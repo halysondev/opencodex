@@ -513,6 +513,8 @@ export default function Logs({ apiBase }: { apiBase: string }) {
   const resourceKey = logsCacheKey(apiBase);
   const cachedLogs = validCachedLogs(readSessionListCache<LogEntry[]>(resourceKey));
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [clearedAt, setClearedAt] = useState<number | null>(null);
   const [failureStreak, setFailureStreak] = useState<{ error: unknown; count: number }>(
     { error: null, count: 0 },
   );
@@ -718,9 +720,17 @@ export default function Logs({ apiBase }: { apiBase: string }) {
     return () => { cancelled = true; };
   }, [conversationQuery]);
 
+  // Clear view: stash current logs and show only new entries after the clear point.
+  const clearView = useCallback(() => {
+    setClearedAt(Date.now());
+  }, []);
+  const visibleLogs = clearedAt !== null
+    ? logs.filter(log => log.timestamp > clearedAt)
+    : logs;
+
   const filterOptions = useMemo(() => extractLogFilterOptions(logs), [logs]);
   const activeFilters = hasActiveLogFilters(filters);
-  const filteredLogs = useMemo(() => filterLogs(logs, filters, filterClockNow), [logs, filters, filterClockNow]);
+  const filteredLogs = useMemo(() => filterLogs(visibleLogs, filters, filterClockNow), [visibleLogs, filters, filterClockNow]);
   const conversationTotals = conversationQuery ? summarizeFilteredLogs(filteredLogs) : null;
 
   // TanStack Virtual returns unstable function identities; React Compiler skips this call.
@@ -741,15 +751,33 @@ export default function Logs({ apiBase }: { apiBase: string }) {
     ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end
     : 0;
 
+  // Auto-scroll to bottom when new entries arrive and autoScroll is enabled.
+  const prevCountRef = useRef(filteredLogs.length);
+  useLayoutEffect(() => {
+    if (autoScroll && filteredLogs.length > prevCountRef.current && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+    prevCountRef.current = filteredLogs.length;
+  }, [filteredLogs.length, autoScroll]);
+
   return (
     <div className="logs-page">
       <div className="page-head">
         <h2>{t("nav.logs")}</h2>
         {tab === "logs" && (
+          <>
           <label className="muted text-control logs-auto-refresh">
             <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} />
             {t("logs.autoRefresh")}
           </label>
+          <label className="muted text-control logs-auto-refresh">
+            <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} />
+            {t("logs.autoScroll")}
+          </label>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={clearView} disabled={filteredLogs.length === 0}>
+            {t("logs.clearView")}
+          </button>
+          </>
         )}
       </div>
       <div className="page-tabs" role="tablist" aria-label={t("nav.logs")}>
@@ -804,11 +832,17 @@ export default function Logs({ apiBase }: { apiBase: string }) {
         options={filterOptions}
         hasActiveFilters={activeFilters}
         filteredCount={filteredLogs.length}
-        totalCount={logs.length}
+        totalCount={visibleLogs.length}
         t={t}
         onFilterChange={setFilters}
         onResetFilters={() => setFilters(DEFAULT_LOG_FILTER_STATE)}
       />
+      <div className="logs-toolbar">
+        <span className="muted text-caption" style={{ marginLeft: "auto" }}>
+          {t("logs.bufferCount", { shown: filteredLogs.length, total: logs.length })}
+        </span>
+      </div>
+
 
       {conversationTotals && (
         <div className="logs-conversation-totals">
