@@ -203,9 +203,13 @@ const INTENTIONAL_ENGLISH = new Set<TKey>([
   "lab.observationCount",
   "lab.verdictCount",
   "lab.detailObservations",
+  // "Port" is the same word in French.
+  "dash.port",
   // "Clients" is the same word in French, and it is the plural noun the
   // Integrations page uses to head its client catalog.
   "integrations.catalog.title",
+  // "{shown} / {total}" is punctuation and two placeholders — no words to translate.
+  "logs.bufferCount",
   // Cost cells are a fixed `$0.1401` / `≥$0.1401` in every locale (the column header is the
   // untranslated `~$`); the templates are pure placeholders on purpose.
   "logs.cost.approximate",

@@ -189,6 +189,8 @@ const ZH_TW_KEEP_ENGLISH: ReadonlySet<string> = new Set([
   "integrations.cursor.title",
   "integrations.cursor.privateInference",
   "integrations.cursor.baseUrl",
+  // "{shown} / {total}" is placeholders and punctuation — no words to translate.
+  "logs.bufferCount",
   // Cost cells are a fixed `$0.1401` / `≥$0.1401` in every locale (the column header is the
   // untranslated `~$`); the templates are pure placeholders on purpose.
   "logs.cost.approximate",
