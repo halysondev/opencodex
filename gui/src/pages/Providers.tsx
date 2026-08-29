@@ -7,7 +7,7 @@ import { isAccountProvider, type WorkspaceProvider } from "../provider-workspace
 import { ensureOpenAiProvider, openAiAccountProviderState, OpenAiEnableError } from "../provider-payload";
 import { oauthTosRisk } from "../oauth-tos-risk";
 import { ToastNotice, type NoticeTone } from "../ui";
-import { IconPlus } from "../icons";
+import { IconPlus, IconRefresh } from "../icons";
 import { useT } from "../i18n/shared";
 import { useProviderAccountPools, type AccountSelectionTarget } from "../hooks/useProviderAccountPools";
 import { useCodexAccountPool } from "../hooks/useCodexAccountPool";
@@ -207,6 +207,14 @@ function useAccountSelectionEvents(
   return useCallback(() => recoverRef.current(), []);
 }
 
+interface TestResult {
+  ok: boolean;
+  latencyMs: number;
+  error?: string;
+  message?: string;
+  applicable?: boolean;
+}
+
 export default function Providers({ apiBase }: { apiBase: string }) {
   const t = useT();
   const configCacheKey = `ocx.providers.config.v1:${apiBase}`;
@@ -235,6 +243,7 @@ export default function Providers({ apiBase }: { apiBase: string }) {
   const [oauthTosPending, setOauthTosPending] = useState<
     { provider: string; addAccount: boolean; accountId?: string } | null
   >(null);
+  const [batchTesting, setBatchTesting] = useState(false);
   /** Bumped after OAuth login so ProviderDetails switches to the Accounts tab. */
   const [accountsFocus, setAccountsFocus] = useState<{ token: number; provider: string | null }>({
     token: 0,
@@ -258,6 +267,36 @@ export default function Providers({ apiBase }: { apiBase: string }) {
     setStatusOk(false);
     setStatusTone("err");
   }, []);
+
+  const testAllProviders = useCallback(async () => {
+    if (!config || batchTesting) return;
+    const names = Object.keys(config.providers);
+    if (names.length === 0) return;
+    setBatchTesting(true);
+    const results: Record<string, TestResult> = {};
+    await Promise.allSettled(
+      names.map(async (name) => {
+        try {
+          const res = await fetch(`${apiBase}/api/providers/test?${new URLSearchParams({ name })}`, { method: "POST" });
+          const body = (await res.json()) as TestResult;
+          results[name] = body;
+        } catch {
+          results[name] = { ok: false, latencyMs: 0, error: "Network error" };
+        }
+      }),
+    );
+    if (aliveRef.current) {
+      setBatchTesting(false);
+      const passed = Object.values(results).filter(r => r.ok).length;
+      const failed = names.length - passed;
+      notify(
+        failed === 0
+          ? t("prov.testAll.ok", { count: passed })
+          : t("prov.testAll.partial", { passed, failed }),
+        failed === 0,
+      );
+    }
+  }, [config, batchTesting, apiBase, notify, t]);
 
   const notifyCodexCompletion = useCallback((completion: CodexAccountMutationCompletion) => {
     if (completion.validationPending || completion.catalogRefreshPending) {
@@ -563,6 +602,9 @@ export default function Providers({ apiBase }: { apiBase: string }) {
       <div className="page-head">
         <h2>{t("nav.providers")}</h2>
         <div className="row">
+          <button type="button" className="btn btn-secondary" onClick={() => void testAllProviders()} disabled={batchTesting}>
+            <IconRefresh />{batchTesting ? t("prov.testing") : t("prov.testAll")}
+          </button>
           <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}><IconPlus />{t("prov.add")}</button>
         </div>
       </div>
