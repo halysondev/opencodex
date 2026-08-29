@@ -79,6 +79,7 @@ export function DashboardOverviewHead({
           </div>
           <div className="stat" aria-busy={healthLoading || undefined}><div className="label">{t("dash.version")}</div><div className="value mono dash-stat-version" title={health?.version}>{health?.version ?? "—"}</div></div>
           <div className="stat" aria-busy={healthLoading || undefined}><div className="label">{t("dash.uptime")}</div><div className="value mono">{health ? formatUptime(health.uptime, locale) : "—"}</div></div>
+          <div className="stat" aria-busy={healthLoading || undefined}><div className="label">{t("dash.port")}</div><div className="value mono">{health?.port ?? "—"}</div></div>
           <div className="stat" aria-busy={healthLoading || undefined}><div className="label">{t("dash.providers")}</div><div className="value">{providers.length}</div></div>
           <div className="stat" aria-busy={usageLoading || undefined}>
             <div className="label">{t("dash.tokens30d")}</div>
