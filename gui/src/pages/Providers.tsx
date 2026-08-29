@@ -23,6 +23,7 @@ import { buildAccountLoginStatus, buildAddModalAccountRows } from "./providers-p
 import type { CodexAccountMutationCompletion } from "../codex-account-mutation";
 import { useProviderModelsNotice } from "./use-provider-models-notice";
 import { navigateHash } from "../hash-routing";
+import { testProviderConnection, type ConnectionTestResult } from "../components/provider-workspace/provider-test";
 
 /** The page's real refresh tickets: only the captured report epoch and account read can settle them. */
 // oxlint-disable-next-line react/only-export-components -- keep the page-owned coordinator and its direct race tests in the authorized owner.
@@ -207,13 +208,6 @@ function useAccountSelectionEvents(
   return useCallback(() => recoverRef.current(), []);
 }
 
-type ConnectionTestResult = {
-  ok?: boolean;
-  latencyMs?: number;
-  error?: string;
-  message?: string;
-  applicable?: boolean;
-};
 
 const TEST_CONCURRENCY = 3;
 
@@ -276,33 +270,31 @@ export default function Providers({ apiBase }: { apiBase: string }) {
     if (names.length === 0) return;
     setBatchTesting(true);
     const results: Record<string, ConnectionTestResult> = {};
-    for (let i = 0; i < names.length; i += TEST_CONCURRENCY) {
-      const batch = names.slice(i, i + TEST_CONCURRENCY);
-      await Promise.allSettled(batch.map(async (name) => {
-        try {
-          const res = await fetch(`${apiBase}/api/providers/test?${new URLSearchParams({ name })}`, { method: "POST" });
-          if (!res.ok) {
-            results[name] = { ok: false, error: `HTTP ${res.status}` };
-            return;
-          }
-          let body: unknown;
-          try { body = await res.json(); } catch { results[name] = { ok: false, error: "Invalid response" }; return; }
-          results[name] = body as ConnectionTestResult;
-        } catch {
-          results[name] = { ok: false, error: "Network error" };
+    const abortController = new AbortController();
+    const queue = [...names];
+    const workerCount = Math.min(TEST_CONCURRENCY, names.length);
+    const runWorker = async () => {
+      while (queue.length > 0 && !abortController.signal.aborted) {
+        const name = queue.shift()!;
+        results[name] = await testProviderConnection(apiBase, name, abortController.signal);
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+    } finally {
+      if (aliveRef.current) {
+        setBatchTesting(false);
+        if (!abortController.signal.aborted) {
+          const passed = Object.values(results).filter(r => r.ok).length;
+          const failed = names.length - passed;
+          notify(
+            failed === 0
+              ? t("prov.testAll.ok", { count: passed })
+              : t("prov.testAll.partial", { passed, failed }),
+            failed === 0,
+          );
         }
-      }));
-    }
-    if (aliveRef.current) {
-      setBatchTesting(false);
-      const passed = Object.values(results).filter(r => r.ok).length;
-      const failed = names.length - passed;
-      notify(
-        failed === 0
-          ? t("prov.testAll.ok", { count: passed })
-          : t("prov.testAll.partial", { passed, failed }),
-        failed === 0,
-      );
+      }
     }
   }, [config, batchTesting, apiBase, notify, t]);
 

@@ -3,7 +3,6 @@
  * (STATS + Notes). Phase 030 of workspace design parity.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readJsonOrThrow } from "../../fetch-json";
 import { useT, useI18n } from "../../i18n/shared";
 import { IconAlert, IconCheck } from "../../icons";
 import { binProviderStatus, type WorkspaceItem } from "../../provider-workspace/catalog";
@@ -15,15 +14,7 @@ import type { ProviderUpdatePatch, ProviderUpdateResult } from "./types";
 import ProviderCurrentQuota from "./ProviderCurrentQuota";
 import type { CatalogPreset } from "../provider-catalog/provider-presets";
 import ProviderSponsor from "./ProviderSponsor";
-
-type ConnectionTestResult = {
-  applicable?: boolean;
-  ok?: boolean;
-  latencyMs?: number;
-  reason?: string;
-  message?: string;
-  error?: string;
-};
+import { testProviderConnection, type ConnectionTestResult } from "./provider-test";
 
 type ConnectionTestState = {
   key: string;
@@ -104,16 +95,11 @@ export default function ProviderOverview({
     connectionAbortRef.current = { key: connectionProbeKey, controller };
     setConnectionTest({ key: connectionProbeKey, testing: true, result: null });
     try {
-      const response = await fetch(`${apiBase}/api/providers/test?name=${encodeURIComponent(item.name)}`, {
-        method: "POST",
-        signal: controller.signal,
-      });
-      const result = await readJsonOrThrow<ConnectionTestResult>(response, t("pws.connectionFailed"));
-      if (!result) throw new Error(t("pws.connectionFailed"));
+      const result = await testProviderConnection(apiBase, item.name, controller.signal);
       if (!controller.signal.aborted) {
         setConnectionTest({ key: connectionProbeKey, testing: false, result });
       }
-    } catch (error) {
+    } catch {
       if (!controller.signal.aborted) {
         setConnectionTest({
           key: connectionProbeKey,
@@ -121,7 +107,7 @@ export default function ProviderOverview({
           result: {
             applicable: true,
             ok: false,
-            error: error instanceof Error ? error.message : t("pws.connectionFailed"),
+            error: t("pws.connectionFailed"),
           },
         });
       }
