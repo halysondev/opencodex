@@ -1034,13 +1034,13 @@ export default function Logs({ apiBase }: { apiBase: string }) {
                         type="button"
                         className="log-detail-btn"
                         onClick={() => setDetail(log)}
-                        aria-label={`${t("logs.details")}: ${log.requestId ?? log.status}`}
+                        aria-label={`${t("logs.details")}: ${log.requestId}`}
                       >
                         {t("logs.details")}
                       </button>
                     </span>
                  </td>
-                  <td className="muted mono"><span className="log-reqid" title={log.requestId}>{log.requestId ?? "-"}</span></td>
+                  <td className="muted mono"><span className="log-reqid" title={log.requestId}>{log.requestId}</span></td>
                  <td className="num log-col-duration">{log.durationMs}ms</td>
                 </tr>
                 );
@@ -1107,7 +1107,6 @@ function LogDetailDialog({
   const detailFailure = failureAttributionLabels(detail, t);
 
   const copyRequestId = async () => {
-    if (!detail.requestId) return;
     try {
       await navigator.clipboard.writeText(detail.requestId);
       setCopied(true);
@@ -1168,12 +1167,10 @@ function LogDetailDialog({
             )}
             <span className="muted">{t("logs.col.request")}</span>
             <span className="log-detail-request-row">
-              <span className="mono log-detail-break">{detail.requestId ?? "\u2014"}</span>
-              {detail.requestId && (
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copyRequestId()}>
-                  {t(copied ? "logs.detail.copied" : "logs.detail.copyRequestId")}
-                </button>
-              )}
+              <span className="mono log-detail-break">{detail.requestId}</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copyRequestId()}>
+                {t(copied ? "logs.detail.copied" : "logs.detail.copyRequestId")}
+              </button>
             </span>
             {detail.conversationId && (
               <>
