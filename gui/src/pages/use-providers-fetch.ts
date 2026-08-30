@@ -9,7 +9,6 @@ export function useProvidersFetch({
   apiBase,
   t,
   setConfig,
-  setProviderConfigGeneration,
   setOauthProviders,
   setOauthStatus,
   notify,
@@ -19,7 +18,6 @@ export function useProvidersFetch({
   apiBase: string;
   t: TFn;
   setConfig: React.Dispatch<React.SetStateAction<ProvidersConfig | null>>;
-  setProviderConfigGeneration: React.Dispatch<React.SetStateAction<number>>;
   setOauthProviders: React.Dispatch<React.SetStateAction<string[]>>;
   setOauthStatus: React.Dispatch<React.SetStateAction<Record<string, OAuthStatus>>>;
   notify: (msg: string, ok: boolean) => void;
@@ -38,7 +36,6 @@ export function useProvidersFetch({
       if (request !== configRequest.current) return "superseded";
       if (!data) throw new Error("config response missing");
       setConfig(data ?? null);
-      setProviderConfigGeneration(g => g + 1);
       if (configCacheKey && data) writeSessionListCache(configCacheKey, data);
       return "applied";
     } catch {
@@ -46,7 +43,7 @@ export function useProvidersFetch({
       notify(t("prov.loadConfigFail"), false);
       return "failed";
     }
-  }, [apiBase, configCacheKey, notify, setConfig, setProviderConfigGeneration, t]);
+  }, [apiBase, configCacheKey, notify, setConfig, t]);
 
   const fetchOauth = useCallback(async () => {
     try {
