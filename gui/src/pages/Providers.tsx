@@ -15,7 +15,6 @@ import { useJsonConfigEditor } from "../hooks/useJsonConfigEditor";
 import { useKeyedClientResource } from "../client-resource";
 import { readSessionListCache } from "../session-list-cache";
 import type { ProvidersConfig } from "./providers-shared";
-import { providerTestInputSnapshot } from "./providers-shared";
 import { useProvidersOAuth } from "./use-providers-oauth";
 import { useProvidersCrud } from "./use-providers-crud";
 import { useProvidersFetch } from "./use-providers-fetch";
@@ -269,17 +268,28 @@ export default function Providers({ apiBase }: { apiBase: string }) {
   const nextBatchIdRef = useRef(0);
   /** Identity of the currently-active batch; stale callbacks see a mismatch and bail out. */
   const activeBatchRef = useRef<{ id: number; controller: AbortController } | null>(null);
+  /** Bumped whenever provider config is refreshed via a successful /api/config fetch. */
+  const [providerConfigGeneration, setProviderConfigGeneration] = useState(0);
 
   /**
-   * Cancel the current batch and exit Testing UI (no replacement will follow).
-   * Used by apiBase/config change effects and unmount.
+   * Cancel an in-flight batch for a mounted component: abort + exit Testing UI.
+   * Used by apiBase change effect and config generation change effect.
    */
-  const cancelCurrentBatch = useCallback(() => {
+  const cancelMountedBatch = useCallback(() => {
     const active = activeBatchRef.current;
     if (!active) return;
     active.controller.abort();
     activeBatchRef.current = null;
     setBatchTesting(false);
+  }, []);
+
+  /**
+   * Clean up batch resources on unmount without touching state.
+   * Called only from the unmount effect to avoid setState on unmounted components.
+   */
+  const abortBatchOnUnmount = useCallback(() => {
+    activeBatchRef.current?.controller.abort();
+    activeBatchRef.current = null;
   }, []);
 
   const testAllProviders = useCallback(async () => {
@@ -326,29 +336,24 @@ export default function Providers({ apiBase }: { apiBase: string }) {
     }
   }, [config, batchTesting, apiBase, notify, t]);
 
-  // Cancel batch and exit Testing UI on unmount.
+  // Clean up batch resources on unmount — no state updates (component may be gone).
   useEffect(() => {
-    return () => { cancelCurrentBatch(); };
-  }, [cancelCurrentBatch]);
+    return () => { abortBatchOnUnmount(); };
+  }, [abortBatchOnUnmount]);
 
   // Cancel batch and exit Testing UI when apiBase changes.
   const prevApiBaseRef = useRef(apiBase);
   useEffect(() => {
     if (prevApiBaseRef.current !== apiBase) {
-      cancelCurrentBatch();
+      cancelMountedBatch();
       prevApiBaseRef.current = apiBase;
     }
-  }, [apiBase, cancelCurrentBatch]);
+  }, [apiBase, cancelMountedBatch]);
 
-  // Cancel batch and exit Testing UI when provider config content changes.
-  const configSnapshot = config ? providerTestInputSnapshot(config) : "";
-  const prevConfigSnapshotRef = useRef(configSnapshot);
+  // Cancel batch and exit Testing UI when provider config is refreshed.
   useEffect(() => {
-    if (prevConfigSnapshotRef.current !== configSnapshot) {
-      cancelCurrentBatch();
-      prevConfigSnapshotRef.current = configSnapshot;
-    }
-  }, [configSnapshot, cancelCurrentBatch]);
+    cancelMountedBatch();
+  }, [providerConfigGeneration, cancelMountedBatch]);
 
   const notifyCodexCompletion = useCallback((completion: CodexAccountMutationCompletion) => {
     if (completion.validationPending || completion.catalogRefreshPending) {
@@ -417,7 +422,7 @@ export default function Providers({ apiBase }: { apiBase: string }) {
    */
   const { quotaRefresh, invalidateProviderQuotas, settleQuotaRefresh, beginQuotaRefresh } = useQuotaRefreshCoordinator(apiBase);
   const { fetchConfig: refreshConfigResult, fetchOauth, fetchProviderQuotas } = useProvidersFetch({
-    apiBase, t, setConfig, setOauthProviders, setOauthStatus, notify,
+    apiBase, t, setConfig, setProviderConfigGeneration, setOauthProviders, setOauthStatus, notify,
     invalidateProviderQuotas,
     configCacheKey,
   });

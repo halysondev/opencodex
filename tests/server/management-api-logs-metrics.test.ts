@@ -9,8 +9,10 @@ import {
   clearRequestLogsForTests,
   evictOldestRequestLogForBudget,
   getRequestLogEntries,
+  nextRequestLogId,
   type RequestLogEntry,
 } from "../../src/server/request-log";
+import { requestLogDto } from "../../src/server/management/shared";
 import type { OcxConfig } from "../../src/types";
 import { buildRouteDecisionTrace } from "../../src/routing/trace";
 import { summarizeUsage } from "../../src/usage/summary";
@@ -714,4 +716,3 @@ describe("GET /api/logs returns entries with non-empty requestIds", () => {
   });
 });
 
-import { ManagementRequest as Request } from "./helpers/management-auth";

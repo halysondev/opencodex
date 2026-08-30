@@ -1701,6 +1701,7 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     });
     const discovery = resolveProviderModelDiscovery(name, prov);
     const started = Date.now();
+    const upstreamSignal = req.signal ? AbortSignal.any([req.signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000);
     try {
       // Same canonical-URL TUN transparency as catalog discovery: the registry's
       // own fixed discovery URL survives purely-benchmark (Clash/Surge/Mihomo
@@ -1710,11 +1711,11 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
         ? await providerOutboundPost(name, prov, modelsUrl, {
           headers,
           body: JSON.stringify({ project }),
-          signal: AbortSignal.timeout(8000),
+          signal: upstreamSignal,
         }, outboundDependencies)
         : await providerOutboundGet(name, prov, modelsUrl, {
           headers,
-          signal: AbortSignal.timeout(8000),
+          signal: upstreamSignal,
         }, outboundDependencies);
       const latencyMs = Date.now() - started;
       const redirectError = await providerRedirectError(res, modelsUrl);
