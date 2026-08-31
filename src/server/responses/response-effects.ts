@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import type { ResponsesRequestContext, ResponsesAdmissionState } from "./core-options";
 import type { PreparedResponsesRequest } from "./request-prepare";
 import type { ResponsesSidecarAuth } from "./request-sidecar-auth";
 import type { OcxProviderContinuationState } from "../../types";
 import { providerContinuationPayload } from "./core-replay";
 import { mergeProviderContinuationPayload } from "../../responses/provider-continuation";
+import { rememberResponseState } from "../../responses/state";
+import { rememberGuardrailsContinuation } from "../../guardrails/continuations";
 import { commitReasoningReplayServingIdentity } from "../../responses/reasoning-replay-cache";
 import { rememberServingConversationStateIssuer } from "./account-change-state";
 import { isCanonicalOpenAiForwardProvider } from "../../providers/openai-tiers";
@@ -25,11 +28,12 @@ export function createResponsesEffects(
     | "poolAffinityKey"
     | "route"
     | "substituteMainCredential"
+    | "guardrailsContinuationScope"
   >,
   sidecarState: Pick<ResponsesSidecarAuth, "routedCompaction">,
 ) {
   const { options, req, config } = requestContext;
-  const { parsed, poolAffinityKey, route, substituteMainCredential } = requestState;
+  const { parsed, poolAffinityKey, route, substituteMainCredential, guardrailsContinuationScope } = requestState;
   const { routedCompaction } = sidecarState;
 
 
@@ -63,6 +67,41 @@ export function createResponsesEffects(
     return parsed._providerContinuationOwner
       ? { ...merged, __ocxOwner: { ...parsed._providerContinuationOwner } }
       : merged;
+  };
+
+  const rememberResponseWithGuardrails = (
+    response: { id?: unknown; output?: unknown; status?: unknown; incomplete_details?: unknown },
+    emitted: OcxProviderContinuationState | undefined,
+    responseOptions: {
+      force?: boolean;
+      clientThreadId?: string;
+      guardrails?: { enforced: true; policyRevision: string };
+    },
+  ): void => {
+    rememberResponseState(
+      parsed._rawBody,
+      response,
+      continuationStateForResponse(emitted),
+      responseOptions,
+    );
+    if (!options.guardrailsPassthroughFailure
+      && options.guardrailsTurn?.mode === "enforce"
+      && guardrailsContinuationScope) {
+      const result = rememberGuardrailsContinuation({
+        responseId: response.id,
+        state: options.guardrailsTurn.state,
+        scope: guardrailsContinuationScope,
+        lineageId: options.guardrailsLineageId ?? randomUUID(),
+        policyRevision: options.guardrailsTurn.snapshot.policyRevision,
+        expiresAt: options.guardrailsInheritedContinuation?.expiresAt,
+      });
+      if (result.status === "stored") {
+        options.guardrailsResponseContinuationLease?.release();
+        options.guardrailsResponseContinuationLease = result.lease;
+      } else if (result.status !== "invalid") {
+        console.warn(`[opencodex] Guardrails continuation mapping was not retained (${result.status})`);
+      }
+    }
   };
 
   // Remote compaction v2 on a ROUTED model: Codex sent `compaction_trigger` and requires exactly
@@ -125,6 +164,7 @@ export function createResponsesEffects(
     cancelResponseCompletion,
     notifyResponseComplete,
     continuationStateForResponse,
+    rememberResponseWithGuardrails,
     commitReasoningReplayServingRoute,
     get routedNamespaceToolAliases(): RoutedNamespaceToolAliases {
       return routedNamespaceToolAliases;

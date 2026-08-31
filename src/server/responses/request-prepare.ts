@@ -1,4 +1,5 @@
-import type { ResponsesRequestContext, ResponsesAdmissionState, ResponsesDispatchers } from "./core-options";
+import { randomUUID } from "node:crypto";
+import type { HandleResponsesOptions, ResponsesRequestContext, ResponsesAdmissionState, ResponsesDispatchers } from "./core-options";
 import {
   agentTaskRecoveryConfig,
   restoreCachedEncryptedAgentTasks,
@@ -12,7 +13,7 @@ import {
   unreadableEncryptedAgentTaskResponse,
 } from "./core-errors";
 import { parseSyntheticRowId } from "../fast-row";
-import { resolveComboId, comboIdFromRawBody, NoAvailableComboTargetsError } from "../../combos";
+import { getCombo, resolveComboId, comboIdFromRawBody, NoAvailableComboTargetsError } from "../../combos";
 import { INTERCEPT_TARGET_UNAVAILABLE_CODE, interceptTargetUnavailableResponse, resolveShadowCallTarget } from "./shadow-target-availability";
 import { recallComboForLane } from "./combo-session-recall";
 import {
@@ -47,9 +48,34 @@ import {
   previousResponseReplayFailure,
   markBodyNonPersistable,
   previousResponseProviderState,
+  previousResponseGuardrailsMarker,
 } from "../../responses/state";
+import {
+  admitGuardrailsRuntime,
+  guardrailsFailureCode,
+  guardrailsFailureStatus,
+  isGuardrailsCapacityError,
+  maskLocalCompactionArtifacts,
+  prepareGuardrailsTurn,
+  rescanGuardrailsResponsesBody,
+} from "../../guardrails/turn";
+import {
+  guardrailsPolicyProtectsProvider,
+} from "../../guardrails/activation";
+import {
+  createGuardrailsContinuationScope,
+  GuardrailsContinuationConflictError,
+  mergeGuardrailsContinuationStates,
+  retainGuardrailsContinuation,
+} from "../../guardrails/continuations";
+import { retainGuardrailsCompactContinuation } from "../../guardrails/compact-continuations";
+import {
+  recordGuardrailsEvent,
+  recordGuardrailsTurn,
+} from "../../guardrails/telemetry";
+import { decideAndRecordGuardrailsLateFailure } from "../../guardrails/late-failure";
 import { formatErrorResponse } from "../../bridge";
-import type { OcxParsedRequest } from "../../types";
+import type { OcxConfig, OcxParsedRequest } from "../../types";
 import { buildToolBridgeMaps } from "./collaboration";
 import { parseRequest } from "../../responses/parser";
 import { anthropicSessionKeyFromParts } from "../../oauth/anthropic-routing";
@@ -137,6 +163,42 @@ import {
   accountChangeFileReferenceRefusal,
   conversationCarriesUploadedFiles,
 } from "./account-change-state";
+
+function guardrailsAdmissionProviderId(
+  config: OcxConfig,
+  body: unknown,
+  options: Pick<
+    HandleResponsesOptions,
+    "comboAttempt" | "guardrailsCapturedPolicy" | "guardrailsProviderScopeAnchor"
+  >,
+): string | undefined {
+  if (options.guardrailsProviderScopeAnchor !== undefined) {
+    return options.guardrailsProviderScopeAnchor;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const model = (body as { model?: unknown }).model;
+  if (typeof model !== "string" || model.length === 0) return undefined;
+  if (!options.comboAttempt) {
+    const comboId = comboIdFromRawBody(body, config);
+    const combo = comboId ? getCombo(config, comboId) : undefined;
+    if (combo) {
+      const allExcluded = combo.targets.every(target =>
+        !guardrailsPolicyProtectsProvider(
+          options.guardrailsCapturedPolicy,
+          target.provider,
+        ));
+      return allExcluded ? combo.targets[0]?.provider : undefined;
+    }
+  }
+  try {
+    const route = options.comboAttempt
+      ? routeConcreteModel(config, model)
+      : routeModel(config, model, evidenceFromBody(body));
+    return route.providerName;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Parses, selects, and admits one request without changing the dispatch policy. */
 export async function prepareResponsesRequest(
@@ -247,35 +309,177 @@ export async function prepareResponsesRequest(
       }
     }
   }
-  const comboId = !options.comboAttempt ? comboIdFromRawBody(body, config) : null;
-  if (comboId && Object.hasOwn(config.combos ?? {}, comboId)) {
-    options.onRequestBodyRead?.();
-    return requestDispatchers.handleComboResponses(req, body, comboId, config, logCtx, {
-      ...options,
-      // Concrete combo child selectors no longer match the shadow source model. Carry the
-      // interception decision explicitly so provider-specific helper isolation still applies.
-      shadowCallIntercepted,
-      // The original request body was accepted above. Combo children are synthetic
-      // replays and must not repeat the caller-owned timeout transition.
-      onRequestBodyRead: undefined,
+  if (!options.guardrailsTurn
+    && !options.guardrailsSnapshot
+    && !options.guardrailsPassthroughFailure) {
+    const surface = options.inboundWire === "chat"
+      ? "chat"
+      : options.inboundWire === "anthropic"
+        ? "messages"
+        : "responses";
+    try {
+      const admission = await admitGuardrailsRuntime(
+        config,
+        surface,
+        guardrailsAdmissionProviderId(config, body, options),
+        options.guardrailsCapturedPolicy,
+      );
+      options.guardrailsRuntimeLease = admission.lease;
+      options.guardrailsSnapshot = admission.snapshot;
+      options.guardrailsPassthroughFailure = admission.passthroughFailure;
+    } catch (error) {
+      recordGuardrailsEvent({
+        surface,
+        mode: options.guardrailsCapturedPolicy?.mode ?? "enforce",
+        result: "blocked",
+        registryGeneration: 0,
+        count: 1,
+        categoryIds: [],
+        ruleIds: [],
+        latencyMs: 0,
+        severity: "warning",
+      });
+      return formatErrorResponse(
+        guardrailsFailureStatus(error),
+        guardrailsFailureCode(error),
+        isGuardrailsCapacityError(error)
+          ? "Request exceeds the Guardrails processing limit"
+          : "Guardrails could not safely initialize for this request",
+      );
+    }
+  }
+  const guardrailsSnapshot = options.guardrailsTurn?.snapshot
+    ?? options.guardrailsSnapshot;
+  if (options.guardrailsPassthroughFailure) {
+    logCtx.sensitiveDataProtectionActive = true;
+    markBodyNonPersistable(body);
+  }
+  const inboundClientThreadId = req.headers.get("x-codex-parent-thread-id")?.trim() || undefined;
+  const incomingPreviousResponseId = typeof (body as { previous_response_id?: unknown } | undefined)?.previous_response_id === "string"
+    ? (body as { previous_response_id: string }).previous_response_id.trim()
+    : undefined;
+  const continuationScope = createGuardrailsContinuationScope(
+    logCtx.admissionKind,
+    logCtx.apiKeyId,
+    sessionLaneIdFromRequest(req.headers),
+  );
+  const persistedGuardrailsMarker = previousResponseGuardrailsMarker(
+    incomingPreviousResponseId,
+    inboundClientThreadId,
+  );
+  if (persistedGuardrailsMarker && (!guardrailsSnapshot || guardrailsSnapshot.mode !== "enforce")) {
+    return formatErrorResponse(
+      409,
+      "guardrails_policy_changed",
+      "This continuation was protected by Guardrails enforce mode. Start a new session before using detect or disabled mode.",
+    );
+  }
+  if (!options.guardrailsInheritedContinuation && !options.guardrailsParentContinuationLease) {
+    options.guardrailsParentContinuationLease = retainGuardrailsContinuation(
+      incomingPreviousResponseId,
+      continuationScope,
+    );
+  }
+  if (!options.guardrailsCompactContinuationLease) {
+    options.guardrailsCompactContinuationLease = retainGuardrailsCompactContinuation(
+      (body as { input?: unknown }).input,
+      continuationScope,
+    );
+  }
+  const inheritedSources = [
+    options.guardrailsInheritedContinuation,
+    options.guardrailsParentContinuationLease,
+    options.guardrailsCompactContinuationLease,
+  ].filter((lease): lease is NonNullable<typeof lease> => lease !== undefined);
+  if (inheritedSources.length > 0
+    && (!guardrailsSnapshot
+      || guardrailsSnapshot.mode !== "enforce")) {
+    return formatErrorResponse(
+      409,
+      "guardrails_policy_changed",
+      "This continuation was protected by Guardrails enforce mode. Start a new session before using detect or disabled mode.",
+    );
+  }
+  if (inheritedSources.some(source => source.lineageId !== inheritedSources[0]!.lineageId)) {
+    return formatErrorResponse(
+      409,
+      "guardrails_continuation_conflict",
+      "Guardrails continuation lineages conflict. Start a new session with the full conversation.",
+    );
+  }
+  let inheritedGuardrailsState;
+  try {
+    inheritedGuardrailsState = mergeGuardrailsContinuationStates(
+      ...inheritedSources.map(source => source.state),
+    );
+  } catch (error) {
+    if (error instanceof GuardrailsContinuationConflictError) {
+      return formatErrorResponse(
+        409,
+        "guardrails_continuation_conflict",
+        "Guardrails continuation mappings conflict. Start a new session with the full conversation.",
+      );
+    }
+    throw error;
+  }
+  const inheritedGuardrailsContinuation = inheritedSources.length > 0 && inheritedGuardrailsState
+    ? {
+        expiresAt: Math.min(...inheritedSources.map(source => source.expiresAt)),
+        lineageId: inheritedSources[0]!.lineageId,
+        policyRevision: guardrailsSnapshot?.policyRevision ?? inheritedSources[0]!.policyRevision,
+        state: inheritedGuardrailsState,
+      }
+    : undefined;
+  if (persistedGuardrailsMarker
+    && guardrailsSnapshot?.mode === "enforce"
+    && continuationScope
+    && !inheritedGuardrailsContinuation) {
+    console.warn("[opencodex] Guardrails continuation mapping is unavailable; issued placeholders remain masked");
+    recordGuardrailsEvent({
+      surface: options.inboundWire === "chat"
+        ? "chat"
+        : options.inboundWire === "anthropic"
+          ? "messages"
+          : "responses",
+      mode: "enforce",
+      result: "demask_warning",
+      registryGeneration: guardrailsSnapshot.generation,
+      count: 1,
+      categoryIds: [],
+      ruleIds: [],
+      latencyMs: 0,
+      severity: "warning",
     });
   }
+  if (guardrailsSnapshot || inheritedGuardrailsContinuation) {
+    options.guardrailsLineageId ??= inheritedGuardrailsContinuation?.lineageId ?? randomUUID();
+  }
+  options.guardrailsInheritedContinuation ??= inheritedGuardrailsContinuation
+    ? {
+        expiresAt: inheritedGuardrailsContinuation.expiresAt,
+        lineageId: inheritedGuardrailsContinuation.lineageId,
+        policyRevision: inheritedGuardrailsContinuation.policyRevision,
+        state: structuredClone(inheritedGuardrailsContinuation.state),
+      }
+    : undefined;
   let unreadableEncryptedAgentTask = hasUnreadableEncryptedAgentTask(
     (body as { input?: unknown } | undefined)?.input,
   );
-  const inboundClientThreadId = req.headers.get("x-codex-parent-thread-id")?.trim() || undefined;
   // The request's OWN thread, which `x-codex-parent-thread-id` is not: parallel children of one
   // parent all present the same parent id. `codexConversationIdentity` already reads this header
   // for the same reason, and a surface that must tell siblings apart needs it too (#5033).
   const inboundOwnThreadId = req.headers.get("thread-id")?.trim() || undefined;
   const cursorClientThreadId = codexPoolAffinityKey(req.headers);
+  const previousGuardrailsState = options.guardrailsInheritedContinuation?.state;
   const originalBody = body;
+  let previousResponseInputScopeMismatch = false;
   if (options.comboReplaySnapshot) {
     copyPreviousResponseReplayProvenance(options.comboReplaySnapshot.sourceBody, body);
   } else {
     body = expandPreviousResponseInput(body, inboundClientThreadId);
     const replayFailure = previousResponseReplayFailure(body);
     if (replayFailure?.reason === "scope_mismatch") {
+      previousResponseInputScopeMismatch = true;
       // Bounded and content-free: no task scope and nothing about the retained entry.
       console.warn("[opencodex] refusing continuation because the client task scope does not match replay state");
     }
@@ -292,6 +496,8 @@ export async function prepareResponsesRequest(
     ?? (body !== originalBody
       && typeof (body as { previous_response_id?: unknown }).previous_response_id === "string");
 
+  // Spawn-message compatibility must precede Guardrails so recovered plaintext is never
+  // introduced after the only request-field scan. Genuine backend ciphertext stays unchanged.
   // Spawn-message compatibility (both directions): agent_message task payloads ride in
   // encrypted_content slots as plaintext. Rewrite them to input_text on the RAW body BEFORE
   // parsing so every consumer sees the payload: parseRequest (routed/translated providers read
@@ -309,6 +515,105 @@ export async function prepareResponsesRequest(
       console.warn(
         `[opencodex] rewrote ${rewritten} plaintext encrypted_content part(s) to input_text (spawn-message compatibility)`,
       );
+  }
+  if (guardrailsSnapshot || options.guardrailsPassthroughFailure) {
+    logCtx.sensitiveDataProtectionActive = true;
+  }
+
+  let guardrailsPassthroughBody: unknown | undefined;
+  if (guardrailsSnapshot && !options.guardrailsTurn && !options.guardrailsPassthroughFailure) {
+    const preGuardrailsBody = body;
+    const guardrailsStartedAt = performance.now();
+    try {
+      const prepared = await prepareGuardrailsTurn(config, "responses", body, previousGuardrailsState, guardrailsSnapshot);
+      body = prepared.body;
+      options.guardrailsTurn = prepared.turn;
+      if (prepared.turn) guardrailsPassthroughBody = preGuardrailsBody;
+      if (prepared.turn) {
+        recordGuardrailsTurn("responses", prepared.turn, performance.now() - guardrailsStartedAt);
+      }
+      if (options.guardrailsTurn) {
+        const protectedCompaction = maskLocalCompactionArtifacts(body, options.guardrailsTurn);
+        body = protectedCompaction.body;
+        options.guardrailsTurn = protectedCompaction.turn;
+      }
+    } catch (error) {
+      if (guardrailsSnapshot?.failurePolicy !== "passthrough") {
+        recordGuardrailsEvent({
+          surface: "responses",
+          mode: guardrailsSnapshot?.mode ?? "enforce",
+          result: "blocked",
+          registryGeneration: guardrailsSnapshot?.generation ?? 0,
+          count: 1,
+          categoryIds: [],
+          ruleIds: [],
+          latencyMs: performance.now() - guardrailsStartedAt,
+          severity: "warning",
+        });
+        const status = guardrailsFailureStatus(error);
+        return formatErrorResponse(
+          status,
+          guardrailsFailureCode(error),
+          status === 413
+            ? "Request exceeds the Guardrails processing limit"
+            : "Guardrails could not safely process the request",
+        );
+      }
+      console.warn(`[opencodex] guardrails request processing failed in passthrough mode: ${error instanceof Error ? error.name : "unknown"}`);
+      recordGuardrailsEvent({
+        surface: "responses",
+        mode: guardrailsSnapshot?.mode ?? "enforce",
+        result: "passthrough",
+        registryGeneration: guardrailsSnapshot?.generation ?? 0,
+        count: 1,
+        categoryIds: [],
+        ruleIds: [],
+        latencyMs: performance.now() - guardrailsStartedAt,
+        severity: "high",
+      });
+      body = preGuardrailsBody;
+      options.guardrailsTurn = undefined;
+      options.guardrailsPassthroughFailure = true;
+      markBodyNonPersistable(body);
+    }
+  }
+  if (options.guardrailsTurn?.mode === "detect") {
+    // Detect forwards the original text by definition. Never let that text enter the
+    // durable Responses replay/spill cache; a later continuation must start fresh.
+    markBodyNonPersistable(body);
+  }
+  options.onGuardrailsRequestPrepared?.({
+    body: structuredClone(body),
+    ...(options.guardrailsTurn ? { turn: options.guardrailsTurn } : {}),
+    ...(guardrailsSnapshot ? { snapshot: guardrailsSnapshot } : {}),
+    passthroughFailure: options.guardrailsPassthroughFailure === true,
+  });
+  const comboId = !options.comboAttempt ? comboIdFromRawBody(body, config) : null;
+  if (comboId && Object.hasOwn(config.combos ?? {}, comboId)) {
+    const comboReplaySnapshot = {
+      sourceBody: body,
+      previousResponseInputExpanded,
+      recoveredPlaintext: false,
+      providerContinuation: !previousResponseInputScopeMismatch
+        && previousResponseInputExpanded
+        && incomingPreviousResponseId
+        ? previousResponseProviderState(incomingPreviousResponseId)
+        : undefined,
+    };
+    options.onRequestBodyRead?.();
+    const response = await requestDispatchers.handleComboResponses(req, body, comboId, config, logCtx, {
+      ...options,
+      comboBodyPrepared: true,
+      comboReplaySnapshot,
+      // Concrete combo child selectors no longer match the shadow source model. Carry the
+      // interception decision explicitly so provider-specific helper isolation still applies.
+      shadowCallIntercepted,
+      // The original request body was accepted above. Combo children are synthetic
+      // replays and must not repeat the caller-owned timeout transition.
+      onRequestBodyRead: undefined,
+    });
+    options.guardrailsResponseProcessedByComboChild = true;
+    return response;
   }
 
   let parsed: OcxParsedRequest;
@@ -387,9 +692,21 @@ export async function prepareResponsesRequest(
     return formatErrorResponse(400, "invalid_request_error", err instanceof Error ? err.message : String(err));
   }
   options.onRequestBodyRead?.();
-  const responseStateOptions = (force = false): { force?: boolean; clientThreadId?: string } => ({
+  const responseStateOptions = (force = false): {
+    force?: boolean;
+    clientThreadId?: string;
+    guardrails?: { enforced: true; policyRevision: string };
+  } => ({
     ...(force ? { force: true } : {}),
     ...(parsed._clientThreadId ? { clientThreadId: parsed._clientThreadId } : {}),
+    ...(options.guardrailsTurn?.mode === "enforce"
+      ? {
+          guardrails: {
+            enforced: true,
+            policyRevision: options.guardrailsTurn.snapshot.policyRevision,
+          } as const,
+        }
+      : {}),
   });
   const resolvedConversationId = conversationIdFromResponsesRequest({
     clientThreadId: parsed._clientThreadId,
@@ -781,16 +1098,19 @@ export async function prepareResponsesRequest(
     && !options.comboAttempt
     && !canPassThroughEncryptedV2AgentTask(route, inboundWire)
   ) {
+    const recoveryBody = options.guardrailsTurn && guardrailsPassthroughBody !== undefined
+      ? guardrailsPassthroughBody
+      : body;
     let recovered = restoreCachedEncryptedAgentTasks(
-      req, (body as { input?: unknown } | undefined)?.input, config, { parentThreadId },
+      req, (recoveryBody as { input?: unknown } | undefined)?.input, config, { parentThreadId },
     ) > 0;
     unreadableEncryptedAgentTask = hasUnreadableEncryptedAgentTask(
-      (body as { input?: unknown } | undefined)?.input,
+      (recoveryBody as { input?: unknown } | undefined)?.input,
     );
     if (unreadableEncryptedAgentTask) try {
       const result = await recoverEncryptedAgentTaskWithResult(
         req,
-        (body as { input?: unknown } | undefined)?.input,
+        (recoveryBody as { input?: unknown } | undefined)?.input,
         agentTaskRecovery,
         config,
         { parentThreadId, abortSignal: options.abortSignal },
@@ -802,6 +1122,7 @@ export async function prepareResponsesRequest(
       recoveryFailureReason = undefined;
     }
     if (recovered) {
+      body = recoveryBody;
       unreadableEncryptedAgentTask = hasUnreadableEncryptedAgentTask(
         (body as { input?: unknown } | undefined)?.input,
       );
@@ -832,6 +1153,57 @@ export async function prepareResponsesRequest(
           // text. Bar it from the continuation cache before any recording path can reach it —
           // that cache is persisted to disk, which would defeat the recovery cache's TTL.
           markBodyNonPersistable(parsed._rawBody);
+
+          if (options.guardrailsTurn) {
+            const turn = options.guardrailsTurn;
+            const passthroughBody = structuredClone(body);
+            const guardrailsStartedAt = performance.now();
+            try {
+              const rescanned = rescanGuardrailsResponsesBody(body, turn);
+              body = rescanned.body;
+              options.guardrailsTurn = rescanned.turn;
+              if (rescanned.turn.mode === "enforce") {
+                const protectedParsed = parseRequest(body);
+                for (const key of kept) {
+                  if (parsed[key] !== undefined) {
+                    (protectedParsed as unknown as Record<string, unknown>)[key] = parsed[key];
+                  }
+                }
+                bindTurnTerminationScope(protectedParsed, resolvedConversationId);
+                markBodyNonPersistable(protectedParsed._rawBody);
+                parsed = protectedParsed;
+              }
+            } catch (error) {
+              const decision = decideAndRecordGuardrailsLateFailure({
+                error,
+                inboundProtocol: inboundWire,
+                latencyMs: performance.now() - guardrailsStartedAt,
+                turn,
+              });
+              if (decision.kind === "block") {
+                return formatErrorResponse(
+                  decision.status,
+                  decision.code,
+                  decision.status === 413
+                    ? "Recovered agent task exceeds the Guardrails processing limit"
+                    : "Guardrails could not safely process the recovered agent task",
+                );
+              }
+              console.warn("[opencodex] Guardrails recovered-task rescan failed in passthrough mode");
+              body = passthroughBody;
+              const passthroughParsed = parseRequest(body);
+              for (const key of kept) {
+                if (parsed[key] !== undefined) {
+                  (passthroughParsed as unknown as Record<string, unknown>)[key] = parsed[key];
+                }
+              }
+              bindTurnTerminationScope(passthroughParsed, resolvedConversationId);
+              markBodyNonPersistable(passthroughParsed._rawBody);
+              parsed = passthroughParsed;
+              options.guardrailsTurn = undefined;
+              options.guardrailsPassthroughFailure = true;
+            }
+          }
 
           // The ciphertext-only pass intentionally excludes routed candidates. Once recovery
           // makes the assignment readable, run selection again with the full configured chain
@@ -978,6 +1350,19 @@ export async function prepareResponsesRequest(
   }
 
   if (options.abortSignal?.aborted) return clientCancelledResponse();
+  if (!options.guardrailsTurn
+    && !options.guardrailsSnapshot
+    && !options.guardrailsPassthroughFailure
+    && guardrailsPolicyProtectsProvider(
+      options.guardrailsCapturedPolicy,
+      route.providerName,
+    )) {
+    return formatErrorResponse(
+      409,
+      "guardrails_policy_changed",
+      "The final provider requires Guardrails protection. Start a new request instead of crossing provider protection scopes.",
+    );
+  }
 
   if (inboundWire === "responses" && isCanonicalOpenAiForwardProvider(route.provider)) {
     const rewritten = sanitizeEncryptedContentInPlace(
@@ -1268,6 +1653,7 @@ export async function prepareResponsesRequest(
     toolBridgeMaps,
     responseStateOptions,
     rememberKiroDeliveredFinalAnswer,
+    guardrailsContinuationScope: continuationScope,
     route,
     get selectedForwardHeaders(): typeof selectedForwardHeaders {
       return selectedForwardHeaders;

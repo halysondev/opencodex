@@ -46,6 +46,7 @@ import { clearableDeadline, idleDeadline } from "../lib/abort";
 import { estimateTokens } from "../lib/token-estimate";
 import { captureRouteStaticPolicy, NoEligiblePolicyCandidateError, UnknownRoutingPolicyError, routeModel } from "../router";
 import { evidenceFromBody } from "../routing/request-evidence";
+import { ANTHROPIC_NATIVE_PROVIDER_ID } from "../config/provider-name";
 import { resolveWireProtocolOverride } from "./adapter-resolve";
 import type { OcxConfig } from "../types";
 import { readJsonRequestBody, resolveInboundBodyLimitBytes } from "./request-decompress";
@@ -68,6 +69,18 @@ import {
 } from "./auth-cors";
 import type { AdmissionLease } from "../lib/admission";
 import { tryClaimNativeMainProfileForTurn } from "../codex/native-main-admission";
+import {
+  admitGuardrailsRuntime,
+  demaskGuardrailsResponse,
+  guardrailsFailureCode,
+  guardrailsFailureStatus,
+  isGuardrailsCapacityError,
+  prepareGuardrailsTurn,
+  type GuardrailsTurn,
+} from "../guardrails/turn";
+import {
+  captureGuardrailsPolicy,
+} from "../guardrails/activation";
 import { CODEX_MAIN_PROFILE_MAINTENANCE_MESSAGE } from "../codex/auth-context";
 import {
   createTranslatorBudget,
@@ -84,6 +97,11 @@ import {
   parseSyntheticRowId,
   type ParsedFastRowId,
 } from "./fast-row";
+import {
+  recordGuardrailsEvent,
+  recordGuardrailsToolArgumentRestoreSkipped,
+  recordGuardrailsTurn,
+} from "../guardrails/telemetry";
 
 type Rec = Record<string, unknown>;
 
@@ -218,6 +236,24 @@ function wantsNativePassthrough(
   // An alias or modelMap hit means the user asked for a ROUTED model: translate instead.
   // `cc` carries first-party intercept bindings for requests on the claude-intercept ingress.
   return resolveInboundModel(model, cc) === model;
+}
+
+function guardrailsAnthropicProviderId(
+  config: OcxConfig,
+  body: unknown,
+  nativePassthrough: boolean,
+): string | undefined {
+  if (nativePassthrough) return ANTHROPIC_NATIVE_PROVIDER_ID;
+  if (!isRec(body) || typeof body.model !== "string") return undefined;
+  try {
+    return routeModel(
+      config,
+      resolveInboundModel(body.model, config.claudeCode),
+      evidenceFromBody(body),
+    ).providerName;
+  } catch {
+    return undefined;
+  }
 }
 
 function shouldForwardNativeHeader(name: string, value: string, config: OcxConfig): boolean {
@@ -464,7 +500,7 @@ async function anthropicNativePassthrough(
 ): Promise<Response> {
   const model = typeof body.model === "string" ? body.model : "unknown";
   logCtx.model = model;
-  logCtx.provider = "anthropic-native";
+  logCtx.provider = ANTHROPIC_NATIVE_PROVIDER_ID;
   logCtx.requestedModel = model;
   let logged = false;
   const finalize = (status: number, meta: { closeReason: PassthroughCloseReason | "non_stream" }) => {
@@ -731,6 +767,12 @@ async function handleClaudeMessagesWithBudget(
   let effortRow: ParsedEffortRowId | null = null;
   let fastRow: ParsedFastRowId | null = null;
   let requestedModel = "";
+  let guardrailsTurn: GuardrailsTurn | undefined;
+  const capturedGuardrailsPolicy = captureGuardrailsPolicy(config);
+  let guardrailsLease: Awaited<ReturnType<typeof admitGuardrailsRuntime>>["lease"];
+  let guardrailsSnapshot: GuardrailsTurn["snapshot"] | undefined;
+  let guardrailsBypassed = false;
+  try {
   try {
     anthropicBody = await readAnthropicBody(req, translatorBudget, resolveInboundBodyLimitBytes(config.maxInboundBodyBytes));
     // Defensive [1m] strip (devlog 138): clients normally remove the context-variant
@@ -770,6 +812,97 @@ async function handleClaudeMessagesWithBudget(
       }
       if (fastRow) anthropicBody.model = fastRow.baseId;
     }
+    const nativePassthrough = !effortRow && !fastRow && isRec(anthropicBody)
+      && wantsNativePassthrough(req, config, requestPolicy, anthropicBody.model, cc);
+    try {
+      const guardrailsAdmission = await admitGuardrailsRuntime(
+        config,
+        "messages",
+        guardrailsAnthropicProviderId(config, anthropicBody, nativePassthrough),
+        capturedGuardrailsPolicy,
+      );
+      guardrailsLease = guardrailsAdmission.lease;
+      guardrailsSnapshot = guardrailsAdmission.snapshot;
+      guardrailsBypassed = guardrailsAdmission.passthroughFailure;
+    } catch (error) {
+      const status = guardrailsFailureStatus(error);
+      recordGuardrailsEvent({
+        surface: "messages",
+        mode: capturedGuardrailsPolicy?.mode ?? "enforce",
+        result: "blocked",
+        registryGeneration: 0,
+        count: 1,
+        categoryIds: [],
+        ruleIds: [],
+        latencyMs: 0,
+        severity: "warning",
+      });
+      if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, status, { closeReason: "non_stream" });
+      return anthropicErrorResponse(
+        status,
+        isGuardrailsCapacityError(error)
+          ? "request exceeds the Guardrails processing limit"
+          : "Guardrails could not safely initialize for this request",
+        "invalid_request_error",
+        guardrailsFailureCode(error),
+      );
+    }
+    if (guardrailsSnapshot || guardrailsBypassed) {
+      logCtx.sensitiveDataProtectionActive = true;
+    }
+    if (!guardrailsBypassed && guardrailsSnapshot) {
+      const guardrailsStartedAt = performance.now();
+      try {
+      const prepared = await prepareGuardrailsTurn(
+        config,
+        "anthropic",
+        anthropicBody,
+        undefined,
+        guardrailsSnapshot,
+        { scanAnthropicDocumentSources: nativePassthrough },
+      );
+      anthropicBody = prepared.body;
+      guardrailsTurn = prepared.turn;
+      if (guardrailsTurn) {
+        recordGuardrailsTurn("messages", guardrailsTurn, performance.now() - guardrailsStartedAt);
+      }
+      } catch (error) {
+      if (guardrailsSnapshot?.failurePolicy !== "passthrough") {
+        recordGuardrailsEvent({
+          surface: "messages",
+          mode: guardrailsSnapshot?.mode ?? "enforce",
+          result: "blocked",
+          registryGeneration: guardrailsSnapshot?.generation ?? 0,
+          count: 1,
+          categoryIds: [],
+          ruleIds: [],
+          latencyMs: performance.now() - guardrailsStartedAt,
+          severity: "warning",
+        });
+        const status = isGuardrailsCapacityError(error) ? 413 : 400;
+        if (logIds) addFinalRequestLog(logIds.requestId, logIds.start, logCtx, status, { closeReason: "non_stream" });
+        return anthropicErrorResponse(
+          status,
+          status === 413 ? "request exceeds the Guardrails processing limit" : "Guardrails could not safely process the request",
+          "invalid_request_error",
+          guardrailsFailureCode(error),
+        );
+      }
+      console.warn(`[opencodex] guardrails Anthropic processing failed in passthrough mode: ${error instanceof Error ? error.name : "unknown"}`);
+      recordGuardrailsEvent({
+        surface: "messages",
+        mode: guardrailsSnapshot?.mode ?? "enforce",
+        result: "passthrough",
+        registryGeneration: guardrailsSnapshot?.generation ?? 0,
+        count: 1,
+        categoryIds: [],
+        ruleIds: [],
+        latencyMs: performance.now() - guardrailsStartedAt,
+        severity: "high",
+      });
+      guardrailsBypassed = true;
+      }
+    }
     // Debug capture (opt-in allowlist scalars) BEFORE the passthrough branch so
     // native, routed, and disabled-alias paths are all observable (devlog 130 B1).
     captureClaudeInbound(
@@ -797,8 +930,27 @@ async function handleClaudeMessagesWithBudget(
     // caller's body with the caller's credential and never runs the Anthropic adapter, so the
     // proxy-owned `speed` + beta (anthropic-speed wire) and its usage.speed observation would be
     // silently skipped. Translation reaches the adapter, which owns both.
-    if (!effortRow && !fastRow && isRec(anthropicBody) && wantsNativePassthrough(req, config, requestPolicy, anthropicBody.model, cc)) {
-      return await anthropicNativePassthrough(req, config, logCtx, logIds, anthropicBody, "/v1/messages");
+    if (nativePassthrough && isRec(anthropicBody)) {
+      const nativeResponse = await anthropicNativePassthrough(req, config, logCtx, logIds, anthropicBody, "/v1/messages");
+      return demaskGuardrailsResponse(
+        nativeResponse,
+        guardrailsTurn,
+        translatorBudget,
+        () => {
+          recordGuardrailsEvent({
+            surface: "messages",
+            mode: guardrailsTurn?.mode ?? "enforce",
+            result: "demask_warning",
+            registryGeneration: guardrailsTurn?.snapshot.generation ?? 0,
+            count: 1,
+            categoryIds: [],
+            ruleIds: [],
+            latencyMs: 0,
+            severity: "warning",
+          });
+        },
+        count => recordGuardrailsToolArgumentRestoreSkipped("messages", guardrailsTurn, count),
+      );
     }
     // Capture source semantics before effort rewriting or translation drops fields.
     // This policy is uniform across translated targets, including later fallback attempts.
@@ -1027,6 +1179,10 @@ async function handleClaudeMessagesWithBudget(
     inboundWire: "anthropic",
     claudeGoAffinity: { sessionLane: claudeGoSessionLane },
     claudeNativeSessionId,
+    guardrailsTurn,
+    guardrailsSnapshot,
+    guardrailsPassthroughFailure: guardrailsBypassed,
+    guardrailsCapturedPolicy: capturedGuardrailsPolicy,
     stripClaudeMainAuthForNoncanonicalForward: true,
     ...(trustedClaudeMainAuth ? { trustedClaudeMainAuth } : {}),
     // Claude's internal stored-main enrichment is not an original caller credential.
@@ -1197,6 +1353,9 @@ async function handleClaudeMessagesWithBudget(
     status: 200,
     headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
   });
+  } finally {
+    guardrailsLease?.release();
+  }
 }
 
 /** Per-attachment token estimate for a base64 payload: real image dimensions when the
@@ -1271,6 +1430,7 @@ export async function handleClaudeCountTokens(
   if (disabled) return disabled;
   const cc = claudeCodeForIngress(config.claudeCode, ingress.claudeIntercept === true);
 
+  const capturedGuardrailsPolicy = captureGuardrailsPolicy(config);
   let body: unknown;
   const translatorBudget = createTranslatorBudget();
   try {
@@ -1313,15 +1473,111 @@ export async function handleClaudeCountTokens(
       model = countFastRow.baseId;
       raw.model = model;
     }
-    captureClaudeInbound("count_tokens", raw, resolveInboundModel(model, cc), req.headers.get("anthropic-beta") ?? undefined);
-    if (wantsNativePassthrough(req, config, requestPolicy, model, cc)) {
-      return await anthropicNativePassthrough(req, config, { model, provider: "anthropic-native", surface: "claude" }, undefined, raw, "/v1/messages/count_tokens");
+    const nativePassthrough = wantsNativePassthrough(req, config, requestPolicy, model, cc);
+    let guardrailsAdmission;
+    try {
+      guardrailsAdmission = await admitGuardrailsRuntime(
+        config,
+        "messages",
+        guardrailsAnthropicProviderId(config, raw, nativePassthrough),
+        capturedGuardrailsPolicy,
+      );
+    } catch (error) {
+      const status = guardrailsFailureStatus(error);
+      recordGuardrailsEvent({
+        surface: "messages",
+        mode: capturedGuardrailsPolicy?.mode ?? "enforce",
+        result: "blocked",
+        registryGeneration: 0,
+        count: 1,
+        categoryIds: [],
+        ruleIds: [],
+        latencyMs: 0,
+        severity: "warning",
+      });
+      return anthropicErrorResponse(
+        status,
+        isGuardrailsCapacityError(error)
+          ? "request exceeds the Guardrails processing limit"
+          : "Guardrails could not safely initialize for this request",
+        "invalid_request_error",
+        guardrailsFailureCode(error),
+      );
     }
-    const inputTokens = estimateClaudeRequestTokens(raw, model);
+    const guardrailsLease = guardrailsAdmission.lease;
+    const guardrailsSnapshot = guardrailsAdmission.snapshot;
+    try {
+    const unmaskedCountBody = structuredClone(raw);
+    if (!guardrailsAdmission.passthroughFailure && guardrailsSnapshot) {
+      const guardrailsStartedAt = performance.now();
+      try {
+      const prepared = await prepareGuardrailsTurn(
+        config,
+        "anthropic",
+        raw,
+        undefined,
+        guardrailsSnapshot,
+        { scanAnthropicDocumentSources: nativePassthrough },
+      );
+      body = prepared.body;
+      if (prepared.turn) {
+        recordGuardrailsTurn("messages", prepared.turn, performance.now() - guardrailsStartedAt);
+      }
+      } catch (error) {
+      if (guardrailsSnapshot?.failurePolicy !== "passthrough") {
+        recordGuardrailsEvent({
+          surface: "messages",
+          mode: guardrailsSnapshot?.mode ?? "enforce",
+          result: "blocked",
+          registryGeneration: guardrailsSnapshot?.generation ?? 0,
+          count: 1,
+          categoryIds: [],
+          ruleIds: [],
+          latencyMs: performance.now() - guardrailsStartedAt,
+          severity: "warning",
+        });
+        const status = isGuardrailsCapacityError(error) ? 413 : 400;
+        return anthropicErrorResponse(
+          status,
+          status === 413 ? "request exceeds the Guardrails processing limit" : "Guardrails could not safely process the request",
+          "invalid_request_error",
+          guardrailsFailureCode(error),
+        );
+      }
+      console.warn(`[opencodex] guardrails Anthropic count_tokens processing failed in passthrough mode: ${error instanceof Error ? error.name : "unknown"}`);
+      recordGuardrailsEvent({
+        surface: "messages",
+        mode: guardrailsSnapshot?.mode ?? "enforce",
+        result: "passthrough",
+        registryGeneration: guardrailsSnapshot?.generation ?? 0,
+        count: 1,
+        categoryIds: [],
+        ruleIds: [],
+        latencyMs: performance.now() - guardrailsStartedAt,
+        severity: "high",
+      });
+      }
+    }
+    const protectedRaw = body as Rec;
+    captureClaudeInbound("count_tokens", protectedRaw, resolveInboundModel(model, cc), req.headers.get("anthropic-beta") ?? undefined);
+    if (nativePassthrough) {
+      return await anthropicNativePassthrough(
+        req,
+        config,
+        { model, provider: "anthropic-native", surface: "claude" },
+        undefined,
+        protectedRaw,
+        "/v1/messages/count_tokens",
+      );
+    }
+    const inputTokens = estimateClaudeRequestTokens(unmaskedCountBody, model);
     return new Response(JSON.stringify({ input_tokens: inputTokens }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
+    } finally {
+      guardrailsLease?.release();
+    }
   } catch (error) {
     if (error instanceof DesktopModelMappingUnavailableError) return desktopMappingUnavailableResponse(error);
     if (error instanceof AnthropicRequestError) return anthropicErrorResponse(400, error.message);

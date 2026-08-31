@@ -11,7 +11,11 @@ import { captureExplicitOpenAiCallerAuth } from "../../providers/openai-sidecar"
 import { captureCallerDirectAuth } from "../../providers/caller-authorization";
 import { createRequestExecutionBudget } from "../../lib/request-execution-budget";
 import { attachRequestSpendTracker } from "./request-spend";
-import { finalizeOwnedTranslatorBudget } from "./core-lifetime";
+import { finalizeOwnedTranslatorBudget, finalizeResponseLifecycle } from "./core-lifetime";
+import { demaskGuardrailsResponse } from "../../guardrails/turn";
+import { captureGuardrailsPolicy, retainCapturedGuardrailsRuntimeSnapshot } from "../../guardrails/activation";
+import type { GuardrailsRuntimeSnapshotLease } from "../../guardrails/runtime";
+import { recordGuardrailsEvent, recordGuardrailsToolArgumentRestoreSkipped } from "../../guardrails/telemetry";
 import type { TranslatorBudget } from "../../lib/translator-budget";
 import { executeComboResponses } from "./core-combo";
 import { prepareResponsesRequest } from "./request-prepare";
@@ -44,8 +48,22 @@ export async function handleResponses(
 ): Promise<Response> {
   const ownsBudget = options.translatorBudget === undefined;
   const translatorBudget = options.translatorBudget ?? createTranslatorBudget();
+  const inheritedGuardrailsSnapshot = options.guardrailsTurn?.snapshot ?? options.guardrailsSnapshot;
+  const capturedGuardrailsPolicy = options.guardrailsCapturedPolicy
+    ?? captureGuardrailsPolicy(config);
+  const guardrailsTelemetrySurface = options.inboundWire === "chat"
+    ? "chat"
+    : options.inboundWire === "anthropic"
+      ? "messages"
+      : "responses";
+  let guardrailsLease: GuardrailsRuntimeSnapshotLease | undefined;
+  let innerOptions: (HandleResponsesOptions & { translatorBudget: TranslatorBudget }) | undefined;
+  let guardrailsPassthroughFailure = options.guardrailsPassthroughFailure === true;
   try {
-    const response = await handleResponsesInner(req, config, logCtx, {
+    if (inheritedGuardrailsSnapshot) {
+      guardrailsLease = await retainCapturedGuardrailsRuntimeSnapshot(inheritedGuardrailsSnapshot);
+    }
+    innerOptions = {
       ...options,
       openAiSidecarAuth: options.openAiSidecarAuth === undefined
         ? captureExplicitOpenAiCallerAuth(req.headers, config) : options.openAiSidecarAuth,
@@ -59,9 +77,57 @@ export async function handleResponses(
       translatorBudget,
       // Once at ingress, spend observer included: a combo child inherits the parent's holder.
       sendBudget: options.sendBudget ?? createRequestExecutionBudget(undefined, undefined, attachRequestSpendTracker(req, logCtx)),
-    });
-    return ownsBudget ? finalizeOwnedTranslatorBudget(response, translatorBudget) : response;
+      guardrailsCapturedPolicy: capturedGuardrailsPolicy,
+      guardrailsSnapshot: options.guardrailsSnapshot ?? guardrailsLease?.snapshot,
+      guardrailsPassthroughFailure,
+    };
+    const response = await handleResponsesInner(req, config, logCtx, innerOptions);
+    const demasked = innerOptions.guardrailsResponseProcessedByComboChild
+      ? response
+      : await demaskGuardrailsResponse(
+          response,
+          innerOptions.guardrailsTurn,
+          translatorBudget,
+          () => recordGuardrailsEvent({
+            surface: guardrailsTelemetrySurface,
+            mode: innerOptions?.guardrailsTurn?.mode ?? "enforce",
+            result: "demask_warning",
+            registryGeneration: innerOptions?.guardrailsTurn?.snapshot.generation ?? 0,
+            count: 1,
+            categoryIds: [],
+            ruleIds: [],
+            latencyMs: 0,
+            severity: "warning",
+          }),
+          count => recordGuardrailsToolArgumentRestoreSkipped(
+            guardrailsTelemetrySurface,
+            innerOptions?.guardrailsTurn,
+            count,
+          ),
+        );
+    const releaseGuardrailsLifecycle = () => {
+      innerOptions?.guardrailsResponseContinuationLease?.release();
+      innerOptions?.guardrailsParentContinuationLease?.release();
+      innerOptions?.guardrailsCompactContinuationLease?.release();
+      innerOptions?.guardrailsRuntimeLease?.release();
+      guardrailsLease?.release();
+    };
+    const hasGuardrailsLifecycle = guardrailsLease !== undefined
+      || innerOptions.guardrailsResponseContinuationLease !== undefined
+      || innerOptions.guardrailsParentContinuationLease !== undefined
+      || innerOptions.guardrailsCompactContinuationLease !== undefined
+      || innerOptions.guardrailsRuntimeLease !== undefined;
+    return ownsBudget
+      ? finalizeOwnedTranslatorBudget(demasked, translatorBudget, releaseGuardrailsLifecycle)
+      : hasGuardrailsLifecycle
+        ? finalizeResponseLifecycle(demasked, releaseGuardrailsLifecycle)
+        : demasked;
   } catch (error) {
+    innerOptions?.guardrailsResponseContinuationLease?.release();
+    innerOptions?.guardrailsParentContinuationLease?.release();
+    innerOptions?.guardrailsCompactContinuationLease?.release();
+    innerOptions?.guardrailsRuntimeLease?.release();
+    guardrailsLease?.release();
     if (ownsBudget) translatorBudget.dispose();
     throw error;
   }

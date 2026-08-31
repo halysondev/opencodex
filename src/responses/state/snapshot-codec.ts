@@ -6,7 +6,7 @@ import type {
   StoredResponseState,
 } from "../state";
 import type { ResponseSpillRef } from "../spill-store";
-import type { OcxProviderContinuationState } from "../../types";
+import type { OcxGuardrailsResponseMarker, OcxProviderContinuationState } from "../../types";
 
 export interface SnapshotLoadStore {
   replaceMapEntry(id: string, next: StoredResponseState, expected?: StoredResponseState): boolean;
@@ -24,6 +24,17 @@ interface LegacySnapshotState {
   providers?: OcxProviderContinuationState;
   conversationId?: unknown;
   cursorCheckpointUsable?: unknown;
+  guardrails?: unknown;
+}
+
+export function normalizedGuardrailsMarker(value: unknown): OcxGuardrailsResponseMarker | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const marker = value as Record<string, unknown>;
+  if (Object.keys(marker).some(key => !["enforced", "policyRevision"].includes(key))
+    || marker.enforced !== true
+    || typeof marker.policyRevision !== "string"
+    || !/^[0-9a-f]{64}$/.test(marker.policyRevision)) return undefined;
+  return { enforced: true, policyRevision: marker.policyRevision };
 }
 
 function isSpillRef(value: unknown): value is ResponseSpillRef {
@@ -43,6 +54,7 @@ export function loadSnapshotEntry(id: string, value: unknown, store: SnapshotLoa
   const clientThreadId = typeof rec.clientThreadId === "string" && rec.clientThreadId.trim().length > 0
     ? rec.clientThreadId.trim()
     : undefined;
+  const guardrails = normalizedGuardrailsMarker(rec.guardrails);
   // A malformed boundary degrades to "never skip" rather than to a bad index: an untrusted
   // snapshot must not be able to authorize dropping conversation history.
   const anchorFor = (itemCount: number): number | undefined => {
@@ -61,6 +73,7 @@ export function loadSnapshotEntry(id: string, value: unknown, store: SnapshotLoa
       // here; the spill payload validator re-checks it against the real array.
       ...(anchorFor(Number.MAX_SAFE_INTEGER) !== undefined ? { providerOutputStart: anchorFor(Number.MAX_SAFE_INTEGER) } : {}),
       ...(rec.providers ? { providers: rec.providers } : {}),
+      ...(guardrails ? { guardrails } : {}),
       spill: rec.spill,
     };
     store.replaceMapEntry(id, { ...base, sizeBytes: store.stubSize(id, base) });
@@ -88,6 +101,7 @@ export function loadSnapshotEntry(id: string, value: unknown, store: SnapshotLoa
     items: rec.items,
     ...(anchorFor(rec.items.length) !== undefined ? { providerOutputStart: anchorFor(rec.items.length) } : {}),
     ...(providers ? { providers } : {}),
+    ...(guardrails ? { guardrails } : {}),
   });
   if (!resident) {
     store.replaceMapEntry(id, store.tombstone(id, rec.createdAt));

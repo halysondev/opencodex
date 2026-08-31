@@ -16,6 +16,10 @@ import type { TranslatorBudget } from "../../lib/translator-budget";
 import type { TransientSendBudget } from "../../lib/upstream-retry";
 import type { RequestLogContext } from "../request-log";
 import type { UpstreamHostAdmissionLease } from "../../codex/upstream-host-health";
+import type { GuardrailsTurn } from "../../guardrails/turn";
+import type { CapturedGuardrailsPolicy } from "../../guardrails/activation";
+import type { GuardrailsRuntimeSnapshotLease } from "../../guardrails/runtime";
+import type { GuardrailsContinuationLease } from "../../guardrails/continuations";
 
 export interface ConsumedComboFailure {
   response: Response;
@@ -114,6 +118,10 @@ export interface HandleResponsesOptions {
   callerDirectAuth?: CallerDirectAuth | null;
   /** Internal recursion guard; callers outside this module must not set it. */
   comboAttempt?: boolean;
+  /** Parent already expanded, sanitized, and Guardrails-processed this combo body. */
+  comboBodyPrepared?: boolean;
+  /** Successful combo child already applied response demasking with its final turn state. */
+  guardrailsResponseProcessedByComboChild?: boolean;
   /** Internal handoff: this combo was selected by shadow-call interception. */
   shadowCallIntercepted?: boolean;
   compactionRoutingOverride?: CompactionRoutingOverride | null;
@@ -147,6 +155,42 @@ export interface HandleResponsesOptions {
    * rebuilds headers and carries the fact through this flag.
    */
   visionDescribeTerminal?: boolean;
+  /**
+   * Request-local placeholder state created by a protocol-specific ingress.
+   * A transformed Chat/Anthropic request supplies it so the Responses replay
+   * neither scans twice nor loses the mappings needed for outbound demasking.
+   */
+  guardrailsTurn?: GuardrailsTurn;
+  /** Immutable enabled-policy intent captured before the caller body is read. */
+  guardrailsCapturedPolicy?: CapturedGuardrailsPolicy;
+  /** Captured before body read so every masking pass uses one immutable config generation. */
+  guardrailsSnapshot?: GuardrailsTurn["snapshot"];
+  /** Runtime lease acquired after provider classification and released by the outer response lifecycle. */
+  guardrailsRuntimeLease?: GuardrailsRuntimeSnapshotLease;
+  /** Policy-fallback provider whose protection class owns every physical attempt. */
+  guardrailsProviderScopeAnchor?: string;
+  /** Internal handoff of the already-scanned request to a policy-fallback owner. */
+  onGuardrailsRequestPrepared?: (prepared: {
+    body: unknown;
+    turn?: GuardrailsTurn;
+    snapshot?: GuardrailsTurn["snapshot"];
+    passthroughFailure: boolean;
+  }) => void;
+  /** Runtime setup failed under explicit passthrough policy before the caller body was read. */
+  guardrailsPassthroughFailure?: boolean;
+  /** Internal parent mapping pin, released by the outer client-facing response lifecycle. */
+  guardrailsParentContinuationLease?: GuardrailsContinuationLease;
+  /** Internal current-response mapping pin, installed by the completion callback. */
+  guardrailsResponseContinuationLease?: GuardrailsContinuationLease;
+  /** Internal compact-prefix mapping pin. */
+  guardrailsCompactContinuationLease?: GuardrailsContinuationLease;
+  /** Internal lineage identity; never serialized or sent upstream. */
+  guardrailsLineageId?: string;
+  /** Internal clone for combo children; the owning outer request retains the actual pin. */
+  guardrailsInheritedContinuation?: Pick<
+    GuardrailsContinuationLease,
+    "expiresAt" | "lineageId" | "policyRevision" | "state"
+  >;
 }
 
 /** Values shared by the call, not a bag of mutable pipeline state. */

@@ -1,4 +1,4 @@
-import type { OcxConfig, OcxProviderConfig } from "../types";
+import type { OcxConfig, OcxGuardrailsConfig, OcxProviderConfig } from "../types";
 import { configReasoningPinsConfigError } from "./provider-validation";
 import { adoptCustomModelCatalogMigration, projectCustomModelCatalogMigration } from "../codex/custom-model-catalog-migration";
 import { refreshPreservedProviderOwner } from "../usage/user-cost-overlays";
@@ -98,6 +98,23 @@ export function adoptPersistedProviderIntoLiveConfig(
   const baseline = liveConfigBaseline.get(config);
   if (baseline) baseline.providers[name] = structuredClone(provider);
   if (persistedConfig) refreshPreservedProviderOwner(config, persistedConfig);
+}
+
+/**
+ * Adopt the Guardrails subtree that was committed to authoritative disk into a
+ * long-lived config and its baseline. The caller keeps the config-mutation lock
+ * while invoking this helper so disk and live state cannot be observed apart.
+ */
+export function adoptPersistedGuardrailsIntoLiveConfig(
+  config: OcxConfig,
+  guardrails: OcxGuardrailsConfig | undefined,
+): void {
+  if (guardrails === undefined) delete config.guardrails;
+  else config.guardrails = structuredClone(guardrails);
+  const baseline = liveConfigBaseline.get(config);
+  if (!baseline) return;
+  if (guardrails === undefined) delete baseline.guardrails;
+  else baseline.guardrails = structuredClone(guardrails);
 }
 
 /** Test seam only: is this instance armed? */

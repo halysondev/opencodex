@@ -202,8 +202,12 @@ export async function executeComboResponses(
   // continuation that only references prior images still fails closed when
   // imageInput is disabled (and so targets see the full replayed input).
   const inboundClientThreadId = req.headers.get("x-codex-parent-thread-id")?.trim() || undefined;
-  const body = expandPreviousResponseInput(rawBody, inboundClientThreadId);
-  const replayFailure = previousResponseReplayFailure(body);
+  const body = options.comboBodyPrepared
+    ? rawBody
+    : expandPreviousResponseInput(rawBody, inboundClientThreadId);
+  const replayFailure = options.comboBodyPrepared
+    ? undefined
+    : previousResponseReplayFailure(body);
   if (replayFailure?.reason === "scope_mismatch") {
     console.warn("[opencodex] refusing continuation because the client task scope does not match replay state");
   }
@@ -223,7 +227,11 @@ export async function executeComboResponses(
   const requestedPreviousId = typeof (rawBody as { previous_response_id?: unknown } | null)?.previous_response_id === "string"
     ? (rawBody as { previous_response_id: string }).previous_response_id.trim()
     : "";
-  const unresolvedPrevious = requestedPreviousId.length > 0 && body === rawBody;
+  const previousResponseInputExpanded = options.comboReplaySnapshot?.previousResponseInputExpanded
+    ?? (!options.comboBodyPrepared
+      && body !== rawBody
+      && typeof (body as { previous_response_id?: unknown }).previous_response_id === "string");
+  const unresolvedPrevious = requestedPreviousId.length > 0 && !previousResponseInputExpanded;
   if (combo.imageInput === "disabled" && unresolvedPrevious) {
     return formatErrorResponse(
       400,
@@ -234,10 +242,9 @@ export async function executeComboResponses(
   if (combo.imageInput === "disabled" && comboRequestHasImageInput(body)) {
     return formatErrorResponse(400, "invalid_request_error", `Combo "${comboId}" does not accept image input`);
   }
-  const comboReplaySnapshot = {
+  const comboReplaySnapshot = options.comboReplaySnapshot ?? {
     sourceBody: body,
-    previousResponseInputExpanded: body !== rawBody
-      && typeof (body as { previous_response_id?: unknown }).previous_response_id === "string",
+    previousResponseInputExpanded,
     providerContinuation: body !== rawBody && requestedPreviousId
       ? previousResponseProviderState(requestedPreviousId)
       : undefined,
@@ -473,6 +480,8 @@ export async function executeComboResponses(
       provider: pick.target.provider,
       ...(logCtx.conversationId ? { conversationId: logCtx.conversationId } : {}),
       ...(logCtx.surface ? { surface: logCtx.surface } : {}),
+      ...(logCtx.admissionKind ? { admissionKind: logCtx.admissionKind } : {}),
+      ...(logCtx.apiKeyId ? { apiKeyId: logCtx.apiKeyId } : {}),
     };
     const targetRoute = routeConcreteModel(config, `${pick.target.provider}/${pick.target.model}`);
     const childBody = concreteComboRequestBody(
@@ -563,6 +572,11 @@ export async function executeComboResponses(
         sendBudget: targetSendBudget,
         comboAttempt: true,
         comboReplaySnapshot,
+        // The outer combo request owns the parent pin. Children inherit only a cloned
+        // mapping snapshot so one failed attempt cannot unpin the lineage for later targets.
+        guardrailsRuntimeLease: undefined,
+        guardrailsParentContinuationLease: undefined,
+        guardrailsCompactContinuationLease: undefined,
         deferCodexResetDerivedCooldown,
         // Attempt-relative TTFT is recorded HERE (not via childLog.firstOutputMs — a later
         // Object.assign(logCtx, childLog) would overwrite the request-relative value).

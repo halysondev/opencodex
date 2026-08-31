@@ -35,35 +35,35 @@ export const UPSTREAM_JSON_BODY_READ_OPTIONS = {
 
 
 
-export function finalizeOwnedTranslatorBudget(response: Response, budget: TranslatorBudget): Response {
+export function finalizeResponseLifecycle(response: Response, finalize: () => void): Response {
   if (!response.body) {
-    budget.dispose();
+    finalize();
     return response;
   }
   const reader = response.body.getReader();
   let finalized = false;
-  const finalize = () => {
+  const finish = () => {
     if (finalized) return;
     finalized = true;
-    budget.dispose();
+    finalize();
   };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const result = await reader.read();
         if (result.done) {
-          finalize();
+          finish();
           controller.close();
         } else {
           controller.enqueue(result.value);
         }
       } catch (error) {
-        finalize();
+        finish();
         controller.error(error);
       }
     },
     async cancel(reason) {
-      try { await reader.cancel(reason); } finally { finalize(); }
+      try { await reader.cancel(reason); } finally { finish(); }
     },
   });
   const finalizedResponse = new Response(body, {
@@ -78,6 +78,17 @@ export function finalizeOwnedTranslatorBudget(response: Response, budget: Transl
     markEagerRelaySseResponse(finalizedResponse);
   }
   return finalizedResponse;
+}
+
+export function finalizeOwnedTranslatorBudget(
+  response: Response,
+  budget: TranslatorBudget,
+  onFinalize?: () => void,
+): Response {
+  return finalizeResponseLifecycle(response, () => {
+    budget.dispose();
+    onFinalize?.();
+  });
 }
 
 

@@ -11,6 +11,7 @@ import { isMissingPathError } from "./atomic-write";
 import { getConfigPath } from "./paths";
 import { getDefaultConfig } from "./proxy-env";
 import { salvageConfigCandidate } from "./salvage";
+import { guardrailsConfigError, malformedGuardrailsConfigWarning } from "../guardrails/config-schema";
 import {
   sanitizeReasoningPinsForLoad,
   sanitizeRetryOn429ForLoad,
@@ -122,6 +123,8 @@ function validFileConfigDiagnostics(config: OcxConfig, rawParsed: unknown): Conf
   if (clientWarning) warnings.push(clientWarning);
   const notifyWarning = malformedQuotaResetNotifyWarning(rawParsed);
   if (notifyWarning) warnings.push(notifyWarning);
+  const guardrailsWarning = malformedGuardrailsConfigWarning(rawParsed);
+  if (guardrailsWarning) warnings.push(guardrailsWarning);
   const catalogRefreshWarning = malformedCatalogAutoRefreshWarning(rawParsed);
   if (catalogRefreshWarning) warnings.push(catalogRefreshWarning);
   const codexPoolWarning = malformedCodexPoolWarning(rawParsed);
@@ -606,6 +609,7 @@ export function validateConfigCandidate(value: unknown): { ok: true; config: Ocx
     ?? plaintextV2AgentMessagesError(value)
     ?? agentTaskRecoveryError(value)
     ?? quotaResetNotifyError(value)
+    ?? guardrailsConfigError(value)
     ?? catalogAutoRefreshError(value)
     ?? spendError(value)
     ?? codexPoolError(value)

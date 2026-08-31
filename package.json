@@ -31,7 +31,10 @@
     "native/remote-workspace-helper/Cargo.toml",
     "native/remote-workspace-helper/Cargo.lock",
     "native/remote-workspace-helper/src",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSES",
+    "tests/fixtures/guardrails-donor-rule-cases.json"
   ],
   "engines": {
     "node": ">=18"
@@ -56,6 +59,9 @@
     "structure:index": "bun scripts/structure-ssot.ts --fix",
     "structure:check": "bun scripts/structure-ssot.ts",
     "ratchet:update": "bun scripts/file-size-ratchet.ts --update",
+    "verify:guardrails-assets": "bun test tests/guardrails-assets.test.ts",
+    "verify:guardrails-package": "bun scripts/verify-guardrails-package.ts",
+    "benchmark:guardrails": "bun scripts/benchmark-guardrails.ts",
     "generate:model-metadata": "bun scripts/generate-model-metadata.ts",
     "build:gui": "cd gui && bun install --frozen-lockfile && bun run build && cd .. && bun run prepare:package",
     "build:remote-workspace-helper": "cargo build --release --locked --manifest-path native/remote-workspace-helper/Cargo.toml",
@@ -64,7 +70,7 @@
     "test:macos": "swift run --package-path app MenuBarCoreTests",
     "prepare:package": "bun scripts/prepare-package.ts",
     "prepack": "bun run prepare:package",
-    "prepublishOnly": "bun run audit:high && bun run typecheck && bun run build:gui",
+    "prepublishOnly": "bun run audit:high && bun run typecheck && bun run build:gui && bun run verify:guardrails-package",
     "release": "bun scripts/release.ts",
     "release:watch": "bun scripts/release.ts watch",
     "prepush": "bun run typecheck && bun run lint:gui:if-changed && bun run test && bun run privacy:scan && bun run doctor:gui:if-changed",
@@ -81,6 +87,8 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/keyring": "1.3.0",
     "bun": "1.4.0",
+    "re2-wasm": "1.0.2",
+    "yaml": "2.8.1",
     "zod": "4.4.3"
   },
   "devDependencies": {

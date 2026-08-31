@@ -35,6 +35,7 @@ export default function ConsequenceDialog({
   planStale = false,
   planLoading = false,
   planFailure = null,
+  titleId = "integration-consequence-dialog-title",
   onConfirm,
   onClose,
 }: {
@@ -47,6 +48,7 @@ export default function ConsequenceDialog({
   planFailure?: string | null;
   onConfirm: (plan?: IntegrationMutationPlan) => Promise<void> | void;
   onClose: () => void;
+  titleId?: string;
 }) {
   const t = useT();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -57,7 +59,6 @@ export default function ConsequenceDialog({
     sourceFingerprint: string | null;
     plan: IntegrationMutationPlan;
   } | null>(null);
-  const titleId = "integration-consequence-dialog-title";
   const planRequired = plan !== null || planLoading || planFailure !== null || plans !== undefined;
   const activePlan = staleOverride?.sourceFingerprint === (plan?.fingerprint ?? null)
     ? staleOverride.plan

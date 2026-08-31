@@ -56,6 +56,8 @@ on:
       - "skills/**"
       - ".github/ISSUE_TEMPLATE/**"
       - "LICENSE"
+      - "THIRD_PARTY_NOTICES.md"
+      - "LICENSES/**"
   workflow_dispatch:
     inputs:
       lane:
@@ -249,6 +251,9 @@ jobs:
               - 'skills/**'
               - '.github/ISSUE_TEMPLATE/**'
               - 'LICENSE'
+              - 'THIRD_PARTY_NOTICES.md'
+              - 'LICENSES/**'
+              - '.github/workflows/ci.yml'
             # Native-gated surface: platform-macos, widget and desktop-shell
             # only run when the code they build or bundle could have changed.
             # The listed src/ entries are what the bundled sidecar executes,
@@ -263,7 +268,6 @@ jobs:
               - 'src/lib/bun-runtime.ts'
               - 'package.json'
               - 'bun.lock'
-              - '.github/workflows/ci.yml'
             gui:
               - 'gui/**'
             # Building both Linux package formats and booting their real payloads is
@@ -350,7 +354,11 @@ jobs:
               - '.gitattributes'
               - 'README.md'
               - 'LICENSE'
+              - 'THIRD_PARTY_NOTICES.md'
+              - 'LICENSES/**'
+              - 'scripts/guardrails-provenance.ts'
               - 'scripts/prepare-package.ts'
+              - 'scripts/verify-guardrails-package.ts'
 
       - name: Assert the scope output is usable
         id: scope
@@ -1260,6 +1268,9 @@ jobs:
 
       - name: Build package assets
         run: npm run build:gui
+
+      - name: Verify Guardrails package assets and WASM scanner
+        run: npx --no-install bun scripts/verify-guardrails-package.ts
 
       - name: Pack
         shell: bash

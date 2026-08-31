@@ -1,10 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 
 import { formatErrorResponse } from "../../src/bridge";
+import { providerConfigSeed } from "../../src/providers/derive";
+import { getProviderRegistryEntry } from "../../src/providers/registry";
 import { RequestPacingQueueOverloadError } from "../../src/providers/request-pacing";
 import { fetchWithTransientRetry, isNonReplayableResponse, markResponseNonReplayable } from "../../src/lib/upstream-retry";
 import { shouldRetryCodexPoolAccountQuota } from "../../src/server/responses/core-codex-account";
-import type { OcxConfig } from "../../src/types";
+import type { OcxConfig, OcxProviderConfig } from "../../src/types";
 import { beginRequestAttempt, type RequestLogContext } from "../../src/server/request-log";
 import type { RouteDecisionTraceV1 } from "../../src/routing/trace";
 import { fakeChatGptJwt } from "../helpers/fake-chatgpt-jwt";
@@ -14,6 +16,12 @@ import {
   rankPolicyFallbackCandidates,
   type PolicyFallbackDeps,
 } from "../../src/server/responses/policy-fallback";
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 function policyTrace(): RouteDecisionTraceV1 {
   return {
@@ -49,6 +57,50 @@ function seedAttempt(logCtx: RequestLogContext, provider: string, model: string)
   (logCtx.attempts ??= []).push(attempt);
   logCtx.activeAttempt = attempt;
   logCtx.activeAttemptStartedAt = Date.now();
+}
+
+function scopedPolicyConfig(
+  candidates: ["protected" | "excluded", "protected" | "excluded"],
+): OcxConfig {
+  const seed = providerConfigSeed(getProviderRegistryEntry("deepseek")!);
+  const provider = (name: "protected" | "excluded") => ({
+    ...seed,
+    apiKey: `${name}-key`,
+    baseUrl: `https://${name}.test/v1`,
+  }) as OcxProviderConfig;
+  return {
+    defaultProvider: candidates[0],
+    providers: {
+      protected: provider("protected"),
+      excluded: provider("excluded"),
+    },
+    routingProfiles: {
+      daily: {
+        candidates: candidates.map(name => ({
+          provider: name,
+          model: "deepseek-v4-flash",
+        })),
+      },
+    },
+    guardrails: {
+      enabled: true,
+      mode: "enforce",
+      failurePolicy: "block",
+      providerScope: { mode: "selected", providerIds: ["protected"] },
+    },
+  } as OcxConfig;
+}
+
+function scopedPolicyRequest(secret: string): Request {
+  return new Request("http://localhost/v1/responses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "policy/daily",
+      input: secret,
+      stream: false,
+    }),
+  });
 }
 
 describe("policy candidate fallback", () => {
@@ -513,5 +565,70 @@ describe("policy candidate fallback", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("hello");
     expect(calls).toBe(1);
+  });
+
+  test("protected policy fallback reuses one masked body for an excluded candidate", async () => {
+    const secret = ["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_");
+    const upstreamBodies: string[] = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = String(init?.body ?? "");
+      upstreamBodies.push(body);
+      if (upstreamBodies.length === 1) {
+        return Response.json(
+          { error: { message: "candidate unavailable", type: "not_found" } },
+          { status: 404 },
+        );
+      }
+      return Response.json({
+        id: "chatcmpl-policy-protected-fallback",
+        object: "chat.completion",
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: "echo <STRIPE_ACCESS_TOKEN_1>",
+          },
+          finish_reason: "stop",
+        }],
+      });
+    }) as typeof fetch;
+
+    const response = await handleResponsesWithPolicyFallback(
+      scopedPolicyRequest(secret),
+      scopedPolicyConfig(["protected", "excluded"]),
+      { model: "", provider: "" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(upstreamBodies).toHaveLength(2);
+    expect(upstreamBodies.every(body => body.includes("<STRIPE_ACCESS_TOKEN_1>"))).toBe(true);
+    expect(upstreamBodies.every(body => !body.includes(secret))).toBe(true);
+    expect(await response.text()).toContain(secret);
+  });
+
+  test("excluded policy fallback blocks before a protected candidate receives raw input", async () => {
+    const secret = ["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_");
+    const upstreamBodies: string[] = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      upstreamBodies.push(String(init?.body ?? ""));
+      return Response.json(
+        { error: { message: "candidate unavailable", type: "not_found" } },
+        { status: 404 },
+      );
+    }) as typeof fetch;
+
+    const response = await handleResponsesWithPolicyFallback(
+      scopedPolicyRequest(secret),
+      scopedPolicyConfig(["excluded", "protected"]),
+      { model: "", provider: "" },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "guardrails_policy_changed" },
+    });
+    expect(upstreamBodies).toHaveLength(1);
+    expect(upstreamBodies[0]).toContain(secret);
+    expect(upstreamBodies[0]).not.toContain("<STRIPE_ACCESS_TOKEN_1>");
   });
 });

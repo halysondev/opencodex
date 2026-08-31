@@ -28,6 +28,7 @@ import {
   providerRelativeSendPathConfigError,
 } from "./leaf-validators";
 import { isValidProviderName, hasOwnProvider } from "../provider-name";
+import { guardrailsConfigSchema } from "../../guardrails/config-schema";
 import {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
@@ -182,6 +183,9 @@ export const configSchema = z.object({
   agentTaskRecovery: agentTaskRecoverySchema.optional().catch(undefined),
   // Same rationale: a bad notify section must not cost the operator their providers.
   quotaResetNotify: quotaResetNotifySchema.optional().catch(undefined),
+  // A malformed hand edit disables this opt-in security feature only. Strict
+  // management writes are rejected in validateConfigCandidate instead.
+  guardrails: guardrailsConfigSchema.optional().catch(undefined),
   // Same rationale: a bad auto-refresh section must not cost the operator their providers.
   catalogAutoRefresh: catalogAutoRefreshSchema.optional().catch(undefined),
   // Same rationale again, with the failure direction stated: a malformed spend section

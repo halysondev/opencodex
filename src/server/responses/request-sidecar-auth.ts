@@ -29,6 +29,17 @@ import {
   CodexThreadAffinityExpiredError,
   CodexMainProfileDrainingError,
 } from "../../codex/auth-context";
+import { markBodyNonPersistable } from "../../responses/state";
+import {
+  extendGuardrailsTurnText,
+  restoreGuardrailsResponsesParsedRequest,
+} from "../../guardrails/turn";
+import {
+  decideAndRecordGuardrailsLateFailure,
+  type GuardrailsLateFailureDecision,
+} from "../../guardrails/late-failure";
+import { formatErrorResponse } from "../../bridge";
+import type { OcxParsedRequest } from "../../types";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
 export async function prepareResponsesSidecarAuth(
@@ -37,13 +48,15 @@ export async function prepareResponsesSidecarAuth(
     PreparedResponsesRequest,
     | "parsed"
     | "route"
+    | "inboundWire"
     | "selectedForwardHeaders"
     | "translatorBudget"
   >,
   transportState: Pick<ResponsesTransport, "adapter" | "isPassthrough">,
 ) {
   const { options, config, req } = requestContext;
-  const { parsed, route, translatorBudget } = requestState;
+  const { route, translatorBudget } = requestState;
+  let parsed = requestState.parsed;
   const { isPassthrough } = transportState;
 
 
@@ -126,7 +139,22 @@ export async function prepareResponsesSidecarAuth(
     });
   const recordSidecarOutcome = openAiSidecar?.recordOutcome;
   if (visionPlan) {
+    let stagedVisionTurn = options.guardrailsTurn;
+    let visionPassthroughParsed: OcxParsedRequest | undefined;
+    let visionGuardrailsDecision: GuardrailsLateFailureDecision | undefined;
+    let visionFailedOpen = false;
+    let preparingVisionRollback = false;
+    let visionGuardrailsStartedAt = 0;
     try {
+      if (stagedVisionTurn?.snapshot.failurePolicy === "passthrough") {
+        preparingVisionRollback = true;
+        visionGuardrailsStartedAt = performance.now();
+        visionPassthroughParsed = restoreGuardrailsResponsesParsedRequest(
+          parsed,
+          stagedVisionTurn,
+        );
+        preparingVisionRollback = false;
+      }
       await describeImagesInPlace(
         parsed,
         visionPlan,
@@ -134,7 +162,63 @@ export async function prepareResponsesSidecarAuth(
         options.abortSignal,
         recordSidecarOutcome,
         translatorBudget,
+        stagedVisionTurn
+          ? (text) => {
+              if (visionFailedOpen || !stagedVisionTurn) return text;
+              const guardrailsStartedAt = performance.now();
+              try {
+                const extended = extendGuardrailsTurnText(text, stagedVisionTurn);
+                stagedVisionTurn = extended.turn;
+                return extended.text;
+              } catch (error) {
+                visionGuardrailsDecision = decideAndRecordGuardrailsLateFailure({
+                  error,
+                  inboundProtocol: requestState.inboundWire,
+                  latencyMs: performance.now() - guardrailsStartedAt,
+                  turn: stagedVisionTurn,
+                });
+                if (visionGuardrailsDecision.kind === "block") throw error;
+                visionGuardrailsDecision = undefined;
+                visionFailedOpen = true;
+                return text;
+              }
+            }
+          : undefined,
+        visionPassthroughParsed,
       );
+      if (visionFailedOpen && stagedVisionTurn) {
+        if (!visionPassthroughParsed) {
+          throw new Error("Guardrails vision passthrough rollback is unavailable");
+        }
+        console.warn("[opencodex] Guardrails vision rescan failed in passthrough mode");
+        parsed = visionPassthroughParsed;
+        requestState.parsed = parsed;
+        options.guardrailsTurn = undefined;
+        options.guardrailsPassthroughFailure = true;
+        markBodyNonPersistable(parsed._rawBody);
+      } else if (stagedVisionTurn) {
+        options.guardrailsTurn = stagedVisionTurn;
+      }
+    } catch (error) {
+      if (preparingVisionRollback && stagedVisionTurn) {
+        visionGuardrailsDecision = decideAndRecordGuardrailsLateFailure({
+          allowPassthrough: false,
+          error,
+          inboundProtocol: requestState.inboundWire,
+          latencyMs: performance.now() - visionGuardrailsStartedAt,
+          turn: stagedVisionTurn,
+        });
+      }
+      if (visionGuardrailsDecision?.kind === "block") {
+        return formatErrorResponse(
+          visionGuardrailsDecision.status,
+          visionGuardrailsDecision.code,
+          visionGuardrailsDecision.status === 413
+            ? "Vision description exceeds the Guardrails processing limit"
+            : "Guardrails could not safely process the vision description",
+        );
+      }
+      throw error;
     } finally {
       // Local validation can reject every image before the sidecar fetch records an outcome.
       // Vision-only turns must hand that unused cooldown probe back; when a fetch did run the

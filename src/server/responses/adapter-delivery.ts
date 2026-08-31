@@ -10,7 +10,6 @@ import { guardTerminalEventStream } from "./terminal-guard";
 import { guardEmptyCompletionEventStream } from "./empty-completion-guard";
 import { bridgeToResponsesSSE, buildResponseJSON, formatErrorResponse } from "../../bridge";
 import type { OcxProviderContinuationState, AdapterEvent } from "../../types";
-import { rememberResponseState } from "../../responses/state";
 import { trackStreamLifetime } from "../lifecycle";
 import { awaitThoughtSignatureDurability } from "../../responses/thought-signature-replay";
 import { adapterResponseReachedServingTerminal } from "./core-replay";
@@ -38,8 +37,8 @@ export async function deliverAdapterResponse(
     ResponsesEffects,
     | "cancelResponseCompletion"
     | "commitReasoningReplayServingRoute"
-    | "continuationStateForResponse"
     | "notifyResponseComplete"
+    | "rememberResponseWithGuardrails"
   >,
   completionPolicy: Pick<ResponsesCompletionPolicy, "emptyCompletionGuardEnabled">,
   adapterExchange: Pick<AdapterExchange, "upstreamResponse" | "upstream" | "cleanupUpstreamAbort">,
@@ -63,8 +62,8 @@ export async function deliverAdapterResponse(
   const {
     cancelResponseCompletion,
     commitReasoningReplayServingRoute,
-    continuationStateForResponse,
     notifyResponseComplete,
+    rememberResponseWithGuardrails,
   } = responseEffects;
   const { routedCompaction } = sidecarState;
   const bodyInactivityMs = resolveStallTimeoutSec(config.stallTimeoutSec) * 1000;
@@ -141,10 +140,9 @@ export async function deliverAdapterResponse(
           // PRE-compaction history, and a later previous_response_id expansion would rehydrate the
           // giant stale chain Codex just replaced.
           if (!routedCompaction) {
-            rememberResponseState(
-              parsed._rawBody,
+            rememberResponseWithGuardrails(
               response,
-              continuationStateForResponse(providerState),
+              providerState,
               responseStateOptions(transportState.activeAdapter.name === "kiro"),
             );
           }
@@ -219,10 +217,9 @@ export async function deliverAdapterResponse(
     // See the streaming branch: compaction turns skip the continuation cache.
     if (!routedCompaction) {
       rememberKiroDeliveredFinalAnswer(transportState.activeAdapter.name, json);
-      rememberResponseState(
-        parsed._rawBody,
+      rememberResponseWithGuardrails(
         json,
-        continuationStateForResponse(providerState),
+        providerState,
         responseStateOptions(transportState.activeAdapter.name === "kiro"),
       );
     }

@@ -19,6 +19,7 @@ import { getProviderRegistryEntry, providerMatchesRegistryTransport, registryMod
 import { providerFastSwitchOff } from "../providers/fast-opt-in";
 import { isCodexReasoningEffort } from "../reasoning-effort";
 import { refreshConfigDerivedRegistries } from "./derived-registries";
+import { malformedGuardrailsConfigWarning } from "../guardrails/config-schema";
 import { type OcxClaudeCodeConfig, type OcxConfig } from "../types";
 import {
   agentTaskRecoverySchema,
@@ -726,6 +727,11 @@ export function malformedCodexPoolWarning(rawParsed: unknown): string | null {
  */
 export function warnDegradedQuotaResetNotify(rawParsed: unknown): void {
   const warning = malformedQuotaResetNotifyWarning(rawParsed);
+  if (warning) console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
+}
+
+export function warnDegradedGuardrailsConfig(rawParsed: unknown): void {
+  const warning = malformedGuardrailsConfigWarning(rawParsed);
   if (warning) console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
 }
 

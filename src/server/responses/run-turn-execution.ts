@@ -36,7 +36,6 @@ import {
   observeEmptyCompletion,
   emptyCompletionNotice,
 } from "./empty-completion-guard";
-import { rememberResponseState } from "../../responses/state";
 import { trackStreamLifetime } from "../lifecycle";
 import { awaitThoughtSignatureDurability } from "../../responses/thought-signature-replay";
 import { undeclaredToolCallMessage } from "../responses-undeclared-tool-guard";
@@ -76,8 +75,8 @@ export async function executeResponsesRunTurn(
     ResponsesEffects,
     | "cancelResponseCompletion"
     | "commitReasoningReplayServingRoute"
-    | "continuationStateForResponse"
     | "notifyResponseComplete"
+    | "rememberResponseWithGuardrails"
   >,
   sendBudgetState: Pick<
     ResponsesSendBudget,
@@ -116,8 +115,8 @@ export async function executeResponsesRunTurn(
   const {
     cancelResponseCompletion,
     commitReasoningReplayServingRoute,
-    continuationStateForResponse,
     notifyResponseComplete,
+    rememberResponseWithGuardrails,
   } = responseEffects;
   const { routedCompaction } = sidecarState;
 
@@ -447,10 +446,9 @@ export async function executeResponsesRunTurn(
             commitReasoningReplayServingRoute();
             rememberKiroDeliveredFinalAnswer(transportState.adapter.name, response);
             if (!routedCompaction) {
-              rememberResponseState(
-                parsed._rawBody,
+              rememberResponseWithGuardrails(
                 response,
-                continuationStateForResponse(providerState),
+                providerState,
                 responseStateOptions(adapterNeedsForcedContinuation(transportState.adapter.name)),
               );
             }
@@ -526,10 +524,9 @@ export async function executeResponsesRunTurn(
     });
     if (!routedCompaction) {
       rememberKiroDeliveredFinalAnswer(transportState.adapter.name, json);
-      rememberResponseState(
-        parsed._rawBody,
+      rememberResponseWithGuardrails(
         json,
-        continuationStateForResponse(providerState),
+        providerState,
         responseStateOptions(adapterNeedsForcedContinuation(transportState.adapter.name)),
       );
     }

@@ -3,7 +3,10 @@ import { dirname, join } from "node:path";
 import { atomicWriteFileAsync, getConfigDir, resolveWriteTarget } from "../config";
 import { enforceAppOwnedMemoryBudget, type RetainedStoreSnapshot } from "../lib/app-owned-memory";
 import { windowsSecretAclApplies } from "../lib/windows-secret-acl";
-import type { OcxProviderContinuationState } from "../types";
+import type {
+  OcxGuardrailsResponseMarker,
+  OcxProviderContinuationState,
+} from "../types";
 import {
   deleteResponseSpill,
   noteStubSwapForTest,
@@ -22,7 +25,7 @@ export type { ResponseSpillWriteFailureCode, ResponseSpillWriteStatus, ResponseS
 import type { ResponseSpillWriteFailureCode, ResponseSpillWriteStatus, ResponseSpillWriteFailureOrigin } from "./state/spill-failure";
 export { responseAdmissionCountersForTests } from "./state/spill-failure";
 import { admissionCounters, noteSpillWriteFailure, noteSpillWriteSuccess, spillCounters, spillWriteHealth } from "./state/spill-failure";
-import { loadSnapshotEntry } from "./state/snapshot-codec";
+import { loadSnapshotEntry, normalizedGuardrailsMarker } from "./state/snapshot-codec";
 import { isBodyNonPersistable } from "./state/body-policy";
 export { isBodyNonPersistable, markBodyNonPersistable } from "./state/body-policy";
 export { flushPendingResponseSpillsForTests, awaitResponseSpillPublicationTailForTests, pendingResponseSpillMetricsForTests, setResponseSpillShutdownBudgetForTests, setResponseSpillAsyncAclAttemptBudgetForTests, setResponseSpillShutdownTerminalizationPassLimitForTests } from "./state/spill-queue";
@@ -110,6 +113,7 @@ export interface ResidentResponseState {
   /** Index in `items` where provider output begins; see clientCarriedPrefixLength. */
   providerOutputStart?: number;
   providers?: OcxProviderContinuationState;
+  guardrails?: OcxGuardrailsResponseMarker;
   sizeBytes: number;
 }
 
@@ -120,6 +124,7 @@ export interface SpilledResponseState {
   /** Mirrors the spilled payload boundary so a spilled entry keeps its anchor. */
   providerOutputStart?: number;
   providers?: OcxProviderContinuationState;
+  guardrails?: OcxGuardrailsResponseMarker;
   spill: ResponseSpillRef;
   sizeBytes: number;
 }
@@ -297,6 +302,7 @@ function measureResidentEntry(id: string, entry: ResidentInput): ResidentRespons
     items: entry.items,
     ...(entry.providerOutputStart !== undefined ? { providerOutputStart: entry.providerOutputStart } : {}),
     ...(entry.providers ? { providers: entry.providers } : {}),
+    ...(entry.guardrails ? { guardrails: entry.guardrails } : {}),
   });
   return sizeBytes === null ? null : { kind: "resident", ...entry, sizeBytes };
 }
@@ -400,6 +406,7 @@ function swapResidentForSpill(id: string, expected: ResidentResponseState, ref: 
     createdAt: expected.createdAt,
     ...(expected.clientThreadId ? { clientThreadId: expected.clientThreadId } : {}),
     ...(expected.providers ? { providers: expected.providers } : {}),
+    ...(expected.guardrails ? { guardrails: expected.guardrails } : {}),
     spill: ref,
   };
   const next: SpilledResponseState = { ...base, sizeBytes: stubSize(id, base) };
@@ -423,6 +430,7 @@ function replaceSpillEntryAtomically(
       items: candidate.items,
       ...(candidate.providerOutputStart !== undefined ? { providerOutputStart: candidate.providerOutputStart } : {}),
       ...(candidate.providers ? { providers: candidate.providers } : {}),
+      ...(candidate.guardrails ? { guardrails: candidate.guardrails } : {}),
     });
     const base: Omit<SpilledResponseState, "sizeBytes"> = {
       kind: "spill",
@@ -430,6 +438,7 @@ function replaceSpillEntryAtomically(
       ...(candidate.clientThreadId ? { clientThreadId: candidate.clientThreadId } : {}),
       ...(candidate.providerOutputStart !== undefined ? { providerOutputStart: candidate.providerOutputStart } : {}),
       ...(candidate.providers ? { providers: candidate.providers } : {}),
+      ...(candidate.guardrails ? { guardrails: candidate.guardrails } : {}),
       spill: ref,
     };
     const next: SpilledResponseState = { ...base, sizeBytes: stubSize(id, base) };
@@ -515,6 +524,7 @@ function admitOversizedCandidate(
       items: candidate.items,
       ...(candidate.providerOutputStart !== undefined ? { providerOutputStart: candidate.providerOutputStart } : {}),
       ...(candidate.providers ? { providers: candidate.providers } : {}),
+      ...(candidate.guardrails ? { guardrails: candidate.guardrails } : {}),
     });
     // Enforce the ceiling against the REAL envelope: the spill payload adds
     // the {version, responseId, ...} wrapper, so a candidate within the
@@ -530,6 +540,7 @@ function admitOversizedCandidate(
       createdAt: candidate.createdAt,
       ...(candidate.clientThreadId ? { clientThreadId: candidate.clientThreadId } : {}),
       ...(candidate.providers ? { providers: candidate.providers } : {}),
+      ...(candidate.guardrails ? { guardrails: candidate.guardrails } : {}),
       spill: ref,
     };
     const next: SpilledResponseState = { ...base, sizeBytes: stubSize(id, base) };
@@ -926,6 +937,7 @@ function pruneResponses(at = now()): void {
         items: entry.items,
         ...(entry.providerOutputStart !== undefined ? { providerOutputStart: entry.providerOutputStart } : {}),
         ...(entry.providers ? { providers: entry.providers } : {}),
+        ...(entry.guardrails ? { guardrails: entry.guardrails } : {}),
       });
       if (swapResidentForSpill(oldestId, entry, ref)) noteSpillWriteSuccess();
     } catch (error) {
@@ -985,6 +997,7 @@ export function evictOldestResponseContinuationForBudget(): number {
       items: entry.items,
       ...(entry.providerOutputStart !== undefined ? { providerOutputStart: entry.providerOutputStart } : {}),
       ...(entry.providers ? { providers: entry.providers } : {}),
+      ...(entry.guardrails ? { guardrails: entry.guardrails } : {}),
     });
     if (swapResidentForSpill(id, entry, ref)) noteSpillWriteSuccess();
   } catch (error) {
@@ -1029,6 +1042,7 @@ function materializeEntry(
       ? { providerOutputStart: result.payload.providerOutputStart }
       : {}),
     ...(result.payload.providers ? { providers: result.payload.providers } : {}),
+    ...(result.payload.guardrails ? { guardrails: result.payload.guardrails } : {}),
   });
   if (!state) {
     spillCounters.readFailures += 1;
@@ -1147,6 +1161,19 @@ export function previousResponseProviderState(responseId: string | undefined): O
   return providers ? structuredClone(providers) : undefined;
 }
 
+export function previousResponseGuardrailsMarker(
+  responseId: string | undefined,
+  clientThreadId?: string,
+): OcxGuardrailsResponseMarker | undefined {
+  if (!responseId) return undefined;
+  ensureLoaded();
+  pruneResponses();
+  const state = states.get(responseId);
+  if (!state || state.kind === "spill-failed") return undefined;
+  if (normalizedClientThreadId(clientThreadId) !== normalizedClientThreadId(state.clientThreadId)) return undefined;
+  return state.guardrails ? structuredClone(state.guardrails) : undefined;
+}
+
 export interface ResponseStateMetrics {
   count: number;
   residentCount: number;
@@ -1234,7 +1261,11 @@ export function rememberResponseState(
   requestBody: unknown,
   response: { id?: unknown; output?: unknown; status?: unknown; incomplete_details?: unknown },
   providerState?: OcxProviderContinuationState | string,
-  opts?: { force?: boolean; clientThreadId?: string },
+  opts?: {
+    force?: boolean;
+    clientThreadId?: string;
+    guardrails?: OcxGuardrailsResponseMarker;
+  },
 ): void {
   if (!requestBody || typeof requestBody !== "object" || Array.isArray(requestBody)) return;
   const request = requestBody as Record<string, unknown>;
@@ -1261,6 +1292,7 @@ export function rememberResponseState(
     });
   }
   const clientThreadId = normalizedClientThreadId(opts?.clientThreadId);
+  const guardrails = normalizedGuardrailsMarker(opts?.guardrails);
   // Compute the normalized array once and reuse it for both fields, so the recorded
   // boundary can never disagree with the items it indexes.
   const requestItems = inputItems(request.input);
@@ -1278,6 +1310,7 @@ export function rememberResponseState(
     // incomplete agent turn on the Cursor side (we suspended without a real mcpResult), so its
     // checkpoint must not be reused — but the conversation id string itself is still valid.
     ...(Object.keys(normalizedProviderState).length > 0 ? { providers: normalizedProviderState } : {}),
+    ...(guardrails ? { guardrails } : {}),
   });
   enforceAppOwnedMemoryBudget();
   schedulePersist();

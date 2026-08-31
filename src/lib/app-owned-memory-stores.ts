@@ -50,6 +50,18 @@ import {
   evictOldestResponseContinuationForBudget,
   responseContinuationRetainedStoreSnapshot,
 } from "../responses/state";
+import {
+  evictOldestGuardrailsContinuationForBudget,
+  guardrailsContinuationRetainedStoreSnapshot,
+} from "../guardrails/continuations";
+import {
+  evictOldestGuardrailsCompactContinuationForBudget,
+  guardrailsCompactContinuationRetainedStoreSnapshot,
+} from "../guardrails/compact-continuations";
+import {
+  evictOldestGuardrailsActivityForBudget,
+  guardrailsActivityRetainedStoreSnapshot,
+} from "../guardrails/telemetry";
 import { translatorObservedBufferSnapshot } from "./translator-budget";
 import { imageFulfillmentTailSnapshot } from "../images/fulfill";
 import { oauthMutationTailSnapshot } from "../oauth/store";
@@ -141,6 +153,12 @@ export const APP_OWNED_RETAINED_STORE_REGISTRATIONS = [
     evictOldest: evictOldestCrashTraceForBudget,
   },
   {
+    id: "guardrails_activity",
+    category: "logs",
+    snapshot: guardrailsActivityRetainedStoreSnapshot,
+    evictOldest: evictOldestGuardrailsActivityForBudget,
+  },
+  {
     id: "image_normalize",
     category: "caches",
     snapshot: anthropicImageNormalizeRetainedStoreSnapshot,
@@ -193,6 +211,18 @@ export const APP_OWNED_RETAINED_STORE_REGISTRATIONS = [
     category: "continuation",
     snapshot: nativeControlReplayRetainedStoreSnapshot,
     evictOldest: () => 0,
+  },
+  {
+    id: "guardrails_continuation",
+    category: "continuation",
+    snapshot: guardrailsContinuationRetainedStoreSnapshot,
+    evictOldest: evictOldestGuardrailsContinuationForBudget,
+  },
+  {
+    id: "guardrails_compact_continuation",
+    category: "continuation",
+    snapshot: guardrailsCompactContinuationRetainedStoreSnapshot,
+    evictOldest: evictOldestGuardrailsCompactContinuationForBudget,
   },
 ] as const satisfies readonly RetainedStoreRegistration[];
 

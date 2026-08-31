@@ -206,6 +206,7 @@ export async function preparePassthroughExchange(
     | "routedNamespaceToolAliases"
     | "plaintextV2AgentMessageAliasedToolNames"
     | "notifyResponseComplete"
+    | "rememberResponseWithGuardrails"
   >,
   sendBudgetState: Pick<
     ResponsesSendBudget,
@@ -242,7 +243,7 @@ export async function preparePassthroughExchange(
     refreshResolvedOAuthSelection,
     applyFailoverSnapshot,
   } = transportState;
-  const { refreshRequestToolAliases, notifyResponseComplete } = responseEffects;
+  const { refreshRequestToolAliases, notifyResponseComplete, rememberResponseWithGuardrails } = responseEffects;
   const {
     remainingTransientSendBudget,
     noteTransientSends,
@@ -276,7 +277,7 @@ export async function preparePassthroughExchange(
       && (!parsed.previousResponseId || parsed._previousResponseInputExpanded === true);
     const rememberPassthroughResponse = passthroughRecordEligible
       ? (response: { id?: unknown; output?: unknown; status?: unknown }) =>
-        rememberResponseState(parsed._rawBody, response, undefined, responseStateOptions(true))
+        rememberResponseWithGuardrails(response, undefined, responseStateOptions(true))
       : undefined;
     if (options.nativeControl && nativeResponseControlEligible(route.provider, options.nativeControl)
       && options.inboundTransport === "websocket" && !options.comboAttempt) {

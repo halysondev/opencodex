@@ -184,6 +184,12 @@ async function handleRemoteWorkspaceRoutesOnDemand(ctx: ManagementContext): Prom
   return handleRemoteWorkspaceRoutes(ctx);
 }
 
+async function handleGuardrailsRoutesOnDemand(ctx: ManagementContext): Promise<Response | null> {
+  if (!pathInManagementNamespace(ctx.url.pathname, "/api/guardrails")) return null;
+  const { handleGuardrailsRoutes } = await import("./management/guardrails-routes");
+  return handleGuardrailsRoutes(ctx);
+}
+
 export async function handleManagementAPI(
   req: Request,
   url: URL,
@@ -280,6 +286,7 @@ export async function handleManagementAPI(
     ??     (await handleRemoteWorkspaceRoutesOnDemand(ctx))
     ??     (await handleConfigRoutes(ctx))
     ??     (await handleStorageLogGuardRoutes(ctx))
+    ??     (await handleGuardrailsRoutesOnDemand(ctx))
     ??     (await handleLogsUsageRoutes(ctx))
     ??     (await handleRequestHistoryRoutes(ctx))
     ??     (await handleQuotaResetRoutesOnDemand(ctx))
