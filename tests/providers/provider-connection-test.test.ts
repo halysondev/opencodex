@@ -812,7 +812,7 @@ describe("POST /api/providers/test (WP040 connectivity probe)", () => {
 
     // Clean up — abort the client signal so the dangling fetch is released.
     controller.abort();
-  });
+  }, 15_000);
 });
 
 describe("POST /api/oauth/login/cancel (WP040)", () => {

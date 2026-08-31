@@ -129,7 +129,10 @@ function findAutoScrollCheckbox(container: HTMLElement): HTMLInputElement | null
 }
 
 function hasLogRow(container: HTMLElement, id: string): boolean {
-  return container.textContent?.includes(id) ?? false;
+  // Scope to the table: the filter bar lists every model/provider in the buffer,
+  // so cleared entries still appear there as filter options.
+  const table = container.querySelector(".logs-table-wrap");
+  return table?.textContent?.includes(id) ?? false;
 }
 
 test("Logs: clear view hides existing logs", async () => {
