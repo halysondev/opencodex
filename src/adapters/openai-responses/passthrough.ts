@@ -15,6 +15,7 @@ import {
   isCanonicalOpenAiForwardProvider,
   isOpenAiOperatedResponsesDestination,
 } from "../../providers/openai-tiers";
+import { applyGithubCopilotContextTier } from "../../providers/github-copilot-context";
 import type { TranslatorBudget } from "../../lib/translator-budget";
 import { rewriteRoutedCustomToolsForUpstream, validateFinalCustomToolCompatibility } from "../../responses/custom-tool-compat";
 import { rewriteRoutedToolSearchForUpstream } from "../../responses/tool-search-compat";
@@ -529,7 +530,7 @@ export function createResponsesPassthroughAdapter(provider: OcxProviderConfig): 
       if (!isCanonicalOpenAiForwardProvider(provider)) {
         validateFinalCustomToolCompatibility(finalBody, provider.supportsResponsesCustomTools);
       }
-      const body = JSON.stringify(finalBody);
+      const body = JSON.stringify(applyGithubCopilotContextTier(finalBody, provider, parsed.modelId));
       const releaseBodyObservation = translatorBudget.observeExternallyCapped(
         "passthrough_serialization",
         Buffer.byteLength(body, "utf8"),

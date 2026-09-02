@@ -31,6 +31,7 @@ import { isValidProviderName, hasOwnProvider } from "../provider-name";
 import {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
+  contextTierRecordConfigError,
   modelAdapterRecordConfigError,
   modelDisplayNamesConfigError,
   nonBlankStringArrayConfigError,
@@ -480,6 +481,17 @@ export const configSchema = z.object({
         code: "custom",
         path: ["providers", redactSecretString(name), "modelAdapters"],
         message: modelAdaptersError,
+      });
+    }
+    const contextTiersError = contextTierRecordConfigError(
+      (provider as { modelContextTiers?: unknown }).modelContextTiers,
+      "modelContextTiers",
+    );
+    if (contextTiersError) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["providers", redactSecretString(name), "modelContextTiers"],
+        message: contextTiersError,
       });
     }
     const preferHostedToolsError = modelPreferHostedToolsConfigError(

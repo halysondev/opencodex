@@ -1,5 +1,8 @@
 import type { UpstreamHttpVersion, ReasoningSummaryDelivery, CodexAccountMode } from "./wire";
 
+/** Upstream context tier understood by GitHub Copilot-compatible transports. */
+export type OcxContextTier = "default" | "long_context";
+
 /**
  * Per-provider proactive-refresh policy. The guardian only ever touches a provider whose EFFECTIVE
  * policy is "proactive"; "lazy-only" keeps today's on-demand refresh, "disabled" forbids the
@@ -584,6 +587,8 @@ export interface OcxProviderConfig {
   contextWindow?: number;
   /** Per-model fallback when context metadata is absent; otherwise caps the reported window. */
   modelContextWindows?: Record<string, number>;
+  /** Per-model upstream context tier. GitHub Copilot supports "default" and "long_context". */
+  modelContextTiers?: Record<string, OcxContextTier>;
   /** Model-specific Codex catalog input modalities, e.g. ["text"] or ["text", "image"]. */
   modelInputModalities?: Record<string, string[]>;
   modelCapabilities?: Record<string, ModelCapabilities>;

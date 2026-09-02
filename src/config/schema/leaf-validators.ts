@@ -351,6 +351,7 @@ export const providerConfigSchema = z.object({
   // management write boundary still rejects it loudly (`retryOnResetPolicyConfigError`).
   retryOnReset: retryOnResetPolicySchema.optional().catch(undefined),
   codexAccountMode: z.enum(["pool", "direct"]).optional(),
+  modelContextTiers: z.record(z.string(), z.enum(["default", "long_context"])).optional(),
   // Validated rather than passed through: this schema ends in `.passthrough()`, so an
   // undeclared key survives verbatim. A misspelled `codexToolMode` therefore used to be
   // accepted, persisted, and then silently resolved to the `code_mode_only` default — the

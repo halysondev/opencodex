@@ -19,6 +19,7 @@ import {
   autoReviewModelOverridesConfigError,
   autoReviewModelTargetConfigError,
   booleanRecordConfigError,
+  contextTierRecordConfigError,
   providerReasoningPinsConfigError,
   modelAdapterRecordConfigError,
   nonBlankStringArrayConfigError,
@@ -850,6 +851,8 @@ export function providerManagementConfigError(
   if (defaultMaxOutputError) return `provider ${name} ${defaultMaxOutputError}`;
   const maxOutputError = positiveIntegerRecordConfigError(raw.modelMaxOutputTokens, "modelMaxOutputTokens");
   if (maxOutputError) return `provider ${name} ${maxOutputError}`;
+  const contextTiersError = contextTierRecordConfigError(raw.modelContextTiers, "modelContextTiers");
+  if (contextTiersError) return `provider ${name} ${contextTiersError}`;
   const structuredOutputOptOutError = nonBlankStringArrayConfigError(
     raw.noStructuredOutputModels,
     "noStructuredOutputModels",

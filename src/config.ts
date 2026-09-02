@@ -63,6 +63,7 @@ export { isValidProviderName, hasOwnProvider } from "./config/provider-name";
 export {
   apiKeyTransportConfigError,
   booleanRecordConfigError,
+  contextTierRecordConfigError,
   modelAdapterRecordConfigError,
   modelDisplayNamesConfigError,
   autoReviewModelOverridesConfigError,

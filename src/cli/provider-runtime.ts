@@ -42,7 +42,8 @@ const USAGE = `Usage:
       [--headers <json>] [--enabled <on|off>] [--live-models <on|off>]
       [--retain-models <id,id|->] [--model <id> --text-only]
       [--xai-chat <on|off>]
-      [--allow-private-network <on|off>] [--json]
+      [--allow-private-network <on|off>]
+      [--model-context-tier <model=default|long_context>] [--json]
   ocx provider test <name> [--json]
   ocx provider quota [--refresh] [--json]
   ocx provider resets [--limit <n>] [--json]
@@ -53,6 +54,25 @@ const USAGE = `Usage:
 
 function cleared(value: string | undefined): string | undefined {
   return value === "-" ? "" : value;
+}
+
+function takeRepeatedOptions(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (;;) {
+    const value = takeOption(args, flag);
+    if (value === undefined) return values;
+    values.push(value);
+  }
+}
+
+function parseModelContextTier(raw: string): { model: string; tier: "default" | "long_context" } {
+  const separator = raw.indexOf("=");
+  const model = separator === -1 ? "" : raw.slice(0, separator).trim();
+  const tier = separator === -1 ? "" : raw.slice(separator + 1).trim();
+  if (!model || (tier !== "default" && tier !== "long_context")) {
+    throw new CliUsageError("--model-context-tier must use model=default or model=long_context", USAGE);
+  }
+  return { model, tier };
 }
 
 async function edit(argv: string[], deps: RuntimeApiDeps): Promise<void> {
@@ -72,6 +92,7 @@ async function edit(argv: string[], deps: RuntimeApiDeps): Promise<void> {
   const enabled = takeBooleanOption(args, "--enabled");
   const liveModels = takeBooleanOption(args, "--live-models");
   const allowPrivateNetwork = takeBooleanOption(args, "--allow-private-network");
+  const contextTierValues = takeRepeatedOptions(args, "--model-context-tier");
   const xaiChat = takeBooleanOption(args, "--xai-chat");
   const textOnly = takeFlag(args, "--text-only");
   const capabilityModel = takeOption(args, "--model");
@@ -115,6 +136,14 @@ async function edit(argv: string[], deps: RuntimeApiDeps): Promise<void> {
   }
   if (liveModels !== undefined) patch.liveModels = liveModels;
   if (allowPrivateNetwork !== undefined) patch.allowPrivateNetwork = allowPrivateNetwork;
+  if (contextTierValues.length > 0) {
+    const modelContextTiers = Object.create(null) as Record<string, "default" | "long_context">;
+    for (const value of contextTierValues) {
+      const parsed = parseModelContextTier(value);
+      modelContextTiers[parsed.model] = parsed.tier;
+    }
+    patch.modelContextTiers = modelContextTiers;
+  }
   if (Object.keys(patch).length === 0) throw new CliUsageError("at least one edit option is required", USAGE);
   const result = await runtimeRequest(`/api/providers?name=${encodeURIComponent(name)}`, {
     method: "PATCH",
