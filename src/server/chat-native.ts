@@ -292,6 +292,7 @@ export async function handleNativeChatCompletions(options: HandleNativeChatOptio
       requestedStream,
       fastPolicyForModel(activeProvider, route.modelId, route.providerName, "chat"),
       config.fastMode,
+      route.providerName,
     );
   };
   try {
