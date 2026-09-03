@@ -2,7 +2,7 @@ import { codexAccountLogLabel } from "../account-label";
 import { getCodexAccountCredential, getValidCodexToken, isCodexAccountGenerationLive, readCodexAccountRecord } from "../account-store";
 import { getAccountQuota, isCodexQuotaExhausted, setAccountQuotaFromParsed, withoutRetiredCodexQuota } from "../quota";
 import type { StoredAccountQuota } from "../quota";
-import { ConfigMutationLockError, mutatePersistedConfig } from "../../config";
+import { ConfigMutationLockError, mutatePersistedConfig, refreshResidentConfigIdentity } from "../../config";
 import { reconcileMainCodexAccountRuntimeState } from "../account-lifecycle";
 import { isCodexAccountPaused, setCodexAccountPaused } from "../account-pause";
 import { getCodexAccountPriority } from "../account-priority";
@@ -229,6 +229,7 @@ export function reconcileFreshPoolAccountPlans(runtimeConfig: OcxConfig, updates
     throw error;
   }
   if (outcome.status === "unavailable") return;
+  let adoptedAny = false;
   for (const update of outcome.value) {
     // A replacement immediately after the durable commit is allowed to supersede the result, but
     // the long-lived object must never be updated from that stale generation.
@@ -238,8 +239,14 @@ export function reconcileFreshPoolAccountPlans(runtimeConfig: OcxConfig, updates
       liveAccount.plan = update.plan;
       liveAccount.planSource = "wham";
       liveAccount.planCredentialGeneration = update.credentialGeneration;
+      adoptedAny = true;
     }
   }
+  // The long-lived runtime config now serves the persisted plan, so the resident
+  // divergence identity must follow it (the disk-first mutation skipped the refresh).
+  // Only a committed write may re-anchor: an unchanged refresh must not replace the
+  // raw-byte digest with the normalized projection (would fabricate divergence).
+  if (adoptedAny && outcome.status === "committed") refreshResidentConfigIdentity(runtimeConfig);
 }
 
 export interface CodexAuthAccountsSnapshot {

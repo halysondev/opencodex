@@ -185,6 +185,14 @@ observation yet, loading, failed lookup with last-known values, and measured zer
 states. **Quota check completed** means the read settled—not that a passive observation became
 new or that every upstream measurement was refreshed.
 
+### Config changes while the proxy is running
+
+opencodex loads `config.json` once at startup and serves that snapshot until it exits. If the file is
+edited on disk while the proxy is running — by another process or by hand — the dashboard shows a
+config-change warning on the Overview instead of pretending the new settings are live, and
+`ocx status` prints the same warning. The proxy does not auto-reload the file: restart it
+(`ocx service restart`, or `ocx restart` for a foreground proxy) to apply the on-disk changes.
+
 ## Model visibility
 
 The **Models** switches show final Codex visibility: a routed model is on only when its provider allowlist includes it (or no allowlist is set) and it is not disabled. Turning a model on reconciles both filters atomically; **All on** clears the provider allowlist so newly discovered models are also on.

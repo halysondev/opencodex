@@ -66,7 +66,7 @@ import {
   pendingTeardownsAreExactly,
   quarantinePendingTeardown,
 } from "../config/pending-teardown";
-import { collectStatus, deadProxyRoutingAdviceLines, detectMissingCodexCatalogPath, hubStatusLines, missingCodexCatalogLines, remoteHubBannerLine, remoteHubStatusLines, unusedProxyWarningLines } from "./status";
+import { collectStatus, configDivergenceActionLine, deadProxyRoutingAdviceLines, detectMissingCodexCatalogPath, hubStatusLines, missingCodexCatalogLines, remoteHubBannerLine, remoteHubStatusLines, unusedProxyWarningLines } from "./status";
 import { endpointsToProve, everyEndpointProvenDownAsync, sharedTeardownAuthorized, type UninstallObservation } from "./uninstall-plan";
 import { takeFlag } from "./runtime-api";
 import { parseStartOptions, StartArgsError } from "./start-args";
@@ -1845,6 +1845,17 @@ async function handleStatus() {
   if (status.json.codexHome.warning) {
     console.log(`   ⚠️  ${status.json.codexHome.warning}`);
     console.log(`      Action: ${status.json.codexHome.action}`);
+  }
+  if (status.json.configDivergence.available && status.json.configDivergence.diverged) {
+    if (status.json.configDivergence.diskVersion === null) {
+      console.log("   ⚠️  config.json was removed after the running proxy loaded it; the proxy is still serving the loaded settings.");
+    } else if (status.json.configDivergence.residentVersion === null) {
+      console.log("   ⚠️  config.json appeared after the running proxy started with defaults; restart to apply it.");
+    } else {
+      console.log("   ⚠️  config.json changed on disk after the running proxy loaded it; the proxy is still serving the older settings.");
+    }
+    const serviceInstalled = status.json.startup.serviceInstalled && !status.json.startup.serviceConflict;
+    console.log(configDivergenceActionLine(serviceInstalled));
   }
   console.log(`   Catalog clamp: ${status.json.codexRuntime.catalogClamp.active ? "active" : "inactive"}`);
   if (status.json.codexRuntime.catalogClamp.removedEfforts.length > 0) {

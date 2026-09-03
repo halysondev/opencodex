@@ -6,6 +6,7 @@ import { refreshConfigDerivedRegistries } from "./derived-registries";
 import { atomicWriteFile, isMissingPathError } from "./atomic-write";
 import { getConfigPath } from "./paths";
 import { configRebaseDeletionKeys, projectConfigRebaseProvenance } from "./rebase-provenance";
+import { anchorResidentToServed, reanchorResidentIfServedMatchesBytes } from "./resident-identity";
 import { clientConnectionSchema } from "./schema/leaf-validators";
 
 /** The literal file, with no schema merge or default injection. */
@@ -48,13 +49,31 @@ function failClosedClientPersistenceError(
   return "config write refused: malformed or mismatched remote client state must be repaired or explicitly cleared";
 }
 
+export type PersistConfigUnlockedOptions = {
+  /**
+   * The served snapshot whose serialization owns the resident divergence digest.
+   * Defaults to `config`; pass the pre-binding live projection when the persisted
+   * document deliberately carries a different desired next-start binding.
+   */
+  servedSnapshot?: OcxConfig;
+  /**
+   * Set false for disk-first writers whose result the live server has not adopted
+   * (for example mutatePersistedConfig): the resident identity must stay bound to
+   * what the running process actually serves.
+   */
+  refreshResident?: boolean;
+};
+
 /**
  * Atomic config.json write WITHOUT the mutation lock; callers must hold
  * `withConfigMutationLockSync`. Returns true when bytes changed. Refreshes the
  * cost-overlay registry from the persisted config so runtime estimates follow
  * every save path.
  */
-export function persistConfigUnlocked(config: OcxConfig): boolean {
+export function persistConfigUnlocked(
+  config: OcxConfig,
+  options: PersistConfigUnlockedOptions = {},
+): boolean {
   const pinError = configReasoningPinsConfigError(config);
   if (pinError) throw new Error(pinError);
   const configPath = getConfigPath();
@@ -77,15 +96,24 @@ export function persistConfigUnlocked(config: OcxConfig): boolean {
   } catch (error) {
     if (!isMissingPathError(error)) throw error;
   }
+  // Served snapshot first so the unchanged branch can compare it against the
+  // persisted bytes too (see the re-anchor guard below).
+  const servedSnapshot = options.servedSnapshot ?? config;
   // Keep the runtime overlay registry in sync with EVERY persist path,
   // including byte-identical saves: a cooperating CLI process may have written
   // the same bytes (e.g. before a proxy notification), and Logs/Usage must
   // adopt the overlay without waiting for a changed save or restart.
   if (unchanged) {
+    if (options.refreshResident !== false) {
+      reanchorResidentIfServedMatchesBytes(servedSnapshot, bytes);
+    }
     refreshConfigDerivedRegistries(persisted);
     return false;
   }
   atomicWriteFile(configPath, bytes);
+  if (options.refreshResident !== false) {
+    anchorResidentToServed(servedSnapshot);
+  }
   // For changed saves, refresh only AFTER the write succeeded so a failed
   // write cannot leave estimates reflecting configuration never persisted.
   refreshConfigDerivedRegistries(persisted);

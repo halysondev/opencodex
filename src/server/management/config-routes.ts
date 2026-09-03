@@ -21,6 +21,7 @@ import {
   providerBaseUrlConfigError,
   providerHeadersConfigError,
   saveConfigPreservingClaudeCode,
+  readConfigDivergenceStatus,
 } from "../../config";
 import { captureDesktopAppliedMarker, commitDesktopAppliedMarker } from "../../claude/desktop-applied-marker";
 import {
@@ -292,6 +293,10 @@ export async function handleConfigRoutes(ctx: ManagementContext): Promise<Respon
   const readStartupHealth = deps.getCachedStartupHealth ?? getCachedStartupHealth;
   if (url.pathname === "/api/config" && req.method === "GET") {
     return jsonResponse(withProviderCatalogCapabilityDTO(safeConfigDTO(config), config));
+  }
+
+  if (url.pathname === "/api/config/status" && req.method === "GET") {
+    return jsonResponse(readConfigDivergenceStatus());
   }
 
   if (url.pathname === "/api/config" && req.method === "PUT") {

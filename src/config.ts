@@ -145,6 +145,13 @@ export {
   reconcileLiveConfigFromDisk,
   saveConfigPreservingClaudeCode,
 } from "./config/live-reconcile";
+export {
+  readConfigDivergenceStatus,
+  refreshResidentConfigIdentity,
+  setResidentConfigSha256ForTests,
+  type ConfigDivergenceStatus,
+} from "./config/resident-identity";
+export { type PersistConfigUnlockedOptions } from "./config/persist-unlocked";
 
 // create-only path — never persist-unlocked / atomicWriteFile
 import { InitialConfigPublicationError, publishInitialConfigNoReplace, type InitialConfigPublicationIO } from "./config/initialize";
@@ -157,6 +164,7 @@ import {
 
 // replace path — never publishInitialConfigNoReplace
 import { persistConfigUnlocked, readRawConfigJson } from "./config/persist-unlocked";
+import { armResidentFromDefaults, armResidentFromLoad } from "./config/resident-identity";
 
 import { withConfigMutationLockSync, bumpGenerationForCooperatingConfigWrite } from "./config/mutation-lock";
 import { getDefaultConfig } from "./config/proxy-env";
@@ -208,17 +216,27 @@ import {
  * until a valid config or a genuinely missing file is observed. A partially-
  * invalid config is merged with defaults so providers and pool accounts survive.
  */
-export function loadConfig(): OcxConfig {
+export function loadConfig(options?: { captureResident?: boolean }): OcxConfig {
   const dir = getConfigDir();
   const configPath = getConfigPath();
   hardenConfigDir();
   hardenExistingSecret(configPath);
   hardenExistingSecret(join(dir, "auth.json"));
   if (!existsSync(configPath)) {
+    // No file means the process is serving defaults, not the previously loaded bytes;
+    // a reload after deletion must not retain the old resident identity.
+    if (options?.captureResident) armResidentFromLoad(null);
     return withRefreshedCostOverlays(getDefaultConfig());
   }
   try {
-    const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
+    // Keep the pre-strip bytes: the resident identity must hash exactly what the
+    // process parsed, including a leading BOM, so it matches the admission digest.
+    // Hash the RAW bytes (not the decoded string): decoding can map malformed
+    // UTF-8 sequences onto replacement characters, which would make the digest
+    // disagree with the file's true byte SHA-256 and misreport divergence.
+    const fileBytes = readFileSync(configPath);
+    if (options?.captureResident) armResidentFromLoad(fileBytes);
+    const raw = fileBytes.toString("utf-8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw);
     sanitizeAliasesForLoad(parsed);
     sanitizeReasoningPinsForLoad(parsed);
@@ -256,6 +274,9 @@ export function loadConfig(): OcxConfig {
     // backup.
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       warnAndBackupInvalidConfig(configPath, result.error);
+      // The process serves getDefaultConfig(), not this file. Record a
+      // defaults-backed resident so a later repair is reported as divergent.
+      if (options?.captureResident) armResidentFromDefaults();
       return getDefaultConfig();
     }
     // Schema validation failed — merge defaults into the raw object instead of
@@ -318,9 +339,13 @@ export function loadConfig(): OcxConfig {
     }
     // Merge couldn't fix it — truly broken config
     warnAndBackupInvalidConfig(configPath, result.error);
+    // The process serves getDefaultConfig(), not this file. Record a
+    // defaults-backed resident so a later repair is reported as divergent.
+    if (options?.captureResident) armResidentFromDefaults();
     return getDefaultConfig();
   } catch (error) {
     warnAndBackupInvalidConfig(configPath, error);
+    if (options?.captureResident) armResidentFromDefaults();
     return getDefaultConfig();
   }
 }

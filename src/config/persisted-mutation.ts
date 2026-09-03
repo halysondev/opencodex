@@ -86,7 +86,9 @@ export function mutatePersistedConfig<T>(
         commitBase.diagnostics.config,
         projectConfigRebaseProvenance(confirmedConfig),
       );
-      if (persistConfigUnlocked(projected)) bumpGenerationForCooperatingConfigWrite();
+      // Disk-first mutation: the live server has not adopted this snapshot, so the
+      // resident divergence identity must stay bound to the served config.
+      if (persistConfigUnlocked(projected, { refreshResident: false })) bumpGenerationForCooperatingConfigWrite();
       return { status: "committed", value: confirmed.value };
     }
     return { status: "unavailable", reason: "conflict" };

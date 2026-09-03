@@ -15,6 +15,7 @@ import {
 } from "./rebase-provenance";
 import { withConfigMutationLockSync, bumpGenerationForCooperatingConfigWrite } from "./mutation-lock";
 import { persistConfigUnlocked, readRawConfigJson } from "./persist-unlocked";
+import { refreshResidentConfigIdentity } from "./resident-identity";
 import { configDiagnosticsFromRaw, readConfigDiagnostics } from "./diagnostics";
 import { normalizePersistedClaudeCode } from "./load-degrade";
 
@@ -69,6 +70,10 @@ const detachedConfigSnapshots = new WeakSet<OcxConfig>();
 export function armClaudeCodeBaseline(config: OcxConfig): void {
   liveConfigBaseline.set(config, structuredClone(config));
   claudeCodeBaseline.set(config, structuredClone(config.claudeCode));
+  // The resident digest is captured by loadConfig() from the exact bytes it parsed.
+  // Do NOT re-read config.json here: a file edit between that read and arming
+  // would otherwise be recorded as the resident identity while the live config
+  // still reflects the earlier bytes, producing a false divergence at startup.
 }
 
 /**
@@ -138,6 +143,13 @@ export function adoptPersistedClaudeCode(
   if (baseline) baseline.claudeCode = structuredClone(persistedClaudeCode);
   if (claudeCodeBaseline.has(config)) {
     claudeCodeBaseline.set(config, structuredClone(persistedClaudeCode));
+  }
+  // The long-lived server snapshot now serves the persisted value, so the resident
+  // divergence identity must follow it (the disk-first mutation itself skipped the
+  // refresh because it could not know whether the caller would adopt the write).
+  // Detached snapshots are not the served config, so they must not re-anchor it.
+  if (liveConfigBaseline.has(config) && !detachedConfigSnapshots.has(config)) {
+    refreshResidentConfigIdentity(config);
   }
 }
 
@@ -510,7 +522,10 @@ export function saveConfigPreservingClaudeCode(config: OcxConfig): void {
       const persistedConfig: OcxConfig = { ...projectedConfig, port: persistedBinding.port };
       if (persistedBinding.hostname === undefined) delete persistedConfig.hostname;
       else persistedConfig.hostname = persistedBinding.hostname;
-      if (persistConfigUnlocked(persistedConfig)) bumpGenerationForCooperatingConfigWrite();
+      // The file carries the operator's desired next-start binding, but the running
+      // process still serves the live projection with its ACTUAL binding; the resident
+      // digest must follow the served snapshot so a binding difference stays divergent.
+      if (persistConfigUnlocked(persistedConfig, { servedSnapshot: projectedConfig })) bumpGenerationForCooperatingConfigWrite();
       persistedLiveServerBinding.set(config, persistedBinding);
     } else {
       if (persistConfigUnlocked(projectedConfig)) bumpGenerationForCooperatingConfigWrite();

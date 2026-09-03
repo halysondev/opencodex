@@ -15,8 +15,9 @@ export type {
   CodexAccountReauthReason,
   CodexAuthAccountDto,
   CodexAuthAccountsSnapshot,
+  FreshPoolPlanUpdate,
 } from "./auth-api/account-list";
-export { listCodexAuthAccountsSnapshot, refreshCodexQuotaForActivation, listCodexAuthAccounts } from "./auth-api/account-list";
+export { listCodexAuthAccountsSnapshot, refreshCodexQuotaForActivation, listCodexAuthAccounts, reconcileFreshPoolAccountPlans } from "./auth-api/account-list";
 export type { MainAccountInfoSnapshot } from "./auth-api/main-account-probe";
 export { fetchMainAccountInfoSnapshot, fetchMainAccountInfo } from "./auth-api/main-account-probe";
 export { PoolQuotaProbeBusyError, seedCodexAuthAdmissionForTests, fetchPoolAccountQuota } from "./auth-api/pool-quota-probe";

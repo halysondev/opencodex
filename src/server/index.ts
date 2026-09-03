@@ -215,7 +215,7 @@ function startServerWithSpendLedgerOwner(port: number | undefined, deps: StartSe
   const startupConfig = migrateStartupSubagentModels(
     runModelRenameStartupMigration(
       runDevinProviderMergeStartupMigration(
-        runAlibabaRegionStartupMigration(runOpenAiTierStartupMigration(loadConfig())),
+        runAlibabaRegionStartupMigration(runOpenAiTierStartupMigration(loadConfig({ captureResident: true }))),
       ),
     ),
   );

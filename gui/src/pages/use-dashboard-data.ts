@@ -19,10 +19,12 @@ import {
   fetchDashboardSettings,
   fetchDashboardSidecars,
   fetchDashboardUsage,
+  fetchDashboardConfigStatus,
   fetchProjectConfigDiagnostics,
   fetchStartupHealth,
   normalizeInjectionSelection,
   type DashboardEpochRefs,
+  type DashboardConfigStatusPoll,
 } from "./dashboard-core-poll";
 import { usageSummary30dResourceKey } from "../usage-summary-resource";
 import type { SubagentSurfaceAdvisory } from "../subagent-surface";
@@ -184,7 +186,8 @@ export function useDashboardData(apiBase: string, refreshEpoch = 0) {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [maMode, setMaMode] = useState<MaMode>(() => cachedMaMode ?? "default");
-const [maBusy, setMaBusy] = useState(false);
+  const [configDivergence, setConfigDivergence] = useState<DashboardConfigStatusPoll["configDivergence"]>(null);
+  const [maBusy, setMaBusy] = useState(false);
   const [maError, setMaError] = useState<string | null>(null);
  /** The runtime's one-time advisory, and whether this page load has answered it. */
   /**
@@ -307,6 +310,13 @@ const [maBusy, setMaBusy] = useState(false);
     { pollMs: 5000 },
   );
 
+  const configStatusPoll = useKeyedClientResource(
+    `dashboard-config-status:${apiBase}`,
+    [apiBase],
+    (signal) => fetchDashboardConfigStatus(apiBase, signal),
+    { pollMs: 15000 },
+  );
+
   const sidecarPoll = useKeyedClientResource(
     `dashboard-sidecars:${apiBase}`,
     [apiBase, refreshEpoch],
@@ -397,6 +407,11 @@ const [maBusy, setMaBusy] = useState(false);
     setMaAdvisoryState({ advisory: maModePoll.data.advisory ?? null, apiBase });
     writeSessionListCache(`${MA_MODE_CACHE_PREFIX}${apiBase}`, maModePoll.data.maMode);
   }, [maModePoll.data, apiBase]);
+
+  useEffect(() => {
+    if (configStatusPoll.data === undefined) return;
+    setConfigDivergence(configStatusPoll.data.configDivergence);
+  }, [configStatusPoll.data]);
 
   // Derived — avoids setState-on-prop-change for the resolved flag. Cache / poll / optimistic
   // save (which writes the same cache key) all count as resolved for MA UI.
@@ -926,6 +941,7 @@ const [maBusy, setMaBusy] = useState(false);
     modelQuery, setModelQuery,
     expandedProviders, setExpandedProviders,
     health, startupHealth, providers, models, settings, sidecar, shadowCall, usage30d,
+    configDivergence,
     usageLoading: usagePoll.loading && !usage30d,
     healthLoading: overviewPoll.loading && !health,
     sidecarSaving, shadowCallSaving, modelsLoading, settingsSaving, syncing,
