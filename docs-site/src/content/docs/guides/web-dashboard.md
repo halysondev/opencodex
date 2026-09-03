@@ -187,11 +187,12 @@ new or that every upstream measurement was refreshed.
 
 ### Config changes while the proxy is running
 
-opencodex loads `config.json` once at startup and serves that snapshot until it exits. If the file is
-edited on disk while the proxy is running — by another process or by hand — the dashboard shows a
-config-change warning on the Overview instead of pretending the new settings are live, and
-`ocx status` prints the same warning. The proxy does not auto-reload the file: restart it
-(`ocx service restart`, or `ocx restart` for a foreground proxy) to apply the on-disk changes.
+Saves made through OpenCodex — the CLI, management API, or dashboard — and live mutations the proxy
+adopts update the resident configuration while it runs; no restart is needed for those. Only when
+`config.json` is edited directly on disk — by another process or by hand — does the running proxy
+keep serving its earlier snapshot. In that case the dashboard shows a config-change warning on the
+Overview instead of pretending the new settings are live, and `ocx status` prints the same warning;
+restart (`ocx service restart`, or `ocx restart` for a foreground proxy) to apply the on-disk edits.
 
 ## Model visibility
 

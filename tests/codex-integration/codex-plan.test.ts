@@ -243,6 +243,14 @@ describe("WHAM-wins plan provenance gate (release-audit fix)", () => {
     // Noncanonical raw bytes: pretty-printed with a trailing newline. A re-anchor
     // to the normalized projection would fabricate a divergence for a no-op write.
     writeFileSync(join(TEST_DIR, "config.json"), JSON.stringify(config, null, 2) + "\n");
+    // beforeEach removed TEST_DIR, so seed the generation-1 credential the WHAM
+    // freshness gate requires (matching the committed WHAM fixture setup).
+    saveCodexAccountCredential("pool-wham-noop", {
+      accessToken: chatgptPlanJwt("pro", "acct-pool-wham-noop"),
+      refreshToken: "refresh-pool-wham-noop",
+      expiresAt: Date.now() + 5 * 60_000,
+      chatgptAccountId: "acct-pool-wham-noop",
+    });
     const armed = loadConfig({ captureResident: true });
     armClaudeCodeBaseline(armed);
     expect(readConfigDivergenceStatus().diverged).toBe(false);

@@ -289,6 +289,32 @@ describe("config divergence status", () => {
     expect(status.residentVersion).toBe(status.diskVersion);
   });
 
+  test("an unchanged save with preserved disk-only bytes keeps divergence when the served snapshot omits them", () => {
+    // A later byte-identical save must not re-anchor the resident digest to the
+    // merged file bytes: the served snapshot still omits the disk-only row, so
+    // re-anchoring would report a false negative for an actual divergence.
+    writeFileSync(getConfigPath(), JSON.stringify(config(), null, 2) + "\n");
+    const loaded = loadConfig({ captureResident: true });
+    armClaudeCodeBaseline(loaded);
+    // An external editor adds a provider the live config never saw.
+    const path = getConfigPath();
+    const current = JSON.parse(readFileSync(path, "utf8")) as { providers: Record<string, unknown> };
+    current.providers.diskOnly = { adapter: "openai-chat", baseUrl: "https://disk.example/v1", apiKey: "sk-disk" };
+    writeFileSync(path, JSON.stringify(current, null, 2) + "\n");
+    reconcileUserCostOverlaysFromDisk(loaded);
+    // First save establishes the persisted bytes (the disk-only row survives at
+    // the serialization boundary while the served snapshot omits it).
+    loaded.streamMode = "eager-relay";
+    saveConfigPreservingClaudeCode(loaded);
+    expect(readConfigDivergenceStatus().diverged).toBe(true);
+    // Second, byte-identical save reaches the unchanged branch with
+    // servedBytes !== bytes; the guard must leave divergence visible.
+    saveConfigPreservingClaudeCode(loaded);
+    const status = readConfigDivergenceStatus();
+    expect(status.diverged).toBe(true);
+    expect(status.residentVersion).not.toBe(status.diskVersion);
+  });
+
   test("resident digest comes from the loaded bytes, not a post-load re-read", async () => {
     const first = JSON.stringify(config(), null, 2) + "\n";
     writeFileSync(getConfigPath(), first);
