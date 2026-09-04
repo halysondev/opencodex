@@ -667,6 +667,17 @@ function nativeContextOverlayError(raw: Record<string, unknown>): string | null 
  * string, or null when the provider may be persisted. Caller-controlled names/fields are
  * redacted and JSON-escaped so secrets never reach the response.
  */
+function requestTransformsConfigError(value: unknown, field = "requestTransforms"): string | null {
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) return `${field} must be an array`;
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      return `${field}.${index} must be a nonblank string`;
+    }
+  }
+  return null;
+}
+
 export function providerManagementConfigError(
   name: unknown,
   provider: unknown,
@@ -744,6 +755,7 @@ export function providerManagementConfigError(
     // validation and then rejected by the seed comparison, so canonical OpenAI could never
     // set OR clear it — the value was admitted and then refused in the same request.
     delete canonicalCandidate.annotateEmptyToolOutputs;
+    delete canonicalCandidate.requestTransforms;
     // Canonical ChatGPT keeps WebSocket as the default, but an operator may
     // select the existing HTTP/SSE path without changing its auth or endpoint.
     if (raw.upstreamWebsocket !== undefined) {
@@ -862,7 +874,7 @@ export function providerManagementConfigError(
   if (jsonSchemaOptOutError) return `provider ${name} ${jsonSchemaOptOutError}`;
   const retainModelsError = nonBlankStringArrayConfigError(raw.retainModels, "retainModels");
   if (retainModelsError) return `provider ${name} ${retainModelsError}`;
-  const requestTransformsError = nonBlankStringArrayConfigError(raw.requestTransforms, "requestTransforms");
+  const requestTransformsError = requestTransformsConfigError(raw.requestTransforms);
   if (requestTransformsError) return `provider ${name} ${requestTransformsError}`;
   const toolReasoningOptOutError = nonBlankStringArrayConfigError(
     raw.omitReasoningEffortWithToolsModels,

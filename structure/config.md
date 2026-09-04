@@ -595,3 +595,11 @@ to the live `/api/settings` mutation surface.
 Stored Direct substitution follows the [credential identity contract](providers/openai-accounts.md#sidecars-management-and-ui): both synchronous and asynchronous materializers discard the caller account header before applying the stored credential; ordinary native Direct passthrough is unchanged.
 
 Proxy activation and credential-safe CLI output follow [Proxy Configuration](config-proxy.md).
+
+## Request transforms
+
+`requestTransforms` can be configured globally in `config.json` or scoped under individual providers in `providers.<name>.requestTransforms`. Handlers are loaded dynamically and executed sequentially on `OcxParsedRequest` in `src/server/responses/request-prepare.ts` before provider adapters construct wire requests.
+
+- Specifiers are resolved relative to `OPENCODEX_HOME` (`~/.opencodex`), current working directory, or treated as module specifiers.
+- Handlers receive `{ providerName, modelId, providerConfig, config, acceptsImageInput }` to facilitate optimizations like `pxpipe` (text-to-image for vision models) and `headroom` (context compression).
+- Execution is guarded per turn by `_requestTransformsApplied` so retries and replays do not execute transforms twice.
