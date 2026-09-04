@@ -65,6 +65,7 @@ import {
   NoEligiblePolicyCandidateError,
 } from "../../router";
 import { evidenceFromBody } from "../../routing/request-evidence";
+import { applyRequestTransforms } from "../../transforms";
 import { OPENAI_CODEX_PROVIDER_ID, isCanonicalOpenAiForwardProvider } from "../../providers/openai-tiers";
 import { isThreadSpawnRequest } from "../effort-policy";
 import {
@@ -345,7 +346,6 @@ export async function prepareResponsesRequest(
     if (options.comboReplaySnapshot?.recoveredPlaintext) {
       markBodyNonPersistable(parsed._rawBody);
     }
-    toolBridgeMaps = buildToolBridgeMaps(parsed, translatorBudget);
     if (previousResponseInputExpanded) parsed._previousResponseInputExpanded = true;
     const providerContinuationCandidate = options.comboReplaySnapshot
       ? options.comboReplaySnapshot.providerContinuation
@@ -1147,6 +1147,16 @@ export async function prepareResponsesRequest(
     && isCodexReserveOptInMissing(options.codexAuthPolicy ?? config, route.modelId, options.admission)) {
     return formatErrorResponse(400, "invalid_request_error", CODEX_RESERVE_OPT_IN_REQUIRED_MESSAGE);
   }
+  parsed = await applyRequestTransforms({
+    parsed,
+    providerName: route.providerName,
+    modelId: route.modelId,
+    providerConfig: route.provider,
+    config,
+  });
+  // Replacement transforms change object identity; termination tracking is WeakMap-backed.
+  bindTurnTerminationScope(parsed, resolvedConversationId);
+  toolBridgeMaps = buildToolBridgeMaps(parsed, translatorBudget);
   // Refuse an input that cannot plausibly fit the model context window before spending auth,
   // circuit budget, or upstream bandwidth on a turn the provider will reject anyway (#1412).
   //

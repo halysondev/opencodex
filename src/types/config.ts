@@ -453,6 +453,11 @@ export interface OcxConfig {
   /** Suppress allowlisted client-facing Codex transport hints; provider enforcement is unchanged. */
   dropCodexSafetyBuffering?: boolean;
   /**
+   * Optional ordered list of pre-adapter request transform handler paths or package specifiers.
+   * Handlers operate on OcxParsedRequest before the wire request is built by provider adapters.
+   */
+  requestTransforms?: string[];
+  /**
    * Whether a login may open a browser on the machine running the proxy.
    *
    * Absent and `true` both mean "open", which is what every existing install
