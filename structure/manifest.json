@@ -212,7 +212,8 @@
       "title": "Streaming Health And WebSocket",
       "scope": "Heartbeat and stall deadlines, plus the opt-in WebSocket transport.",
       "documents": [
-        "src/server/"
+        "src/server/",
+        "src/guardrails/"
       ]
     },
     {

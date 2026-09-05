@@ -537,3 +537,18 @@ independent API credentials, unavailable-mode diagnostics and safe probe outcome
 Dashboard Fast-row persistence and client refresh follow the [Fast selector rows setting contract](../gui-and-management-api.md#fast-selector-rows-setting).
 
 WebSocket [compaction routing selection](responses-failover.md#compaction-routing-overrides) uses per-frame metadata; handshake metadata cannot supply a later frame's trigger.
+
+## Guardrails terminal-gated stream restoration
+
+Guardrails may restore an issued placeholder only in eligible assistant prose. For HTTP/SSE and the
+client-facing Responses WebSocket bridge, the first block that changes from masked to restored starts
+a bounded terminal gate. The gate retains the original masked blocks alongside their rewritten
+forms and preserves event order. It releases rewritten blocks only after `response.completed`, Chat
+`[DONE]`, or Anthropic `message_stop`. A failed or incomplete terminal, malformed data, premature
+EOF, demask-capacity failure, or the combined 2 MiB / 4096-block staging limit releases the original
+masked blocks and disables further restoration for that stream. Blocks emitted before restoration
+remain live, so Guardrails does not turn ordinary streams into full-response buffering.
+
+JSON and streaming failure classification share `src/guardrails/response-envelope.ts`; transport
+code must not introduce a separate interpretation of failed, incomplete, cancelled, or errored
+provider envelopes.
