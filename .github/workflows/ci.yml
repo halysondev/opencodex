@@ -43,6 +43,7 @@ on:
       - "app/**"
       - "desktop/**"
       - "gui/**"
+      - "docs-site/**"
       - "assets/**"
       - ".github/scripts/**"
       - ".github/workflows/**"
@@ -238,6 +239,7 @@ jobs:
               - 'app/**'
               - 'desktop/**'
               - 'gui/**'
+              - 'docs-site/**'
               - 'assets/**'
               - '.github/scripts/**'
               - '.github/workflows/**'
