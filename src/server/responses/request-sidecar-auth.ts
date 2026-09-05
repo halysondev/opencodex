@@ -38,6 +38,7 @@ import {
   decideAndRecordGuardrailsLateFailure,
   type GuardrailsLateFailureDecision,
 } from "../../guardrails/late-failure";
+import { recordGuardrailsTurnDelta } from "../../guardrails/telemetry";
 import { formatErrorResponse } from "../../bridge";
 import type { OcxParsedRequest } from "../../types";
 
@@ -140,15 +141,20 @@ export async function prepareResponsesSidecarAuth(
   const recordSidecarOutcome = openAiSidecar?.recordOutcome;
   if (visionPlan) {
     let stagedVisionTurn = options.guardrailsTurn;
+    const visionFindingCountBefore = stagedVisionTurn?.findings.length ?? 0;
     let visionPassthroughParsed: OcxParsedRequest | undefined;
     let visionGuardrailsDecision: GuardrailsLateFailureDecision | undefined;
     let visionFailedOpen = false;
     let preparingVisionRollback = false;
-    let visionGuardrailsStartedAt = 0;
+    const visionGuardrailsStartedAt = performance.now();
+    const lateGuardrailsTelemetrySurface = requestState.inboundWire === "chat"
+      ? "chat"
+      : requestState.inboundWire === "anthropic"
+        ? "messages"
+        : "responses";
     try {
       if (stagedVisionTurn?.snapshot.failurePolicy === "passthrough") {
         preparingVisionRollback = true;
-        visionGuardrailsStartedAt = performance.now();
         visionPassthroughParsed = restoreGuardrailsResponsesParsedRequest(
           parsed,
           stagedVisionTurn,
@@ -198,6 +204,12 @@ export async function prepareResponsesSidecarAuth(
         markBodyNonPersistable(parsed._rawBody);
       } else if (stagedVisionTurn) {
         options.guardrailsTurn = stagedVisionTurn;
+        recordGuardrailsTurnDelta(
+          lateGuardrailsTelemetrySurface,
+          stagedVisionTurn,
+          visionFindingCountBefore,
+          performance.now() - visionGuardrailsStartedAt,
+        );
       }
     } catch (error) {
       if (preparingVisionRollback && stagedVisionTurn) {

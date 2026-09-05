@@ -15,6 +15,12 @@ import { handleResponses, handleResponsesCompact } from "../../src/server/respon
 import { OPAQUE_COMPACTION_NOTE, SUMMARY_PREFIX } from "../../src/responses/compaction";
 import { externalTaskInputContent } from "../../src/responses/task-input";
 import { looksLikeBackendCiphertext } from "../../src/server/responses/encrypted-payload";
+import {
+  clearGuardrailsCompactContinuationsForTests,
+  retainGuardrailsCompactContinuation,
+} from "../../src/guardrails/compact-continuations";
+import { createGuardrailsContinuationScope } from "../../src/guardrails/continuations";
+import { sessionLaneIdFromRequest } from "../../src/server/request-log-conversation";
 import * as adapterResolveModule from "../../src/server/adapter-resolve";
 import * as visionModule from "../../src/vision";
 import { saveCodexAccountCredential } from "../../src/codex/account-store";
@@ -58,6 +64,7 @@ const dropSpendHome = (): void => { releaseSpendHome?.(); releaseSpendHome = und
 afterEach(() => {
   dropSpendHome();
   globalThis.fetch = originalFetch;
+  clearGuardrailsCompactContinuationsForTests();
 });
 
 describe("supportsNativeResponsesCompactEndpoint (#422)", () => {
@@ -1465,18 +1472,26 @@ describe("compact alternate-account attempt (#913)", () => {
         apiKey: "openai-test-key",
         models: ["gpt-5.6-sol"],
       };
+      config.guardrails = {
+        enabled: true,
+        mode: "enforce",
+        failurePolicy: "block",
+      };
       const headers = { "x-codex-parent-thread-id": "compact-routed-handoff-thread" };
       // The remembered route is keyed by the admitted principal, so every call in
       // this scenario authenticates as the same configured client.
       const admission = { kind: "configured", keyId: "compact-client", source: "dedicated", contextPrincipalId: "compact-client-principal" } as const;
       const calls: Array<{ model: string; nativeCompact: boolean }> = [];
+      const upstreamBodies: string[] = [];
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
         const url = typeof input === "string"
           ? input
           : input instanceof URL
             ? input.toString()
             : input.url;
-        const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+        const upstreamBody = String(init?.body ?? "{}");
+        upstreamBodies.push(upstreamBody);
+        const body = JSON.parse(upstreamBody) as { model?: string };
         const nativeCompact = url.endsWith("/responses/compact");
         calls.push({ model: body.model ?? "", nativeCompact });
         if (nativeCompact) {
@@ -1511,11 +1526,27 @@ describe("compact alternate-account attempt (#913)", () => {
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.every(call => call.model === "gpt-5.6-sol" && call.nativeCompact)).toBe(true);
       calls.length = 0;
+      upstreamBodies.length = 0;
 
-      const logCtx: RequestLogContext = { model: "", provider: "" };
+      const secret = ["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_");
+      const logCtx: RequestLogContext = {
+        model: "",
+        provider: "",
+        admissionKind: "loopback",
+      };
       const automatic = await handleResponsesCompact(
         compactionRequest(
-          baseCompactionBody({ model: "openai-apikey/gpt-5.6-sol" }),
+          baseCompactionBody({
+            model: "openai-apikey/gpt-5.6-sol",
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: secret }],
+              },
+              { type: "compaction_trigger" },
+            ],
+          }),
           undefined,
           headers,
         ),
@@ -1531,8 +1562,22 @@ describe("compact alternate-account attempt (#913)", () => {
       expect(calls.slice(0, -1).every(call => (
         call.model === "gpt-5.6-sol" && call.nativeCompact
       ))).toBe(true);
+      expect(upstreamBodies.length).toBeGreaterThan(1);
+      expect(upstreamBodies.every(body => body.includes("<STRIPE_ACCESS_TOKEN_1>"))).toBe(true);
+      expect(upstreamBodies.every(body => !body.includes(secret))).toBe(true);
+
+      const retained = retainGuardrailsCompactContinuation(
+        output.output,
+        createGuardrailsContinuationScope(
+          "loopback",
+          undefined,
+          sessionLaneIdFromRequest(new Headers(headers)),
+        ),
+      );
+      expect(retained?.state.replacements[0]?.original).toBe(secret);
+      retained?.release();
     });
-  });
+  }, 15_000);
 
   test("with no eligible alternate the first rejection is returned with its backoff headers", async () => {
     await withPoolEnv("ocx-compact-alt-none-", async config => {

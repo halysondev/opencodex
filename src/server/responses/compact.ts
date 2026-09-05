@@ -302,6 +302,12 @@ function compactHandoffRoute(
 
 export interface HandleResponsesCompactOptions {
   compactionRoutingOverride?: CompactionRoutingOverride | null;
+  /** Internal recursive handoff; preserves one immutable Guardrails turn across model fallback. */
+  guardrailsFallback?: {
+    expiresAt?: number;
+    lineageId: string;
+    turn: GuardrailsTurn;
+  };
   nativeMainRefreshDependencies?: NativeMainRefreshDependencies;
   /** Release the listener's idle guard only after the complete request body is accepted. */
   onRequestBodyRead?: () => void;
@@ -692,12 +698,18 @@ export async function handleResponsesCompact(
   }
   let guardrailsAdmission;
   try {
-    guardrailsAdmission = await admitGuardrailsRuntime(
-      config,
-      "compact",
-      route.providerName,
-      capturedGuardrailsPolicy,
-    );
+    guardrailsAdmission = options.guardrailsFallback
+      ? {
+          lease: undefined,
+          passthroughFailure: false,
+          snapshot: options.guardrailsFallback.turn.snapshot,
+        }
+      : await admitGuardrailsRuntime(
+          config,
+          "compact",
+          route.providerName,
+          capturedGuardrailsPolicy,
+        );
   } catch (error) {
     recordGuardrailsEvent({
       surface: "compact",
@@ -728,8 +740,12 @@ export async function handleResponsesCompact(
     logCtx.apiKeyId,
     sessionLaneIdFromRequest(req.headers),
   );
-  compactContinuationLease = retainGuardrailsCompactContinuation(raw.input, compactScope);
-  const guardrailsLineageId = compactContinuationLease?.lineageId ?? randomUUID();
+  compactContinuationLease = options.guardrailsFallback
+    ? undefined
+    : retainGuardrailsCompactContinuation(raw.input, compactScope);
+  const guardrailsLineageId = options.guardrailsFallback?.lineageId
+    ?? compactContinuationLease?.lineageId
+    ?? randomUUID();
   if (compactContinuationLease && (!guardrailsSnapshot || guardrailsSnapshot.mode !== "enforce")) {
     return formatErrorResponse(
       409,
@@ -737,11 +753,11 @@ export async function handleResponsesCompact(
       "This compact state was protected by Guardrails enforce mode. Start a new session before using detect or disabled mode.",
     );
   }
-  let guardrailsTurn: GuardrailsTurn | undefined;
+  let guardrailsTurn: GuardrailsTurn | undefined = options.guardrailsFallback?.turn;
   const rememberProtectedCompactOutput = (items: unknown[]): void => {
     if (guardrailsTurn?.mode !== "enforce") return;
     const retained = rememberGuardrailsCompactContinuation({
-      expiresAt: compactContinuationLease?.expiresAt,
+      expiresAt: options.guardrailsFallback?.expiresAt ?? compactContinuationLease?.expiresAt,
       items,
       lineageId: guardrailsLineageId,
       policyRevision: guardrailsTurn.snapshot.policyRevision,
@@ -752,7 +768,7 @@ export async function handleResponsesCompact(
       console.warn(`[opencodex] Guardrails compact mapping was not retained (${retained.status})`);
     }
   };
-  if (!guardrailsBypassed && guardrailsSnapshot) {
+  if (!guardrailsBypassed && guardrailsSnapshot && !guardrailsTurn) {
     const guardrailsStartedAt = performance.now();
     try {
     const prepared = await prepareGuardrailsTurn(
@@ -1528,7 +1544,18 @@ export async function handleResponsesCompact(
             admission,
             // The handoff child is the same logical compact on a second model, so it inherits
             // the holder. Forwarding `options` alone was not enough: the child minted its own.
-            { ...options, sendBudget },
+            guardrailsTurn?.mode === "enforce"
+              ? {
+                  ...options,
+                  sendBudget,
+                  guardrailsFallback: {
+                    expiresAt: options.guardrailsFallback?.expiresAt
+                      ?? compactContinuationLease?.expiresAt,
+                    lineageId: guardrailsLineageId,
+                    turn: guardrailsTurn,
+                  },
+                }
+              : { ...options, sendBudget },
           );
           if (fallback.ok || fallback.status === 499) return fallback;
           await fallback.body?.cancel().catch(() => undefined);

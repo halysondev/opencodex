@@ -72,6 +72,7 @@ import { retainGuardrailsCompactContinuation } from "../../guardrails/compact-co
 import {
   recordGuardrailsEvent,
   recordGuardrailsTurn,
+  recordGuardrailsTurnDelta,
 } from "../../guardrails/telemetry";
 import { decideAndRecordGuardrailsLateFailure } from "../../guardrails/late-failure";
 import { formatErrorResponse } from "../../bridge";
@@ -211,6 +212,11 @@ export async function prepareResponsesRequest(
   // The Chat and Anthropic surfaces replay through here with a Responses-shaped body,
   // so an omitted value means a genuine Responses inbound.
   const inboundWire = options.inboundWire ?? "responses";
+  const lateGuardrailsTelemetrySurface = inboundWire === "chat"
+    ? "chat"
+    : inboundWire === "anthropic"
+      ? "messages"
+      : "responses";
   const translatorBudget = options.translatorBudget;
   const agentTaskRecovery = agentTaskRecoveryConfig(config);
   let body: unknown;
@@ -529,13 +535,17 @@ export async function prepareResponsesRequest(
       body = prepared.body;
       options.guardrailsTurn = prepared.turn;
       if (prepared.turn) guardrailsPassthroughBody = preGuardrailsBody;
-      if (prepared.turn) {
-        recordGuardrailsTurn("responses", prepared.turn, performance.now() - guardrailsStartedAt);
-      }
       if (options.guardrailsTurn) {
         const protectedCompaction = maskLocalCompactionArtifacts(body, options.guardrailsTurn);
         body = protectedCompaction.body;
         options.guardrailsTurn = protectedCompaction.turn;
+      }
+      if (options.guardrailsTurn) {
+        recordGuardrailsTurn(
+          lateGuardrailsTelemetrySurface,
+          options.guardrailsTurn,
+          performance.now() - guardrailsStartedAt,
+        );
       }
     } catch (error) {
       if (guardrailsSnapshot?.failurePolicy !== "passthrough") {
@@ -1158,10 +1168,17 @@ export async function prepareResponsesRequest(
             const turn = options.guardrailsTurn;
             const passthroughBody = structuredClone(body);
             const guardrailsStartedAt = performance.now();
+            const findingCountBeforeRecovery = turn.findings.length;
             try {
               const rescanned = rescanGuardrailsResponsesBody(body, turn);
               body = rescanned.body;
               options.guardrailsTurn = rescanned.turn;
+              recordGuardrailsTurnDelta(
+                lateGuardrailsTelemetrySurface,
+                rescanned.turn,
+                findingCountBeforeRecovery,
+                performance.now() - guardrailsStartedAt,
+              );
               if (rescanned.turn.mode === "enforce") {
                 const protectedParsed = parseRequest(body);
                 for (const key of kept) {

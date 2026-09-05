@@ -46,6 +46,7 @@ import {
   restoreGuardrailsResponsesBody,
 } from "../../guardrails/turn";
 import { decideAndRecordGuardrailsLateFailure } from "../../guardrails/late-failure";
+import { recordGuardrailsTurnDelta } from "../../guardrails/telemetry";
 import { trackStreamLifetime } from "../lifecycle";
 
 /** One responsibility of the Responses request pipeline; state owners are explicit. */
@@ -141,6 +142,11 @@ export async function executeResponsesSidecars(
       );
     }
   }
+  const lateGuardrailsTelemetrySurface = inboundWire === "chat"
+    ? "chat"
+    : inboundWire === "anthropic"
+      ? "messages"
+      : "responses";
   const prepareGuardrailsLoopMessages = (
     surface: "Media" | "Web-search",
     messages: OcxMessage[],
@@ -151,6 +157,7 @@ export async function executeResponsesSidecars(
     const nextMessages = structuredClone(messages.slice(addedFromIndex));
     const passthroughMessages = structuredClone(nextMessages);
     let nextTurn = turn;
+    const findingCountBeforeLoop = turn.findings.length;
     const guardrailsStartedAt = performance.now();
     try {
       for (const message of nextMessages) {
@@ -199,6 +206,12 @@ export async function executeResponsesSidecars(
     }
     messages.splice(addedFromIndex, messages.length - addedFromIndex, ...nextMessages);
     options.guardrailsTurn = nextTurn;
+    recordGuardrailsTurnDelta(
+      lateGuardrailsTelemetrySurface,
+      nextTurn,
+      findingCountBeforeLoop,
+      performance.now() - guardrailsStartedAt,
+    );
   };
 
   // Image / web-search sidecars: plan once, then dispatch with runTurn-aware priority.
