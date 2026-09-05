@@ -6,7 +6,10 @@ import {
   createGuardrailsContinuationScope,
   retainGuardrailsContinuation,
 } from "../../src/guardrails/continuations";
-import { expandPreviousResponseInput } from "../../src/responses/state";
+import {
+  clearResponseStateForTests,
+  expandPreviousResponseInput,
+} from "../../src/responses/state";
 import { warnAgentTaskRecoveryStartup } from "../../src/server";
 import { handleResponses } from "../../src/server/responses/core";
 import {
@@ -51,12 +54,14 @@ describe("agent task recovery (opt-in, default off)", () => {
   beforeEach(() => {
     resetAgentTaskRecoveryState();
     clearGuardrailsContinuationsForTests();
+    clearResponseStateForTests();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     resetAgentTaskRecoveryState();
     clearGuardrailsContinuationsForTests();
+    clearResponseStateForTests();
   });
 
   for (const messageType of ["NEW_TASK", "MESSAGE", "FOLLOWUP_TASK"] as const) {
