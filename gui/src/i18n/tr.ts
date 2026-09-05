@@ -3245,6 +3245,7 @@ export const tr: Record<TKey, string> = {
   "guardrails.dataTypes": "Etkin veri türleri",
   "guardrails.dataType": "Veri türü",
   "guardrails.dataType.credentials": "Kimlik bilgileri",
+  "guardrails.groupCredentialUrls": "Kimlik bilgisi içeren URL'ler",
   "guardrails.dataType.apiKeys": "API anahtarları",
   "guardrails.dataType.accessTokens": "Erişim belirteçleri",
   "guardrails.dataType.ipAddresses": "IP adresleri",
