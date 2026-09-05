@@ -231,7 +231,10 @@ export function loadConfig(): OcxConfig {
     sanitizeCapabilityDeclarationsForLoad(parsed);
     const result = configSchema.safeParse(parsed);
     if (result.success) {
-      const config = normalizeApiKeyIds(result.data as OcxConfig);
+      const config = withFailSafeDegradedGuardrails(
+        normalizeApiKeyIds(result.data as OcxConfig),
+        parsed,
+      );
       warnInheritedFastWireConflicts(configPath, config);
       warnDegradedTopLevelOptIns(parsed, config);
       warnDegradedHostname(parsed, config);
@@ -268,7 +271,10 @@ export function loadConfig(): OcxConfig {
     const retryResult = configSchema.safeParse(merged);
     if (retryResult.success) {
       warnConfigRepaired(configPath, result.error);
-      const config = normalizeApiKeyIds(retryResult.data as OcxConfig);
+      const config = withFailSafeDegradedGuardrails(
+        normalizeApiKeyIds(retryResult.data as OcxConfig),
+        parsed,
+      );
       warnInheritedFastWireConflicts(configPath, config);
       warnDegradedHostname(parsed, config);
       warnDegradedListeners(parsed, config);
@@ -298,7 +304,10 @@ export function loadConfig(): OcxConfig {
     if (salvaged) {
       {
         warnDroppedConfigSections(configPath, salvaged.dropped, salvaged.issues);
-        const config = normalizeApiKeyIds(salvaged.parsed);
+        const config = withFailSafeDegradedGuardrails(
+          normalizeApiKeyIds(salvaged.parsed),
+          parsed,
+        );
         warnInheritedFastWireConflicts(configPath, config);
         warnDegradedHostname(parsed, config);
         warnDegradedListeners(parsed, config);
@@ -415,9 +424,13 @@ function validFileConfigDiagnostics(config: OcxConfig, rawParsed: unknown): Conf
   // Unsafe hand-edited optional values are disabled in memory instead of rejecting
   // the entire config, which would hide unrelated providers/accounts. The next
   // ordinary save persists the normalized absence.
-  const syncDisabledReason = nativeSubagentSyncDisabledReason(config, rawParsed);
+  const failSafeConfig = withFailSafeDegradedGuardrails(config, rawParsed);
+  const syncDisabledReason = nativeSubagentSyncDisabledReason(failSafeConfig, rawParsed);
   const rawEffort = rawClaudeSubagentEffort(rawParsed);
-  const normalized = normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, rawParsed), rawParsed);
+  const normalized = normalizeClaudeSubagentEffort(
+    normalizeNativeSubagentSync(failSafeConfig, rawParsed),
+    rawParsed,
+  );
   const warnings = configPlaceholderWarnings(normalized);
   warnings.push(...inheritedFastWireConflictProviderNames(normalized).map(inheritedFastWireConflictWarning));
   warnings.push(...degradedCodexAccountPriorityWarnings(rawParsed, normalized));
@@ -443,7 +456,7 @@ function validFileConfigDiagnostics(config: OcxConfig, rawParsed: unknown): Conf
   if (clientWarning) warnings.push(clientWarning);
   const notifyWarning = malformedQuotaResetNotifyWarning(rawParsed);
   if (notifyWarning) warnings.push(notifyWarning);
-  const guardrailsWarning = malformedGuardrailsConfigWarning(rawParsed);
+  const guardrailsWarning = guardrailsLoadWarning(rawParsed);
   if (guardrailsWarning) warnings.push(guardrailsWarning);
   if (syncDisabledReason) {
     warnings.push(`syncCodexSubagentDefaults ignored: ${syncDisabledReason}`);
@@ -594,7 +607,7 @@ function quotaResetNotifyError(value: unknown): string | null {
 }
 
 function warnDegradedGuardrailsConfig(rawParsed: unknown): void {
-  const warning = malformedGuardrailsConfigWarning(rawParsed);
+  const warning = guardrailsLoadWarning(rawParsed);
   if (warning) console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
 }
 

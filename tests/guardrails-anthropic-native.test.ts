@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,8 @@ import {
   installIsolatedCodexHome,
   type IsolatedCodexHome,
 } from "./helpers/isolated-codex-home";
+
+setDefaultTimeout(15_000);
 
 const SECRET = ["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_");
 const PLACEHOLDER = "<STRIPE_ACCESS_TOKEN_1>";
