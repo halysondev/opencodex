@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { AdapterEvent, OcxProviderConfig } from "../types";
 import type { ProviderAdapter } from "./base";
 import { isTranslatorBudgetExceededError } from "../lib/translator-budget";
@@ -84,6 +83,8 @@ export interface CursorAdapterDeps {
   kv?: CursorKvStore;
   /** Test seam: observe/replace context-usage rekeying on conversation-id rotation. */
   rekeyContextUsage?: (fromConversationId: string, toConversationId: string) => void;
+  /** Optional internal pool seam. Owner is supplied by trusted route parsing, never request headers. */
+  selectPoolToken?: (owner: string, thread: string) => string | undefined;
 }
 
 function safeCursorTransportError(err: unknown, sizeContext?: CursorSizeContext): string {
@@ -196,6 +197,9 @@ export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAda
             /* Missing credential is handled by the live transport path below. */
           }
         }
+        // Pool ownership is a trusted parsed-route field. Never derive it from caller headers.
+        const pooledToken = deps.selectPoolToken?.(_parsed._cursorIdentityScope ?? "", _parsed._clientThreadId ?? "");
+        const activeProvider = pooledToken ? { ...provider, apiKey: pooledToken } : provider;
         const inheritedCheckpointRef = _parsed._providerContinuation?.cursor?.checkpointRef;
         const previousConversationId = _parsed._cursorConversationId;
         let request = {
@@ -389,7 +393,7 @@ export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAda
           await runCursorTurnWithRetry(
             makeTransport,
             {
-              provider,
+              provider: activeProvider,
               headers: incoming.headers,
               translatorBudget: incoming.translatorBudget,
               requestDeclaresFullAccess: cursorRequestDeclaresFullAccess(activeRequest),
