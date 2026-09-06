@@ -733,3 +733,4 @@ export function createCursorAdapter(provider: OcxProviderConfig, deps: CursorAda
     },
   };
 }
+import { createHash } from "node:crypto";
