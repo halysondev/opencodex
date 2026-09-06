@@ -5,6 +5,7 @@ import {
   isEagerRelaySseResponse,
   markEagerRelaySseResponse,
 } from "../relay";
+import { isStrictQuotaWaitResponse, markStrictQuotaWaitResponse } from "./strict-quota-response";
 
 // runTurn adapters own an event queue and perform their combo preflight before
 // bridging. A second byte-stream reader would reinterpret that transport's
@@ -71,6 +72,7 @@ export function finalizeOwnedTranslatorBudget(response: Response, budget: Transl
     statusText: response.statusText,
     headers: response.headers,
   });
+  if (isStrictQuotaWaitResponse(response)) markStrictQuotaWaitResponse(finalizedResponse);
   if (isNativePassthroughSseResponse(response)) {
     markNativePassthroughSseResponse(finalizedResponse);
   }

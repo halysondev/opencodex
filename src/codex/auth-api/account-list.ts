@@ -410,6 +410,25 @@ export async function refreshCodexQuotaForActivation(config: OcxConfig, accountI
   }
 }
 
+/** Explicitly read-only usage refresh for request-owned strict-quota recovery. */
+export async function refreshStrictCodexPoolQuotaSnapshots(
+  config: OcxConfig, accountIds: readonly string[],
+  policy: Pick<OcxConfig, "codexAccountStrictQuota"> = config,
+): Promise<void> {
+  if (policy.codexAccountStrictQuota !== true) return;
+  await mapWithConcurrency([...accountIds], POOL_QUOTA_REFRESH_CONCURRENCY, async id => {
+    if (isCodexAccountPaused(config, id)) return;
+    if (id === MAIN_CODEX_ACCOUNT_ID) {
+      // A background/request check cannot clear a reauth quarantine or redeem credits.
+      await fetchMainAccountInfoAttempt(true, 1, undefined, false, false);
+      return;
+    }
+    const account = configuredPoolAccount(config, id);
+    if (!account || isAccountNeedsReauth(id)) return;
+    await fetchPoolAccountQuota(id, true, account.plan);
+  });
+}
+
 export async function listCodexAuthAccounts(
   config: OcxConfig,
   forceRefresh = false,

@@ -1,4 +1,7 @@
 import { createPoolRetryHarness, POOL_RETRY_MODEL } from "../helpers/codex-pool-retry";
+import { handleResponsesWithPolicyFallback } from "../../src/server/responses/policy-fallback";
+import { clearResponseStateForTests, rememberResponseState } from "../../src/responses/state";
+import { handleResponses as handleResponsesCore } from "../../src/server/responses/core";
 import { waitForNativeMainStartupGate } from "../../src/codex/native-profile-startup";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -2983,6 +2986,129 @@ describe("server local API auth", () => {
       ws.close();
       await stopPoolRetryHarness(harness);
     }
+  }, { timeout: SERVER_BUDGET_MS });
+
+  test.each([false, true])("strict quota traversal=%s respects the account retry budget", async strictQuota => {
+    const harness = await startPoolRetryHarness(accountId => accountId === "acct-pool-c"
+      ? Response.json({ id: "third-account-success", status: "completed", output: [] })
+      : Response.json({ error: { message: "quota exceeded" } }, { status: 429, headers: { "retry-after": "60" } }),
+    { thirdAccount: true, strictQuota });
+    try {
+      const response = await harness.request();
+      expect(response.status).toBe(strictQuota ? 200 : 429);
+      await response.text();
+      expect(harness.dispatches).toEqual(strictQuota
+        ? ["acct-pool-a", "acct-pool-b", "acct-pool-c"] : ["acct-pool-a", "acct-pool-b"]);
+      if (strictQuota) {
+        const requestId = response.headers.get("x-opencodex-request-id");
+        const logs = getRequestLogEntries().filter(entry => entry.requestId === requestId);
+        expect(logs).toHaveLength(1);
+        expect(logs[0]?.attempts?.map(attempt => attempt.status)).toEqual([429, 429, 200]);
+        expect(logs[0]?.attempts?.map(attempt => attempt.sendCount)).toEqual([1, 1, 1]);
+      }
+    } finally { await stopPoolRetryHarness(harness); }
+  }, { timeout: SERVER_BUDGET_MS });
+
+  test("strict quota traversal stops after every configured credential explicitly refuses", async () => {
+    const harness = await startPoolRetryHarness(() => Response.json({ error: { message: "quota exceeded" } },
+      { status: 429, headers: { "retry-after": "60" } }), { thirdAccount: true, strictQuota: true });
+    try {
+      // Exercise one bounded core cycle; the outer server owns waiting for recovery.
+      const response = await handleResponsesCore(new Request("http://localhost/v1/responses", {
+        method: "POST", headers: { "content-type": "application/json", authorization: "Bearer inbound-token" },
+        body: JSON.stringify({ model: POOL_RETRY_MODEL, input: "hello", stream: false }),
+      }), harness.config, { model: "unknown", provider: "unknown" });
+      expect(response.status).toBe(429);
+      expect(response.headers.get("x-opencodex-quota-wait")).toBe("1");
+      expect(await response.text()).toContain("quota exceeded");
+      expect(harness.dispatches).toEqual(["acct-pool-a", "acct-pool-b", "acct-pool-c"]);
+    } finally { await stopPoolRetryHarness(harness); }
+  }, { timeout: SERVER_BUDGET_MS });
+
+  test.each(["owner-task", "foreign-task"])("strict quota wait preserves validated context after cache expiration (%s)", async clientTask => {
+    const bodies: Record<string, unknown>[] = [];
+    let recovered = false;
+    const harness = await startPoolRetryHarness(async (_accountId, req) => {
+      bodies.push(await req.json() as Record<string, unknown>);
+      return recovered
+        ? Response.json({ id: "quota-restored", status: "completed", output: [] })
+        : Response.json({ error: { message: "quota exceeded" } }, { status: 429 });
+    }, { strictQuota: true });
+    try {
+      clearResponseStateForTests();
+      rememberResponseState({ input: [{ role: "user", content: "prior user context" }] },
+        { id: "resp_quota_snapshot", status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "prior answer" }] }] },
+        undefined, { clientThreadId: "owner-task" });
+      const response = await handleResponsesWithPolicyFallback(new Request("http://localhost/v1/responses", {
+        method: "POST", headers: { "content-type": "application/json", authorization: "Bearer inbound-token", "x-codex-parent-thread-id": clientTask },
+        body: JSON.stringify({ model: POOL_RETRY_MODEL, previous_response_id: "resp_quota_snapshot",
+          input: [{ role: "user", content: "new delta" }], stream: false }),
+      }), harness.config, { model: "unknown", provider: "unknown" }, {}, {
+        quotaWait: { waitForChange: async () => {
+          expect(recovered).toBe(false);
+          clearResponseStateForTests();
+          clearCodexUpstreamHealth();
+          updateAccountQuota("pool-a", 0);
+          updateAccountQuota("pool-b", 0);
+          recovered = true;
+        } },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("quota-restored");
+      expect(bodies).toHaveLength(3);
+      const finalInput = JSON.stringify(bodies.at(-1)?.input);
+      expect(finalInput).toContain("new delta");
+      if (clientTask === "owner-task") {
+        expect(finalInput).toContain("prior user context");
+        expect(finalInput).toContain("prior answer");
+      } else {
+        expect(finalInput).not.toContain("prior user context");
+        expect(finalInput).not.toContain("prior answer");
+        expect(bodies.at(-1)?.previous_response_id).toBeUndefined();
+      }
+    } finally { clearResponseStateForTests(); await stopPoolRetryHarness(harness); }
+  }, { timeout: SERVER_BUDGET_MS });
+
+  test("strict quota traversal honors cancellation before a third send", async () => {
+    const controller = new AbortController();
+    const harness = await startPoolRetryHarness(async accountId => {
+      if (accountId === "acct-pool-b") {
+        controller.abort();
+        // Give the server the client cancellation before returning the rejected response.
+        await Bun.sleep(20);
+      }
+      return Response.json({ error: { message: "quota exceeded" } }, { status: 429 });
+    }, { thirdAccount: true, strictQuota: true });
+    try {
+      await expect(harness.request({ signal: controller.signal })).rejects.toThrow();
+      await Bun.sleep(30);
+      expect(harness.dispatches).toEqual(["acct-pool-a", "acct-pool-b"]);
+    } finally { await stopPoolRetryHarness(harness); }
+  }, { timeout: SERVER_BUDGET_MS });
+
+  test("strict quota traversal stops at a non-quota alternate failure", async () => {
+    const harness = await startPoolRetryHarness(accountId => Response.json({ error: { message: "unavailable" } },
+      { status: accountId === "acct-pool-a" ? 402 : 503, headers: { "x-opencodex-quota-wait": "1" } }), { thirdAccount: true, strictQuota: true });
+    try {
+      const response = await harness.request();
+      expect(response.status).toBe(503);
+      expect(response.headers.get("x-opencodex-quota-wait")).toBeNull();
+      await response.text();
+      expect(harness.dispatches).toEqual(["acct-pool-a", "acct-pool-b"]);
+    } finally { await stopPoolRetryHarness(harness); }
+  }, { timeout: SERVER_BUDGET_MS });
+
+  test("strict quota traversal never retries after an alternate starts SSE output", async () => {
+    const harness = await startPoolRetryHarness(accountId => accountId === "acct-pool-a"
+      ? Response.json({ error: { message: "quota exceeded" } }, { status: 429 })
+      : new Response('event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"partial"}\n\nevent: response.failed\ndata: {"type":"response.failed","response":{"status":"failed","error":{"code":"rate_limit_exceeded","message":"quota exceeded"}}}\n\n',
+        { headers: { "content-type": "text/event-stream" } }), { thirdAccount: true, strictQuota: true });
+    try {
+      const response = await harness.request({ stream: true });
+      const body = await response.text();
+      expect(body).toContain("partial");
+      expect(harness.dispatches).toEqual(["acct-pool-a", "acct-pool-b"]);
+    } finally { await stopPoolRetryHarness(harness); }
   }, { timeout: SERVER_BUDGET_MS });
 
   test("#584: pre-stream 429 retries once on another eligible pool account", async () => {

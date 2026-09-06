@@ -1,3 +1,4 @@
+import { notifyCodexQuotaChanges } from "./quota-events";
 export { checkAccountIdCollision, getMainChatgptAccountId } from "./auth-collision";
 export { clearAccountNeedsReauth, isAccountNeedsReauth, markAccountNeedsReauth } from "./account-runtime-state";
 export {
@@ -16,7 +17,7 @@ export type {
   CodexAuthAccountDto,
   CodexAuthAccountsSnapshot,
 } from "./auth-api/account-list";
-export { listCodexAuthAccountsSnapshot, refreshCodexQuotaForActivation, listCodexAuthAccounts } from "./auth-api/account-list";
+export { listCodexAuthAccountsSnapshot, refreshCodexQuotaForActivation, refreshStrictCodexPoolQuotaSnapshots, listCodexAuthAccounts } from "./auth-api/account-list";
 export type { MainAccountInfoSnapshot } from "./auth-api/main-account-probe";
 export { fetchMainAccountInfoSnapshot, fetchMainAccountInfo } from "./auth-api/main-account-probe";
 export { PoolQuotaProbeBusyError, seedCodexAuthAdmissionForTests, fetchPoolAccountQuota } from "./auth-api/pool-quota-probe";

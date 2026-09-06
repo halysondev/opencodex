@@ -152,6 +152,7 @@ export const configSchema = z.object({
   // Default-on policy (#5694): absence and malformed hand edits both mean "on", and only an
   // explicit `false` written by the settings PUT opts out.
   codexMainAccountHardLock: z.boolean().optional().catch(undefined),
+  codexAccountStrictQuota: z.boolean().optional().catch(false),
   // Future versions remain opaque through passthrough-compatible whole-config saves.
   // Only version 1 grants deletion authority in the rebase path.
   configRebaseProvenance: z.unknown().optional(),

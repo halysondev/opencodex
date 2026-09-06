@@ -139,6 +139,11 @@ account exclusion, affinity expiry, or 401/403 and 429 recovery can rebind them.
 selection order when one of them — usually your Codex Desktop login — should only be reached for
 once the others are drained.
 
+For an opt-in hard threshold that also overrides thread affinity, see
+[strict Codex pool quota admission](https://opencodex.me/guides/codex-strict-quota/). It reuses the
+existing selectors, including fill-first, and verifies quota recovery before
+re-enabling an account.
+
 ### Sponsors
 
 Sponsors keep opencodex maintained across every upstream protocol change. Interested?

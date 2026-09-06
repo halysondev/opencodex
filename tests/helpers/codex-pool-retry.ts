@@ -67,6 +67,8 @@ export function createPoolRetryHarness(context: {
     reply: (accountId: string, request: Request) => Response | Promise<Response>,
     options: {
       secondAccount?: boolean;
+      thirdAccount?: boolean;
+      strictQuota?: boolean;
       streamMode?: "legacy-tee" | "eager-relay";
       accountMode?: "direct" | "pool";
       activeAccountId?: string;
@@ -92,6 +94,7 @@ export function createPoolRetryHarness(context: {
     clearRequestLogsForTests();
     clearAccountNeedsReauth("pool-a");
     clearAccountNeedsReauth("pool-b");
+    clearAccountNeedsReauth("pool-c");
     // The registry is process-global and survives a harness teardown. WS-REBIND-01
     // asserts exact per-account socket counts, so a socket leaked by any earlier test
     // in this file shifts its snapshots and fails it in milliseconds — which reads as
@@ -141,6 +144,7 @@ export function createPoolRetryHarness(context: {
           : []),
       ],
       activeCodexAccountId: options.activeAccountId ?? "pool-a",
+      ...(options.strictQuota !== undefined ? { codexAccountStrictQuota: options.strictQuota } : {}),
       ...(options.accountNamespaces ? { codexAccountNamespaces: options.accountNamespaces } : {}),
       ...(options.pausedAccountIds ? { pausedCodexAccountIds: options.pausedAccountIds } : {}),
       ...(options.visionSidecarModel ? { visionSidecar: { model: options.visionSidecarModel } } : {}),
@@ -148,7 +152,17 @@ export function createPoolRetryHarness(context: {
       ...(options.streamMode ? { streamMode: options.streamMode } : {}),
       ...(options.combos ? { combos: options.combos } : {}),
     } as OcxConfig;
+    if (options.thirdAccount) config.codexAccounts!.push({
+      id: "pool-c", email: "pool-c@example.test", isMain: false, chatgptAccountId: "acct-pool-c",
+    });
     saveConfig(config);
+    if (options.thirdAccount) {
+      saveCodexAccountCredential("pool-c", {
+        accessToken: "pool-c-token", refreshToken: "pool-c-refresh",
+        expiresAt: Date.now() + 10 * 60_000, chatgptAccountId: "acct-pool-c",
+      });
+      updateAccountQuota("pool-c", 30);
+    }
     if (!options.omitCredentialAccountIds?.includes("pool-a")) {
       saveCodexAccountCredential("pool-a", {
         accessToken: "pool-a-token",

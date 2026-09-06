@@ -35,6 +35,7 @@ import { consumeComboFailure } from "./core-combo-failure";
 import { readDisplaySafeErrorText } from "./core-errors";
 import { streamingContextOverflowResponse, jsonContextOverflowResponse } from "./context-overflow";
 import { formatPassthroughUpstreamError } from "./passthrough-error";
+import { isStrictQuotaWaitResponse, markStrictQuotaWaitResponse } from "./strict-quota-response";
 import { rewriteUpstreamPolicyRefusal } from "./policy-refusal";
 import {
   resolvePassthroughWebSearchBridgeAuth,
@@ -360,6 +361,9 @@ export async function deliverPassthroughResponse(
   }
 
     const headers = sanitizePassthroughHeaders(upstreamResponse.headers, codexSafetyBufferingOptions);
+    // An upstream-provided header is not authority to replay the request.
+    headers.delete("x-opencodex-quota-wait");
+    if (isStrictQuotaWaitResponse(upstreamResponse)) headers.set("x-opencodex-quota-wait", "1");
     const resolvedModel = headers.get("openai-model")?.trim();
     if (resolvedModel) {
       logCtx.servedModel = resolvedModel;
@@ -453,7 +457,7 @@ export async function deliverPassthroughResponse(
       return new Response(upstreamResponse.body, {
         status: upstreamResponse.status,
         statusText: upstreamResponse.statusText,
-        headers: sanitizePassthroughHeaders(upstreamResponse.headers, codexSafetyBufferingOptions),
+        headers,
       });
     }
     if (!upstreamResponse.ok) {
@@ -486,13 +490,16 @@ export async function deliverPassthroughResponse(
         turnAdmissionLease: options.turnAdmissionLease,
       });
       if (policyRefusal) return policyRefusal;
-      return formatPassthroughUpstreamError(upstreamResponse.status, errorText, {
+      const formattedError = formatPassthroughUpstreamError(upstreamResponse.status, errorText, {
         statusText: upstreamResponse.statusText,
         headers,
         // Provenance, not inference: `errorText` is empty when the bounded read finds nothing
         // display-safe, and an empty body is exactly what the retryable-429 default fires on.
         replayRefusal: isReplayRefusalResponse(upstreamResponse),
       });
+      return isStrictQuotaWaitResponse(upstreamResponse)
+        ? markStrictQuotaWaitResponse(formattedError)
+        : formattedError;
     }
 
     if (options.nativeControl && isNativeControlResponse(upstreamResponse) && upstreamResponse.body) {

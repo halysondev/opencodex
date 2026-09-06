@@ -115,7 +115,9 @@ import {
   strategySelectionOptionsForModelDetour,
   shouldFailover,
   peekAlternateCodexAccount,
+  strictQuotaReplacement,
 } from "./routing/selection";
+import { isCodexStrictQuotaEnabled } from "./strict-quota";
 import { mayRebindAffinityForQuota } from "./routing/cache-affinity";
 import {
   clearAllManualPreferences,
@@ -509,7 +511,7 @@ function pickAffinityPriorityFailback(
   // The selected tier can contain a stale cooler account beside a fresh one.
   // Check every member before the lowest-usage picker sees it.
   const candidates = getEligiblePoolAccounts(config, undefined, now, quotaScope, selectionOptions).filter(id => {
-    if (!hasCodexQuotaHeadroom(config, id, selectionOptions, now)
+    if (!hasCodexQuotaHeadroom(config, id, quotaScope, selectionOptions, now)
       || hasUnrecoveredCodexQuotaRefusal(id, quotaScope)
       || shouldFailover(config, id, now)) return false;
     const quota = getAccountQuota(id);
@@ -559,6 +561,9 @@ function previewReusableAffinityAccount(
       return entry.accountId;
     }
     return null;
+  }
+  if (isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)) {
+    return strictQuotaReplacement(config, entry.accountId, now, quotaScope, selectionOptions) ?? entry.accountId;
   }
   if (accountPoolStrategyForScope(config, quotaScope) === "reset-first") {
     return resetFirstAffinityReplacement(entry, config, now, quotaScope, selectionOptions) ?? entry.accountId;
@@ -612,7 +617,7 @@ function resetFirstAffinityReplacement(
     // to say it. Moving a warm conversation onto an account nobody has a reading for is a
     // guess, not an improvement.
     .filter(id => {
-      if (!hasCodexQuotaHeadroom(config, id, selectionOptions, now)) return false;
+      if (!hasCodexQuotaHeadroom(config, id, quotaScope, selectionOptions, now)) return false;
       return !isUnknownUsage(computeCodexUsageScore(
         getAccountQuota(id),
         getPoolAccountPlanForSelection(config, id, selectionOptions),
@@ -659,7 +664,7 @@ function pickCacheSafeQuotaReplacement(
     quotaScope,
     selectionOptions,
     true,
-  ).filter(id => hasCodexQuotaHeadroom(config, id, selectionOptions, now));
+  ).filter(id => hasCodexQuotaHeadroom(config, id, quotaScope, selectionOptions, now));
   const best = pickLowestUsageAmong(config, candidates, selectionOptions, now);
   if (best === null || best === boundAccountId) return null;
   const bestUsage = computeCodexUsageScore(
@@ -682,6 +687,9 @@ function reevaluateAffinityQuota(
   quotaScope?: CodexQuotaScope,
   selectionOptions?: CodexAccountUsabilityOptions,
 ): string | null {
+  if (isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)) {
+    return strictQuotaReplacement(config, entry.accountId, now, quotaScope, selectionOptions);
+  }
   const strategy = accountPoolStrategyForScope(config, quotaScope);
   if (strategy === "reset-first") {
     const replacement = resetFirstAffinityReplacement(entry, config, now, quotaScope, selectionOptions);
@@ -804,7 +812,8 @@ export function previewCodexAccountForRequest(
     const fallback = pickLowestUsageCodexAccount(config, active, now, quotaScope, selectionOptions);
     if (fallback) active = fallback;
     else if (
-      hasConfiguredPoolAccount(config, active, selectionOptions)
+      !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && hasConfiguredPoolAccount(config, active, selectionOptions)
       && !isCodexAccountPaused(config, active)
       && !isCodexAccountPlanExcluded(config, active)
     ) return active;
@@ -812,15 +821,20 @@ export function previewCodexAccountForRequest(
   }
   active = pickPriorityPreemption(config, active, now, quotaScope, selectionOptions) ?? active;
 
-  const threshold = getEffectiveCodexAutoSwitchThreshold(config, active);
-  if (threshold > 0) {
-    const usage = computeCodexUsageScore(
-      getAccountQuota(active),
-      getPoolAccountPlanForSelection(config, active, selectionOptions),
-      now,
-    );
-    if (!isUnknownUsage(usage) && usage >= threshold) {
-      active = pickLowerUsageAccount(config, active, usage, now, quotaScope, selectionOptions);
+  if (isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)) {
+    active = strictQuotaReplacement(config, active, now, quotaScope, selectionOptions) ?? active;
+  } else {
+    const threshold = (selectionOptions?.strictQuotaPolicy ?? config).autoSwitchThreshold
+      ?? getEffectiveCodexAutoSwitchThreshold(config, active);
+    if (threshold > 0) {
+      const usage = computeCodexUsageScore(
+        getAccountQuota(active),
+        getPoolAccountPlanForSelection(config, active, selectionOptions),
+        now,
+      );
+      if (!isUnknownUsage(usage) && usage >= threshold) {
+        active = pickLowerUsageAccount(config, active, usage, now, quotaScope, selectionOptions);
+      }
     }
   }
   if (shouldFailover(config, active, now)) {
@@ -831,11 +845,13 @@ export function previewCodexAccountForRequest(
   // request will actually use, or subagent fallback scores a model against the wrong one.
   active = preferModelEntitledAccount(config, active, now, quotaScope, selectionOptions);
   if (!isCodexAccountUsable(config, active, selectionOptions)) {
-    return hasConfiguredPoolAccount(config, active, selectionOptions) ? active : null;
+    return !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && hasConfiguredPoolAccount(config, active, selectionOptions) ? active : null;
   }
   if (isCodexAccountPaused(config, active)) return null;
   if (getCodexQuotaHealthSnapshot(active, quotaScope, now)) {
-    return hasConfiguredPoolAccount(config, active, selectionOptions) ? active : null;
+    return !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && hasConfiguredPoolAccount(config, active, selectionOptions) ? active : null;
   }
   return active;
 }
@@ -1135,7 +1151,8 @@ export function resolveCodexAccountForThreadDetailed(
     const selected = pickLowestUsageCodexAccount(config, undefined, now, quotaScope, selectionOptions);
     if (!selected) {
       if (
-        selectionOptions?.nativeMainSelectionOnly === true
+        !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+        && selectionOptions?.nativeMainSelectionOnly === true
         && selectionOptions.modelEligibleAccountIds !== undefined
       ) {
         return { status: "selected", accountId: MAIN_CODEX_ACCOUNT_ID, affinity: affinityAfterRelease(threadId, releaseReason) };
@@ -1168,7 +1185,8 @@ export function resolveCodexAccountForThreadDetailed(
       }
       active = fallback;
     } else if (
-      selectionOptions?.nativeMainSelectionOnly === true
+      !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && selectionOptions?.nativeMainSelectionOnly === true
       && selectionOptions.modelEligibleAccountIds !== undefined
     ) {
       // Entitlement discovery intentionally excludes main while a temporary drain
@@ -1178,7 +1196,8 @@ export function resolveCodexAccountForThreadDetailed(
       // active account or persist/bind this synthetic selection.
       return { status: "selected", accountId: MAIN_CODEX_ACCOUNT_ID, affinity: affinityAfterRelease(threadId, releaseReason) };
     } else if (
-      hasConfiguredPoolAccount(config, active, selectionOptions)
+      !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && hasConfiguredPoolAccount(config, active, selectionOptions)
       && !isCodexAccountPaused(config, active)
       && !isCodexAccountPlanExcluded(config, active)
     ) {
@@ -1228,13 +1247,15 @@ export function resolveCodexAccountForThreadDetailed(
   // is persisted -- and only toward an account eligibility already admitted (#4768).
   active = preferModelEntitledAccount(config, active, now, quotaScope, selectionOptions);
   if (!isCodexAccountUsable(config, active, selectionOptions)) {
-    return hasConfiguredPoolAccount(config, active, selectionOptions)
+    return !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && hasConfiguredPoolAccount(config, active, selectionOptions)
       ? { status: "selected", accountId: active, affinity: affinityAfterRelease(threadId, releaseReason) }
       : { status: "none", affinity: affinityOnNoAccount(threadId, releaseReason) };
   }
   if (isCodexAccountPaused(config, active)) return { status: "none", affinity: affinityOnNoAccount(threadId, releaseReason) };
   if (getCodexQuotaHealthSnapshot(active, quotaScope, now)) {
-    return hasConfiguredPoolAccount(config, active, selectionOptions)
+    return !isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+      && hasConfiguredPoolAccount(config, active, selectionOptions)
       ? { status: "selected", accountId: active, affinity: affinityAfterRelease(threadId, releaseReason) }
       : { status: "none", affinity: affinityOnNoAccount(threadId, releaseReason) };
   }

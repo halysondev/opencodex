@@ -4,6 +4,7 @@ import { estimateCodexQuotaCapacity, insufficientCodexCapacity } from "../quota-
 import type { CodexCapacityResult } from "../quota-capacity";
 import { readUsageSnapshotForManagement } from "../../usage/log";
 import { getAccountQuotaHistory, listAccountQuotas } from "../quota";
+import { notifyCodexQuotaChanges } from "../quota-events";
 import { deleteCodexAccount } from "../account-lifecycle";
 import { isCodexAccountPaused, setCodexAccountPaused } from "../account-pause";
 import { clearCodexAccountPin, isCodexAccountPriorityKey, pinnedCodexAccountId, setCodexAccountPin, setCodexAccountPriority } from "../account-priority";
@@ -267,6 +268,7 @@ export async function handleCodexAuthAPI(
       // lets a surface mark the account the operator actually chose.
       pinnedAccountId: pinnedCodexAccountId(runtimeConfig) ?? null,
       autoSwitchThreshold: runtimeConfig.autoSwitchThreshold ?? 80,
+      codexAccountStrictQuota: runtimeConfig.codexAccountStrictQuota === true,
       upstreamFailoverThreshold: runtimeConfig.upstreamFailoverThreshold ?? 3,
       accountPoolStrategy: normalizeCodexAccountPoolStrategy(runtimeConfig.accountPoolStrategy),
       accountPoolStickyLimit: normalizeAccountPoolStickyLimit(runtimeConfig.accountPoolStickyLimit),
@@ -279,7 +281,10 @@ export async function handleCodexAuthAPI(
     if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
       return jsonResponse({ error: "body must be an object" }, 400);
     }
-    const body = parsedBody as { id?: unknown; threshold?: unknown };
+    const body = parsedBody as { id?: unknown; threshold?: unknown; strictQuota?: unknown };
+    if (body.strictQuota !== undefined && typeof body.strictQuota !== "boolean") {
+      return jsonResponse({ error: "strictQuota must be a boolean" }, 400);
+    }
     const runtimeConfig = getRuntimeConfig(config);
     if (Object.hasOwn(body, "id")) {
       if (!isCodexAccountAutoSwitchThresholdKey(body.id)) {
@@ -315,7 +320,9 @@ export async function handleCodexAuthAPI(
       return jsonResponse({ error: "Threshold must be an integer 0-100" }, 400);
     }
     runtimeConfig.autoSwitchThreshold = body.threshold;
+    if (typeof body.strictQuota === "boolean") runtimeConfig.codexAccountStrictQuota = body.strictQuota;
     saveRuntimeConfig(config, runtimeConfig);
+    notifyCodexQuotaChanges();
     return jsonResponse({ ok: true });
   }
 

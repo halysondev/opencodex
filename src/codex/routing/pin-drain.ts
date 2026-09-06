@@ -4,6 +4,7 @@ import { isAccountNeedsReauth } from "../account-runtime-state";
 import type { CodexAccountUsabilityOptions } from "../account-usability";
 import { isCodexAccountUsable } from "../account-usability";
 import { MAIN_CODEX_ACCOUNT_ID } from "../main-account";
+import { getCodexStrictQuotaStatus } from "../strict-quota";
 import { hasCodexQuotaHeadroom } from "./selection";
 
 /** Why routing would drop a manual pin, or undefined when the pin survives. */
@@ -39,7 +40,7 @@ export function codexAccountPinDrainReason(
   accountId: string,
   selectionOptions?: Pick<
     CodexAccountUsabilityOptions,
-    "nativeMainSelectionOnly" | "isMainAccountTokenLive"
+    "nativeMainSelectionOnly" | "isMainAccountTokenLive" | "strictQuotaPolicy"
   >,
   now: number = Date.now(),
 ): CodexPinDrainReason | undefined {
@@ -52,6 +53,11 @@ export function codexAccountPinDrainReason(
     return undefined;
   }
   if (!isCodexAccountUsable(config, accountId, selectionOptions)) return "unusable";
-  if (!hasCodexQuotaHeadroom(config, accountId, selectionOptions, now)) return "quota_threshold";
+  // Strict admission can prove a drain the legacy scorer calls unknown (a short-only
+  // reading below 100, for example). Retire that pin now so recovery cannot revive it.
+  if (getCodexStrictQuotaStatus(selectionOptions?.strictQuotaPolicy ?? config, accountId, "shared", now).state === "blocked") {
+    return "quota_threshold";
+  }
+  if (!hasCodexQuotaHeadroom(config, accountId, "shared", selectionOptions, now)) return "quota_threshold";
   return undefined;
 }

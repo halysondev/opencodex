@@ -129,3 +129,14 @@ export interface PoolQuotaWriter {
   credentialGeneration: number;
   historyIdentity: string;
 }
+
+/** Durable usage evidence; each window owns its clock independently of partial updates. */
+export type StrictAccountQuota = {
+  windows: Array<{
+    scope: "shared";
+    key: "weekly" | "monthly" | "short";
+    usedPercent: number;
+    observedAt: number;
+    resetAt?: number;
+  }>;
+};

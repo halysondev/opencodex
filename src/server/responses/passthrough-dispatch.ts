@@ -96,6 +96,7 @@ import {
   codexPoolAccountModel400Denial,
   shouldRetryCodexPoolAccountQuota,
   shouldRetryCodexPoolAccountTransient,
+  codexQuotaWaitResponse,
   retryCodexPoolOnAlternateAccount,
 } from "./core-codex-account";
 import {
@@ -1546,6 +1547,9 @@ export async function preparePassthroughExchange(
             );
           },
         });
+        if (retry.kind === "no-alternate" && retry.quotaWaitable) {
+          upstreamResponse = codexQuotaWaitResponse(upstreamResponse);
+        }
         if (retry.kind === "transport") {
           admissionState.authCtx = retry.authCtx;
           return transportFailureResponse(retry.error);

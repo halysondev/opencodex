@@ -136,6 +136,10 @@ opencodex 还能为 Codex 认证管理一个 **ChatGPT 账户池**。添加多�
 401/403 与 429 恢复，仍可能重新绑定。给账户设定选择顺序，以便其中某个账户 ——
 通常是你的 Codex Desktop 登录 —— 只在其他账户耗尽后才被选中。
 
+如需一个同时覆盖线程亲和性的可选硬阈值，见
+[严格 Codex 账户池额度门禁](https://opencodex.me/zh-cn/guides/codex-strict-quota/)。它复用现有选择器（包括
+fill-first），并在验证额度恢复后才重新启用账户。
+
 ### 赞助商
 
 赞助商支撑 opencodex 跟上每一次上游协议变更。有兴趣？

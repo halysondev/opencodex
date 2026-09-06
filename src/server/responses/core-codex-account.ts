@@ -51,12 +51,15 @@ import {
   CodexAuthContextError,
   CodexAccountCooldownError,
   CodexMainProfileDrainingError,
+  CodexStrictQuotaUnavailableError,
   headersForCodexAuthContext,
   applyCodexAuthContextToProvider,
   stripCodexRuntimeProviderFields,
   createCodexReserveDispatchGuard,
 } from "../../codex/auth-context";
 import { ACCOUNT_GATED_NATIVE_OPENAI_MODELS } from "../../codex/catalog/native-models";
+import { isCodexStrictQuotaEnabled } from "../../codex/strict-quota";
+import { markStrictQuotaWaitResponse } from "./strict-quota-response";
 import { isRequestExecutionBudget } from "../../lib/request-execution-budget";
 import type { SingleUseDispatchPermit } from "../../lib/request-execution-budget";
 import { hasForwardableCodexBearer } from "../auth-cors";
@@ -72,6 +75,8 @@ import {
   sealRequestAttemptIdentity,
   recordAttemptCredentialSource,
   noteProviderAttemptSend,
+  beginRequestAttempt,
+  finishRequestAttempt,
 } from "../request-log";
 import { codexAuthContextLogLabel } from "../../codex/account-label";
 import { chargeWorkflowSends } from "../../lib/workflow-budget";
@@ -391,6 +396,8 @@ export interface CodexPoolAccountRetryArgs {
    * out of budget.
    */
   sameAccountOnly?: boolean;
+  /** Request-owned exclusion/budget for strict quota traversal only. */
+  attemptedAccountIds?: Set<string>;
   upstream: AbortController;
   connectMs: number;
   passthroughEstimate?: number;
@@ -411,7 +418,7 @@ export type CodexPoolAccountRetryResult =
     upstreamResponse: Response;
     selectedForwardHeaders: Headers;
   }
-  | { kind: "no-alternate" }
+  | { kind: "no-alternate"; quotaWaitable?: boolean }
   | {
     kind: "transport";
     error: unknown;
@@ -533,6 +540,63 @@ export function shouldDeferCodexResetDerivedCooldown(response: Response, enabled
 export async function retryCodexPoolOnAlternateAccount(
   args: CodexPoolAccountRetryArgs,
 ): Promise<CodexPoolAccountRetryResult> {
+  if (!isCodexStrictQuotaEnabled(args.config, args.firstAuthCtx.quotaScope)
+    || (args.outcomeStatus !== 429 && args.outcomeStatus !== 402)
+    || args.firstAuthCtx.fixedAccount || args.sameAccountOnly) {
+    return retryCodexPoolOnOneAlternateAccount(args);
+  }
+  // Only authoritative pre-stream quota refusals enter this loop. A sent WS frame,
+  // a body failure, or an ambiguous transport error never authorizes another send.
+  const attemptedAccountIds = new Set([args.firstAuthCtx.accountId]);
+  const accountBudget = new Set([
+    MAIN_CODEX_ACCOUNT_ID, ...(args.config.codexAccounts ?? []).map(account => account.id),
+  ]).size;
+  let current = args;
+  let last: CodexPoolAccountRetryResult = { kind: "no-alternate" };
+  while (attemptedAccountIds.size < accountBudget) {
+    if (args.upstream.signal.aborted || args.options.abortSignal?.aborted) {
+      return { kind: "transport", error: args.upstream.signal.reason
+        ?? args.options.abortSignal?.reason, authCtx: current.firstAuthCtx };
+    }
+    const retry = await retryCodexPoolOnOneAlternateAccount({ ...current, attemptedAccountIds });
+    if (retry.kind === "no-alternate") {
+      if (!retry.quotaWaitable) return last;
+      if (last.kind === "retried") {
+        last.upstreamResponse = codexQuotaWaitResponse(last.upstreamResponse);
+        return last;
+      }
+      return retry;
+    }
+    if (retry.kind === "transport") return retry;
+    last = retry;
+    if (retry.authCtx.kind === "main"
+      || !await shouldRetryCodexPoolAccountQuota(retry.upstreamResponse, args.options.abortSignal)) return retry;
+    current = {
+      ...args,
+      firstAuthCtx: retry.authCtx,
+      firstResponse: retry.upstreamResponse,
+      outcomeStatus: retry.upstreamResponse.status >= 500 ? 429 : retry.upstreamResponse.status,
+    };
+  }
+  // Every available account in the frozen budget has explicitly rejected this turn.
+  if (last.kind === "retried") {
+    last.upstreamResponse = codexQuotaWaitResponse(last.upstreamResponse);
+    return last;
+  }
+  return { kind: "no-alternate", quotaWaitable: true };
+}
+
+/** Internal policy signal; only attach to an authoritative pre-stream quota rejection. */
+export function codexQuotaWaitResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("x-opencodex-quota-wait", "1");
+  const marked = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return markStrictQuotaWaitResponse(marked);
+}
+
+async function retryCodexPoolOnOneAlternateAccount(
+  args: CodexPoolAccountRetryArgs,
+): Promise<CodexPoolAccountRetryResult> {
   const {
     callerAuthHeaders, config, route, parsed, logCtx, options, firstAuthCtx, firstResponse,
     outcomeStatus, upstream, connectMs, passthroughEstimate, stream,
@@ -638,6 +702,8 @@ export async function retryCodexPoolOnAlternateAccount(
         "pool",
         {
           excludeAccountId: firstAuthCtx.accountId,
+          ...(args.attemptedAccountIds ? { excludeAccountIds: args.attemptedAccountIds } : {}),
+          signal: options.abortSignal ?? upstream.signal,
           admission: options.admission,
           codexAuthPolicy: options.codexAuthPolicy,
           modelId: route.modelId,
@@ -647,6 +713,9 @@ export async function retryCodexPoolOnAlternateAccount(
         },
       );
   } catch (error) {
+    if (args.attemptedAccountIds && error instanceof CodexStrictQuotaUnavailableError && error.waitable) {
+      return { kind: "no-alternate", quotaWaitable: true };
+    }
     const unexpectedRetryError =
       !(error instanceof CodexPoolAuthenticationError)
       && !(error instanceof CodexAuthContextError)
@@ -660,6 +729,16 @@ export async function retryCodexPoolOnAlternateAccount(
       throw error;
     }
   }
+  if (args.attemptedAccountIds) {
+    const selectedId = retryAuthCtx?.accountId ?? MAIN_CODEX_ACCOUNT_ID;
+    // Defence in depth against a selector racing a config/credential update.
+    if (retryAuthCtx !== undefined && args.attemptedAccountIds.has(selectedId)) {
+      releaseCodexAuthContextProbeLease(retryAuthCtx);
+      return { kind: "no-alternate" };
+    }
+    args.attemptedAccountIds.add(selectedId);
+  }
+
   // A validated request-owned main bearer is a real alternate when the failed credential was a
   // stored Pool account. It has no Pool account id to promote or cool, but it can own this one
   // bounded replay. The resolver already refuses it when main itself is the excluded credential.
@@ -783,6 +862,16 @@ export async function retryCodexPoolOnAlternateAccount(
   recordAdapterTier(logCtx, request);
 
   await firstResponse.body?.cancel().catch(() => undefined);
+  if (args.attemptedAccountIds) {
+    if (logCtx.activeAttempt) finishRequestAttempt(logCtx.activeAttempt, firstResponse.status,
+      Date.now() - (logCtx.activeAttemptStartedAt ?? Date.now()));
+    const attempt = beginRequestAttempt((logCtx.attempts?.length ?? 0) + 1,
+      formatCodexProviderForLog(route.providerName, retryAuthCtx.accountId, config),
+      route.modelId, retryAdapter.name);
+    logCtx.activeAttempt = attempt;
+    logCtx.activeAttemptStartedAt = Date.now();
+    (logCtx.attempts ??= []).push(attempt);
+  }
   options.onCodexAuthContextResolved?.(retryAuthCtx);
   route.provider = retryProvider;
   logCtx.provider = formatCodexProviderForLog(
@@ -832,6 +921,9 @@ export async function retryCodexPoolOnAlternateAccount(
   let upstreamResponse: Response;
   try {
     while (true) {
+      if (upstream.signal.aborted || options.abortSignal?.aborted) {
+        return { kind: "transport", error: upstream.signal.reason ?? options.abortSignal?.reason, authCtx: retryAuthCtx };
+      }
       // The same-account gated-model 400 ladder below keeps its own `maxRetrySends` bound and
       // does not take the reserve again; only the move itself does.
       if (accountMovePermit) {

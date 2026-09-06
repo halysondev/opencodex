@@ -39,6 +39,13 @@ export interface ConsumedComboFailure {
 
 
 
+export interface ResponsesReplaySnapshot {
+  sourceBody: unknown;
+  previousResponseInputExpanded: boolean;
+  providerContinuation: OcxProviderContinuationState | undefined;
+  recoveredPlaintext: boolean;
+}
+
 export interface HandleResponsesOptions {
   /** Internal Claude replay identity; consumed only by the final canonical Go transport. */
   claudeGoAffinity?: { sessionLane?: string };
@@ -118,12 +125,11 @@ export interface HandleResponsesOptions {
   shadowCallIntercepted?: boolean;
   compactionRoutingOverride?: CompactionRoutingOverride | null;
   /** Internal combo handoff for one parent-validated continuation snapshot. */
-  comboReplaySnapshot?: {
-    sourceBody: unknown;
-    previousResponseInputExpanded: boolean;
-    providerContinuation: OcxProviderContinuationState | undefined;
-    recoveredPlaintext: boolean;
-  };
+  comboReplaySnapshot?: ResponsesReplaySnapshot;
+  /** Internal same-request quota handoff; never populated from client JSON. */
+  quotaReplaySnapshot?: ResponsesReplaySnapshot;
+  /** Lazy capture: materialize only when a trusted quota refusal enters waiting. */
+  onQuotaReplaySnapshot?: (capture: () => ResponsesReplaySnapshot) => void;
   /** Internal combo handoff: allow a later same-provider model after a reset-derived 429/402. */
   deferCodexResetDerivedCooldown?: boolean;
   /** 030-owned handoff when a child consumed the original failure under bounds. */

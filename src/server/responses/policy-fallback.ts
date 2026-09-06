@@ -1,3 +1,6 @@
+import { getCodexQuotaRevision } from "../../codex/quota-events";
+import { isStrictQuotaWaitResponse } from "./strict-quota-response";
+import { waitForStrictQuotaResponse, type StrictQuotaWaitOptions } from "./strict-quota-wait";
 import { comboFailureDecision } from "../../combos/failover";
 import { readBoundedResponseBody } from "../../lib/bounded-body";
 import { isNonReplayableResponse } from "../../lib/upstream-retry";
@@ -5,7 +8,7 @@ import { finishRequestAttempt, type RequestLogContext } from "../request-log";
 import { linkRequestSessionLane } from "../request-log-conversation";
 import type { OcxConfig } from "../../types";
 import type { RouteCandidateTrace, RouteDecisionTraceV1 } from "../../routing/trace";
-import { handleResponses as handleResponsesCore } from "./core";
+import { handleResponses as handleResponsesCore, type ResponsesReplaySnapshot } from "./core";
 import { requestPacingOverloadResponse } from "./pacing-overload";
 import { captureExplicitOpenAiCallerAuth } from "../../providers/openai-sidecar";
 import { captureCallerDirectAuth } from "../../providers/caller-authorization";
@@ -17,6 +20,7 @@ type CoreOptions = Parameters<CoreHandler>[3];
 
 export interface PolicyFallbackDeps {
   runCore?: CoreHandler;
+  quotaWait?: Pick<StrictQuotaWaitOptions, "waitForChange" | "heartbeatMs">;
 }
 
 function candidateKey(candidate: Pick<RouteCandidateTrace, "provider" | "model">): string {
@@ -44,6 +48,14 @@ export function rankPolicyFallbackCandidates(
       return scoreDelta || left.index - right.index;
     })
     .map(({ candidate }) => candidate);
+}
+
+function requestWithBody(req: Request, rawBody: Record<string, unknown>, signal = req.signal): Request {
+  const headers = new Headers(req.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Request(req.url, { method: req.method, headers, body: JSON.stringify(rawBody), signal });
 }
 
 function requestWithCandidate(
@@ -134,8 +146,10 @@ export async function handleResponsesWithPolicyFallback(
   let requestBodyReadNotified = false;
   let storedPool401ReplayDispatched = false;
   let rawBody: Record<string, unknown> | null = null;
+  let captureQuotaReplay: (() => ResponsesReplaySnapshot) | undefined;
   const coreOptions: CoreOptions = {
     ...options,
+    onQuotaReplaySnapshot: capture => { captureQuotaReplay = capture; },
     openAiSidecarAuth: options.openAiSidecarAuth === undefined
       ? captureExplicitOpenAiCallerAuth(req.headers, config) : options.openAiSidecarAuth,
     nativeCallerAuth: options.nativeCallerAuth === undefined
@@ -168,6 +182,7 @@ export async function handleResponsesWithPolicyFallback(
     },
   };
   let response: Response;
+  let quotaRevisionBeforeCore = getCodexQuotaRevision();
   try {
     response = await runCore(req, config, logCtx, coreOptions);
   } catch (error) {
@@ -177,7 +192,46 @@ export async function handleResponsesWithPolicyFallback(
   }
   const initialTrace = logCtx.routeDecision;
   const initialRequestedModel = logCtx.requestedModel;
-  if (!rawBody || !isPolicyDecision(initialTrace)) return response;
+  const settleQuotaWait = (first: Response, raw: Record<string, unknown>): Promise<Response> => {
+    const snapshot = captureQuotaReplay?.();
+    captureQuotaReplay = undefined;
+    const body = (snapshot?.sourceBody ?? raw) as Record<string, unknown>;
+    return waitForStrictQuotaResponse({
+      config, initial: first, stream: body.stream === true,
+      signals: [req.signal, options.abortSignal], lease: options.turnAdmissionLease,
+      canReplay: () => !storedPool401ReplayDispatched,
+      finishAttempt: status => finishFailedPolicyAttempt(logCtx, status),
+      observedRevision: () => quotaRevisionBeforeCore,
+      onFailure: status => { logCtx.terminalHttpStatus = status; },
+      ...deps.quotaWait,
+      resume: async signal => {
+        quotaRevisionBeforeCore = getCodexQuotaRevision();
+        try {
+          return await runCore(requestWithBody(req, body, signal), config, logCtx, {
+            ...coreOptions, abortSignal: signal, quotaReplaySnapshot: snapshot,
+            onQuotaReplaySnapshot: undefined,
+            // The heartbeat response is inspected by the ordinary outer SSE logger. Native
+            // callbacks would otherwise finalize the same logical request a second time.
+            ...(body.stream === true ? {
+              onNativePassthroughTerminal: undefined, onNativePassthroughCancel: undefined,
+            } : {}),
+          });
+        } catch (error) {
+          const overload = requestPacingOverloadResponse(error);
+          if (overload) return overload;
+          throw error;
+        } finally {
+          logCtx.requestedModel = initialRequestedModel;
+          logCtx.routeDecision = initialTrace;
+        }
+      },
+    });
+  };
+  if (!rawBody || !isPolicyDecision(initialTrace)) {
+    return rawBody && !storedPool401ReplayDispatched && isStrictQuotaWaitResponse(response)
+      ? settleQuotaWait(response, rawBody) : response;
+  }
+  let quotaReplayBody = rawBody;
 
   const tried = new Set<string>([
     candidateKey({ provider: initialTrace.selected.provider, model: initialTrace.selected.model }),
@@ -186,13 +240,16 @@ export async function handleResponsesWithPolicyFallback(
   while (!storedPool401ReplayDispatched && await shouldHopPolicyCandidate(response, req.signal)) {
     if (req.signal.aborted) return response;
     const next = rankPolicyFallbackCandidates(initialTrace, tried)[0];
-    if (!next) return response;
+    if (!next) break;
     tried.add(candidateKey(next));
 
     finishFailedPolicyAttempt(logCtx, response.status);
     const retryRequest = requestWithCandidate(req, rawBody, next);
+    quotaReplayBody = { ...rawBody, model: `${next.provider}/${next.model}` };
     try {
       try {
+        quotaRevisionBeforeCore = getCodexQuotaRevision();
+        captureQuotaReplay = undefined;
         response = await runCore(retryRequest, config, logCtx, coreOptions);
       } catch (error) {
         const overload = requestPacingOverloadResponse(error);
@@ -205,7 +262,9 @@ export async function handleResponsesWithPolicyFallback(
     }
   }
 
-  return response;
+  // Exhaust the operator's existing policy candidates before waiting on the final quota lane.
+  return !storedPool401ReplayDispatched && isStrictQuotaWaitResponse(response)
+    ? settleQuotaWait(response, quotaReplayBody) : response;
 }
 
 export const handleResponses = handleResponsesWithPolicyFallback;

@@ -270,8 +270,9 @@ export async function prepareResponsesRequest(
   const inboundOwnThreadId = req.headers.get("thread-id")?.trim() || undefined;
   const cursorClientThreadId = codexPoolAffinityKey(req.headers);
   const originalBody = body;
-  if (options.comboReplaySnapshot) {
-    copyPreviousResponseReplayProvenance(options.comboReplaySnapshot.sourceBody, body);
+  const replaySnapshot = options.comboReplaySnapshot ?? options.quotaReplaySnapshot;
+  if (replaySnapshot) {
+    copyPreviousResponseReplayProvenance(replaySnapshot.sourceBody, body);
   } else {
     body = expandPreviousResponseInput(body, inboundClientThreadId);
     const replayFailure = previousResponseReplayFailure(body);
@@ -288,7 +289,7 @@ export async function prepareResponsesRequest(
       );
     }
   }
-  const previousResponseInputExpanded = options.comboReplaySnapshot?.previousResponseInputExpanded
+  const previousResponseInputExpanded = replaySnapshot?.previousResponseInputExpanded
     ?? (body !== originalBody
       && typeof (body as { previous_response_id?: unknown }).previous_response_id === "string");
 
@@ -342,13 +343,13 @@ export async function prepareResponsesRequest(
         effort: effortRow.effort,
       };
     }
-    if (options.comboReplaySnapshot?.recoveredPlaintext) {
+    if (replaySnapshot?.recoveredPlaintext) {
       markBodyNonPersistable(parsed._rawBody);
     }
     toolBridgeMaps = buildToolBridgeMaps(parsed, translatorBudget);
     if (previousResponseInputExpanded) parsed._previousResponseInputExpanded = true;
-    const providerContinuationCandidate = options.comboReplaySnapshot
-      ? options.comboReplaySnapshot.providerContinuation
+    const providerContinuationCandidate = replaySnapshot
+      ? replaySnapshot.providerContinuation
       : previousResponseProviderState(parsed.previousResponseId);
     if (providerContinuationCandidate) parsed._providerContinuationCandidate = providerContinuationCandidate;
     if (inboundOwnThreadId) parsed._codexOwnThreadId = inboundOwnThreadId;
@@ -385,6 +386,21 @@ export async function prepareResponsesRequest(
       });
     }
     return formatErrorResponse(400, "invalid_request_error", err instanceof Error ? err.message : String(err));
+  }
+  // Preserve the validated expanded input before route-specific top-level rewrites. The
+  // shallow envelope retains no extra copy of large content; the full clone happens only
+  // when the caller actually enters quota waiting. Scope/provenance remain proxy-private.
+  let quotaRecoveredPlaintext = replaySnapshot?.recoveredPlaintext ?? false;
+  if (options.onQuotaReplaySnapshot) {
+    const replayBody = { ...(body as Record<string, unknown>) };
+    copyPreviousResponseReplayProvenance(body, replayBody);
+    const providerContinuation = parsed._providerContinuationCandidate;
+    options.onQuotaReplaySnapshot(() => {
+      const sourceBody = structuredClone(replayBody);
+      copyPreviousResponseReplayProvenance(replayBody, sourceBody);
+      return { sourceBody, previousResponseInputExpanded, providerContinuation,
+        recoveredPlaintext: quotaRecoveredPlaintext };
+    });
   }
   options.onRequestBodyRead?.();
   const responseStateOptions = (force = false): { force?: boolean; clientThreadId?: string } => ({
@@ -832,6 +848,7 @@ export async function prepareResponsesRequest(
           // text. Bar it from the continuation cache before any recording path can reach it —
           // that cache is persisted to disk, which would defeat the recovery cache's TTL.
           markBodyNonPersistable(parsed._rawBody);
+          quotaRecoveredPlaintext = true;
 
           // The ciphertext-only pass intentionally excludes routed candidates. Once recovery
           // makes the assignment readable, run selection again with the full configured chain
