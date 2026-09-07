@@ -3053,18 +3053,19 @@ describe("server local API auth", () => {
           recovered = true;
         } },
       });
-      expect(response.status).toBe(200);
-      expect(await response.text()).toContain("quota-restored");
-      expect(bodies).toHaveLength(3);
-      const finalInput = JSON.stringify(bodies.at(-1)?.input);
-      expect(finalInput).toContain("new delta");
-      if (clientTask === "owner-task") {
+      if (clientTask === "foreign-task") {
+        // A continuation scoped to another task is refused before any dispatch,
+        // so a quota wait can never smuggle foreign context into a replay.
+        expect(response.status).toBe(400);
+        expect(bodies).toHaveLength(0);
+      } else {
+        expect(response.status).toBe(200);
+        expect(await response.text()).toContain("quota-restored");
+        expect(bodies).toHaveLength(3);
+        const finalInput = JSON.stringify(bodies.at(-1)?.input);
+        expect(finalInput).toContain("new delta");
         expect(finalInput).toContain("prior user context");
         expect(finalInput).toContain("prior answer");
-      } else {
-        expect(finalInput).not.toContain("prior user context");
-        expect(finalInput).not.toContain("prior answer");
-        expect(bodies.at(-1)?.previous_response_id).toBeUndefined();
       }
     } finally { clearResponseStateForTests(); await stopPoolRetryHarness(harness); }
   }, { timeout: SERVER_BUDGET_MS });

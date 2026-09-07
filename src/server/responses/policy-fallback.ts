@@ -1,4 +1,5 @@
 import { getCodexQuotaRevision } from "../../codex/quota-events";
+import { isCodexStrictQuotaEnabled } from "../../codex/strict-quota";
 import { isStrictQuotaWaitResponse } from "./strict-quota-response";
 import { waitForStrictQuotaResponse, type StrictQuotaWaitOptions } from "./strict-quota-wait";
 import { comboFailureDecision } from "../../combos/failover";
@@ -143,6 +144,10 @@ export async function handleResponsesWithPolicyFallback(
   deps: PolicyFallbackDeps = {},
 ): Promise<Response> {
   const runCore = deps.runCore ?? handleResponsesCore;
+  // Teed before runCore consumes the request: the strict-quota wait rebuilds the
+  // request to resume, and a dispatcher that never reports the parsed body still
+  // leaves this lazy copy available.
+  const wireBody = req.clone();
   let requestBodyReadNotified = false;
   let storedPool401ReplayDispatched = false;
   let rawBody: Record<string, unknown> | null = null;
@@ -169,7 +174,10 @@ export async function handleResponsesWithPolicyFallback(
         && typeof (body as { model?: unknown }).model === "string") {
         const model = (body as { model: string }).model;
         const { fastRow, effortRow } = parseSyntheticRowId(model, config);
-        if (resolvePolicyProfileId(config, fastRow?.baseId ?? effortRow?.baseId ?? model) === null) return;
+        // Policy retries and strict-quota waits both replay the captured body; keep the
+        // snapshot whenever either could need it.
+        if (resolvePolicyProfileId(config, fastRow?.baseId ?? effortRow?.baseId ?? model) === null
+          && !isCodexStrictQuotaEnabled(config)) return;
         // Recovery and other core preparation may mutate the parsed body in place. Keep an
         // immutable snapshot of the original wire body so a retry cannot serialize those
         // mutations. Object-identity metadata is re-established by each attempt, not serialized.
@@ -192,12 +200,21 @@ export async function handleResponsesWithPolicyFallback(
   }
   const initialTrace = logCtx.routeDecision;
   const initialRequestedModel = logCtx.requestedModel;
-  const settleQuotaWait = (first: Response, raw: Record<string, unknown>): Promise<Response> => {
+  const settleQuotaWait = async (first: Response, raw: Record<string, unknown> | null): Promise<Response> => {
     const snapshot = captureQuotaReplay?.();
     captureQuotaReplay = undefined;
-    const body = (snapshot?.sourceBody ?? raw) as Record<string, unknown>;
+    let body = (snapshot?.sourceBody ?? raw) as Record<string, unknown> | null;
+    if (!body) {
+      try {
+        const parsed = await wireBody.json();
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return first;
+        body = parsed as Record<string, unknown>;
+      } catch {
+        return first;
+      }
+    }
     return waitForStrictQuotaResponse({
-      config, initial: first, stream: body.stream === true,
+      config, quotaPolicy: options.codexAuthPolicy, initial: first, stream: body.stream === true,
       signals: [req.signal, options.abortSignal], lease: options.turnAdmissionLease,
       canReplay: () => !storedPool401ReplayDispatched,
       finishAttempt: status => finishFailedPolicyAttempt(logCtx, status),
@@ -228,10 +245,13 @@ export async function handleResponsesWithPolicyFallback(
     });
   };
   if (!rawBody || !isPolicyDecision(initialTrace)) {
-    return rawBody && !storedPool401ReplayDispatched && isStrictQuotaWaitResponse(response)
+    return !storedPool401ReplayDispatched && isStrictQuotaWaitResponse(response)
       ? settleQuotaWait(response, rawBody) : response;
   }
-  let quotaReplayBody = rawBody;
+  // Captured for the loop: `rawBody` is also assigned inside `onRequestBodyParsed`,
+  // so narrowing is dropped at call sites below.
+  const parsedBody = rawBody as Record<string, unknown>;
+  let quotaReplayBody: Record<string, unknown> = parsedBody;
 
   const tried = new Set<string>([
     candidateKey({ provider: initialTrace.selected.provider, model: initialTrace.selected.model }),
@@ -244,8 +264,8 @@ export async function handleResponsesWithPolicyFallback(
     tried.add(candidateKey(next));
 
     finishFailedPolicyAttempt(logCtx, response.status);
-    const retryRequest = requestWithCandidate(req, rawBody, next);
-    quotaReplayBody = { ...rawBody, model: `${next.provider}/${next.model}` };
+    const retryRequest = requestWithCandidate(req, parsedBody, next);
+    quotaReplayBody = { ...parsedBody, model: `${next.provider}/${next.model}` };
     try {
       try {
         quotaRevisionBeforeCore = getCodexQuotaRevision();

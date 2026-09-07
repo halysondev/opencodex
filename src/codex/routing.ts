@@ -206,6 +206,7 @@ export {
   getPoolAccountPlan,
   pickLowestUsageCodexAccount,
   pickAlternateCodexAccount,
+  strictQuotaReplacement,
 } from "./routing/selection";
 export {
   resetCodexRoutingForManualSelection,
@@ -624,7 +625,7 @@ function resetFirstAffinityReplacement(
         now,
       ));
     });
-  return pickResetFirstCodexAccount(config, candidates, now, selectionOptions);
+  return pickResetFirstCodexAccount(config, candidates, now, quotaScope, selectionOptions);
 }
 
 /**

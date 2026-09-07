@@ -551,7 +551,12 @@ export async function retryCodexPoolOnAlternateAccount(
   const accountBudget = new Set([
     MAIN_CODEX_ACCOUNT_ID, ...(args.config.codexAccounts ?? []).map(account => account.id),
   ]).size;
-  let current = args;
+  // Strict quota admission IS the traversal: every configured credential is an in-scope
+  // candidate rather than a failover charged to the request's send budget, whose
+  // alternate-target allowance is sized for ordinary recovery. The frozen roster above
+  // is what bounds the sends here.
+  const traversalOptions = { ...args.options, sendBudget: undefined };
+  let current: CodexPoolAccountRetryArgs = { ...args, options: traversalOptions };
   let last: CodexPoolAccountRetryResult = { kind: "no-alternate" };
   while (attemptedAccountIds.size < accountBudget) {
     if (args.upstream.signal.aborted || args.options.abortSignal?.aborted) {
@@ -572,7 +577,7 @@ export async function retryCodexPoolOnAlternateAccount(
     if (retry.authCtx.kind === "main"
       || !await shouldRetryCodexPoolAccountQuota(retry.upstreamResponse, args.options.abortSignal)) return retry;
     current = {
-      ...args,
+      ...current,
       firstAuthCtx: retry.authCtx,
       firstResponse: retry.upstreamResponse,
       outcomeStatus: retry.upstreamResponse.status >= 500 ? 429 : retry.upstreamResponse.status,

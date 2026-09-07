@@ -205,6 +205,11 @@ export function getEligiblePoolAccounts(
   ) {
     ids.unshift(MAIN_CODEX_ACCOUNT_ID);
   }
+  const preferred = isCodexStrictQuotaEnabled(policy, quotaScope)
+    ? ids.filter(id => hasCodexQuotaHeadroom(config, id, quotaScope, selectionOptions, now)) : [];
+  // Prefer fresh below-threshold capacity only after request eligibility has been applied.
+  // When none exists, retain every usable remainder instead of entering quota wait.
+  const candidates = preferred.length ? preferred : ids;
   // Single choke point for selection order: every strategy, failover, and preview
   // reaches the pool through here, so tiering applies once rather than per picker.
   // Eligibility above is unchanged — this only narrows an already-eligible list.
@@ -214,7 +219,7 @@ export function getEligiblePoolAccounts(
   // is selected. Both steps narrow an already-eligible list and neither can empty it.
   const pinned = pinnedCodexAccountId(config);
   return selectPriorityTier(
-    withoutModelDeniedAccounts(ids, selectionOptions?.deniedModelAccountIds, pinned),
+    withoutModelDeniedAccounts(candidates, selectionOptions?.deniedModelAccountIds, pinned),
     codexAccountPriorityLookup(config),
     id => hasCodexQuotaHeadroom(config, id, quotaScope, selectionOptions, now),
     pinned ?? (
@@ -480,9 +485,14 @@ export function pickUnboundStrategyAccount(
       ? pickResetFirstCodexAccount(config, listEligibleCodexAccountIds(config, now, quotaScope, selectionOptions), now, quotaScope, selectionOptions)
       : pickFillFirstCodexAccount(config, now, quotaScope, selectionOptions);
     if (!picked) return null;
-    if (commitSharedActive && sharesActiveSelection(picked, selectionOptions)) {
-      if (!isIndependentCodexQuotaScope(quotaScope)
-        && !manualPreferenceBlocks(codexPoolKeyForScope(quotaScope), picked)) {
+    if (commitSharedActive && sharesActiveSelection(picked, selectionOptions)
+      && !isIndependentCodexQuotaScope(quotaScope)) {
+      if (isCodexStrictQuotaEnabled(selectionOptions?.strictQuotaPolicy ?? config, quotaScope)
+        && picked !== getEffectiveActiveCodexAccountId(config)) {
+        // Strict admission retires the account the cursor still names: persist the
+        // replacement or the recovered account reclaims the ceiling the pin just lost.
+        setActiveCodexAccount(config, picked);
+      } else if (!manualPreferenceBlocks(codexPoolKeyForScope(quotaScope), picked)) {
         rememberActiveCodexAccount(config, picked);
       }
     }

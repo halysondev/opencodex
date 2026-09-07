@@ -196,6 +196,7 @@ export { codexForwardTerminalOutcomeRecorder } from "./core-codex-account";
 export { decodeRequestErrorResponse } from "./core-errors";
 export { comboUnavailableResponse } from "./core-errors";
 export type { ConsumedComboFailure } from "./core-options";
+export type { ResponsesReplaySnapshot } from "./core-options";
 export type { HandleResponsesOptions } from "./core-options";
 export { clientCancelledResponse } from "./core-errors";
 export { sanitizedRetryAfter } from "./core-combo-failure";

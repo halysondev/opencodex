@@ -19,6 +19,7 @@ import { listCodexAuthAccounts, selectFallbackAfterPause, pauseExhaustedCodexAcc
 import { jsonResponse, manualImportDisabledResponse } from "./http";
 import { convergeAccountNamespaceCatalog, handleCodexAuthLoginStart, handleCodexAuthLoginCode, handleCodexAuthLoginCancel, handleCodexAuthLoginStatus } from "./login-flow";
 import type { CodexAuthCatalogConvergence } from "./login-flow";
+import { fetchMainAccountInfoAttempt } from "./main-account-probe";
 import { PoolQuotaProbeBusyError } from "./pool-quota-probe";
 import { inspectResetCredits, consumeResetCredits } from "./reset-credit-service";
 import { getRuntimeConfig, saveRuntimeConfig, configuredPoolAccount } from "./runtime-config";
@@ -238,6 +239,14 @@ export async function handleCodexAuthAPI(
     else setCodexAccountPin(runtimeConfig, targetAccountId);
     resetCodexRoutingForManualSelection(targetAccountId);
     saveRuntimeConfig(config, runtimeConfig);
+    // Management owns the physical-main claim. Rebuild identity-bound usage here;
+    // caller-owned requests cannot read auth.json to recover an unknown main snapshot.
+    if (targetAccountId === MAIN_CODEX_ACCOUNT_ID && runtimeConfig.codexAccountStrictQuota === true
+      && (runtimeConfig.autoSwitchThreshold ?? 80) > 0) {
+      await fetchMainAccountInfoAttempt(true, 1, undefined, false, false);
+    }
+    // A pending strict-quota request must reconsider an operator-selected account now.
+    notifyCodexQuotaChanges();
     // A pin this route accepts can still be dropped by the very next resolve, and saying
     // nothing about that is what made the setting look ignored (#4521). The checks above
     // refuse an account that cannot be selected at all; this reports the one remaining
@@ -322,6 +331,11 @@ export async function handleCodexAuthAPI(
     runtimeConfig.autoSwitchThreshold = body.threshold;
     if (typeof body.strictQuota === "boolean") runtimeConfig.codexAccountStrictQuota = body.strictQuota;
     saveRuntimeConfig(config, runtimeConfig);
+    if (runtimeConfig.codexAccountStrictQuota === true && body.threshold > 0
+      && (getEffectiveActiveCodexAccountId(runtimeConfig) ?? MAIN_CODEX_ACCOUNT_ID) === MAIN_CODEX_ACCOUNT_ID
+      && !isCodexAccountPaused(runtimeConfig, MAIN_CODEX_ACCOUNT_ID)) {
+      await fetchMainAccountInfoAttempt(true, 1, undefined, false, false);
+    }
     notifyCodexQuotaChanges();
     return jsonResponse({ ok: true });
   }

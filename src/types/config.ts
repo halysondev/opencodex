@@ -1044,7 +1044,7 @@ export interface OcxConfig {
   autoSwitchThreshold?: number;
   /** Opt-in: return bound quota-strategy tasks to recovered higher-priority accounts. */
   codexAccountPriorityFailback?: boolean;
-  /** Default off. Require fresh quota headroom before each ordinary Codex pool dispatch. */
+  /** Default off. Require fresh unexhausted quota; prefer accounts below autoSwitchThreshold. */
   codexAccountStrictQuota?: boolean;
   /** New-session account rotation strategy for the Codex pool. Default quota (today's behaviour). */
   accountPoolStrategy?: OcxAccountPoolRotationStrategy | "reset-first";
