@@ -313,7 +313,6 @@ export async function prepareResponsesRequest(
   }
 
   let parsed: OcxParsedRequest;
-  let toolBridgeMaps: ReturnType<typeof buildToolBridgeMaps>;
   try {
     parsed = parseRequest(body);
     parsed._promptCacheKeyIsSharedCohort = options.promptCacheKeyIsSharedCohort;
@@ -1156,7 +1155,7 @@ export async function prepareResponsesRequest(
   });
   // Replacement transforms change object identity; termination tracking is WeakMap-backed.
   bindTurnTerminationScope(parsed, resolvedConversationId);
-  toolBridgeMaps = buildToolBridgeMaps(parsed, translatorBudget);
+  const toolBridgeMaps = buildToolBridgeMaps(parsed, translatorBudget);
   // Refuse an input that cannot plausibly fit the model context window before spending auth,
   // circuit budget, or upstream bandwidth on a turn the provider will reject anyway (#1412).
   //
