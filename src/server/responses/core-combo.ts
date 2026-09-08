@@ -75,6 +75,13 @@ import { preflightComboStreamResponse } from "./combo-stream-preflight";
 import { streamingContextOverflowResponse, jsonContextOverflowResponse } from "./context-overflow";
 import { mandatoryResponsesReasoningReplayUnavailable } from "./core-replay";
 import { settleOperatorReplacement } from "../../lib/upstream-retry";
+import { markBodyNonPersistable } from "../../responses/state";
+import { decideAndRecordGuardrailsLateFailure } from "../../guardrails/late-failure";
+import { recordGuardrailsTurnDelta } from "../../guardrails/telemetry";
+import {
+  rescanGuardrailsResponsesBody,
+  restoreGuardrailsResponsesBody,
+} from "../../guardrails/turn";
 
 /**
  * Sends one combo target may run on its own before the ladder moves on. A target is a whole
@@ -202,7 +209,7 @@ export async function executeComboResponses(
   // continuation that only references prior images still fails closed when
   // imageInput is disabled (and so targets see the full replayed input).
   const inboundClientThreadId = req.headers.get("x-codex-parent-thread-id")?.trim() || undefined;
-  const body = options.comboBodyPrepared
+  let body = options.comboBodyPrepared
     ? rawBody
     : expandPreviousResponseInput(rawBody, inboundClientThreadId);
   const replayFailure = options.comboBodyPrepared
@@ -318,6 +325,7 @@ export async function executeComboResponses(
   };
   let encryptedTaskRecoveryAttempted = false;
   let recoveryFailureReason: AgentTaskRecoveryFailureReason | undefined;
+  let guardrailsRecoveryFailure: Response | undefined;
   let storedPool401ReplayDispatched = false;
   const recoverUnreadableEncryptedTask = async (): Promise<boolean> => {
     if (encryptedTaskRecoveryAttempted) return false;
@@ -365,6 +373,33 @@ export async function executeComboResponses(
       );
       return false;
     }
+    if (options.guardrailsTurn) {
+      const turn = options.guardrailsTurn;
+      const started = performance.now();
+      try {
+        const rescanned = rescanGuardrailsResponsesBody(body, turn);
+        body = rescanned.body;
+        options.guardrailsTurn = rescanned.turn;
+        recordGuardrailsTurnDelta("responses", rescanned.turn, turn.findings.length, performance.now() - started);
+      } catch (error) {
+        const decision = decideAndRecordGuardrailsLateFailure({
+          error, inboundProtocol: "responses", latencyMs: performance.now() - started, turn,
+        });
+        if (decision.kind === "block") {
+          guardrailsRecoveryFailure = formatErrorResponse(
+            decision.status,
+            decision.code,
+            "Guardrails could not safely process the recovered combo task",
+          );
+          return false;
+        }
+        body = restoreGuardrailsResponsesBody(body, turn);
+        options.guardrailsTurn = undefined;
+        options.guardrailsPassthroughFailure = true;
+      }
+    }
+    markBodyNonPersistable(body);
+    comboReplaySnapshot.sourceBody = body;
     comboPayloadReadable = true;
     comboReplaySnapshot.recoveredPlaintext = true;
     return true;
@@ -742,6 +777,10 @@ export async function executeComboResponses(
           pick = recoveredTarget;
           continue;
         }
+        if (guardrailsRecoveryFailure) {
+          void lastFailure.body?.cancel().catch(() => {});
+          return guardrailsRecoveryFailure;
+        }
         if (options.abortSignal?.aborted) return clientCancelledResponse();
       }
       // Keep the spent Pool budget sticky even after a recovered routed child:
@@ -830,6 +869,10 @@ export async function executeComboResponses(
         if (recoveredTarget && await recoverUnreadableEncryptedTask()) {
           pick = recoveredTarget;
           continue;
+        }
+        if (guardrailsRecoveryFailure) {
+          void lastFailure.body?.cancel().catch(() => {});
+          return guardrailsRecoveryFailure;
         }
       }
       // Waiting or recovery may have observed cancellation after the check above.
