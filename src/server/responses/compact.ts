@@ -124,6 +124,7 @@ import {
   type RequestExecutionBudget,
 } from "../../lib/request-execution-budget";
 import { classifyTransportFailureKind, transportErrorCode } from "../../lib/upstream-reachability";
+import { guardrailsAdmissionProviderId } from "./request-prepare";
 import {
   acquireUpstreamHostAdmission,
   disableUpstreamHostCircuitForKey,
@@ -706,8 +707,10 @@ export async function handleResponsesCompact(
     }
     return formatErrorResponse(404, "invalid_request_error", err instanceof Error ? err.message : String(err));
   }
-  const guardrailsProviderScopeAnchor = options.guardrailsProviderScopeAnchor
-    ?? route.providerName;
+  const guardrailsProviderScopeAnchor = guardrailsAdmissionProviderId(config, raw, {
+    guardrailsCapturedPolicy: capturedGuardrailsPolicy,
+    guardrailsProviderScopeAnchor: options.guardrailsProviderScopeAnchor,
+  }, route.providerName);
   if (options.guardrailsProviderScopeAnchor !== undefined
     && !guardrailsPolicyProtectsProvider(
       capturedGuardrailsPolicy,
@@ -731,7 +734,7 @@ export async function handleResponsesCompact(
       : await admitGuardrailsRuntime(
           config,
           "compact",
-          route.providerName,
+          guardrailsProviderScopeAnchor,
           capturedGuardrailsPolicy,
         );
   } catch (error) {

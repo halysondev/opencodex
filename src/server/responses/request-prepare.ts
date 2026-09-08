@@ -165,13 +165,14 @@ import {
   conversationCarriesUploadedFiles,
 } from "./account-change-state";
 
-function guardrailsAdmissionProviderId(
+export function guardrailsAdmissionProviderId(
   config: OcxConfig,
   body: unknown,
   options: Pick<
     HandleResponsesOptions,
     "comboAttempt" | "guardrailsCapturedPolicy" | "guardrailsProviderScopeAnchor"
   >,
+  resolvedProviderId?: string,
 ): string | undefined {
   if (options.guardrailsProviderScopeAnchor !== undefined) {
     return options.guardrailsProviderScopeAnchor;
@@ -191,6 +192,7 @@ function guardrailsAdmissionProviderId(
       return allExcluded ? combo.targets[0]?.provider : undefined;
     }
   }
+  if (resolvedProviderId !== undefined) return resolvedProviderId;
   try {
     const route = options.comboAttempt
       ? routeConcreteModel(config, model)
