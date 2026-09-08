@@ -87,6 +87,22 @@ JSON mode: `envelope`.
 - Exit 0 carries a trustworthy verdict (live or proven absent); exit 1 means the CLI could not resolve and a caller must refuse to guess — unknown liveness never reads as absent.
 - Built for embedding shells (desktop app): the liveness budgets stay owned by src/server/proxy-liveness.ts.
 
+### `ocx voice-relay`
+
+Run a loopback-only foreground relay for a connected remote hub's realtime voice routes.
+
+Drives no management route.
+
+| Flag | Value | Meaning |
+|---|---|---|
+| `--port` | number | Loopback port; defaults to 10111. |
+| `--allow-standalone` | boolean | Also admit bare /v1/live and /v1/realtime WebSocket sessions. |
+
+JSON mode: `none`.
+
+- Requires an intact ocx connect record and owner-matching data credential.
+- Does not write Codex configuration or install a service; exits when connection ownership changes.
+
 ### `ocx capabilities`
 
 List the declared CLI capabilities and the management routes they drive.
@@ -1005,6 +1021,6 @@ JSON mode: `payload`.
 
 ## Counts
 
-- declared capabilities: 56
+- declared capabilities: 57
 - of those, state-changing: 30
 - head-resolved invocations: 2

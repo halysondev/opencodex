@@ -551,6 +551,10 @@ const commandRunners: Record<string, CommandRunner> = {
     const { handleCatalogCommand } = await import("./catalog");
     return await handleCatalogCommand(deps.args.slice(1));
   },
+  "voice-relay": async deps => {
+    const { handleVoiceRelayCommand } = await import("./voice-relay");
+    return await handleVoiceRelayCommand(deps.args.slice(1));
+  },
   "sync-cache": async deps => {
     const cacheArgs = deps.args.slice(1);
     const restartScope = readRestartScope(cacheArgs, console);

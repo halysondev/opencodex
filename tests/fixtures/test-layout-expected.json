@@ -294,6 +294,7 @@
   "client-hub-relay.test.ts": "clients",
   "client-hub-state.test.ts": "clients",
   "client-hub-usage.test.ts": "clients",
+  "client-voice-relay.test.ts": "clients",
   "client-injection-guard.test.ts": "codex-integration",
   "client-lifecycle-lock.test.ts": "clients",
   "client-machine-listener.test.ts": "clients",
