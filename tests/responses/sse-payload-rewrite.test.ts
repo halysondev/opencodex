@@ -529,6 +529,85 @@ describe("SSE payload rewrite composition", () => {
     budget.dispose();
   });
 
+  test("malformed UTF-8 falls back to byte-identical passthrough", async () => {
+    const encoder = new TextEncoder();
+    const prefix = encoder.encode('event: malformed\ndata: {"delta":"');
+    const suffix = encoder.encode('"}\r\n\r\nevent: later\r\ndata: {"delta":"ok"}\r\n\r\n');
+    const malformed = new Uint8Array(prefix.byteLength + 1 + suffix.byteLength);
+    malformed.set(prefix);
+    malformed[prefix.byteLength] = 0x80;
+    malformed.set(suffix, prefix.byteLength + 1);
+    let sent = false;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent) {
+          controller.close();
+          return;
+        }
+        sent = true;
+        controller.enqueue(malformed);
+      },
+    });
+    const budget = createTestTranslatorBudget();
+    const rewritten = relaySseWithBlockRewrite(
+      source,
+      block => [block.replace('"ok"', '"changed"')],
+      budget,
+    );
+
+    expect([...await readAllBytes(rewritten)]).toEqual([...malformed]);
+    expect(budget.snapshot().currentBytes).toBe(0);
+    budget.dispose();
+  });
+
+  test("a failed error flush releases retained bytes and disposes the rewriter", async () => {
+    const failure = new Error("synthetic flush failure");
+    const budget = createTestTranslatorBudget();
+    let reads = 0;
+    let disposals = 0;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (reads++ === 0) controller.enqueue(new TextEncoder().encode("data: partial"));
+        else controller.error(new Error("synthetic source failure"));
+      },
+    });
+    const rewrite = Object.assign((block: string) => [block], {
+      flush(): string[] { throw failure; },
+      dispose() { disposals++; },
+    });
+    try {
+      await expect(readAll(relaySseWithBlockRewrite(source, rewrite, budget))).rejects.toBe(failure);
+      expect(disposals).toBe(1);
+      expect(budget.snapshot().currentBytes).toBe(0);
+    } finally {
+      budget.dispose();
+    }
+  });
+
+  test("source errors deliver an already-buffered partial tail before the original error", async () => {
+    const encoder = new TextEncoder();
+    const failure = new Error("synthetic upstream failure");
+    let pullCount = 0;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pullCount += 1;
+        if (pullCount === 1) {
+          controller.enqueue(encoder.encode('event: partial\ndata: {"delta":"kept"}'));
+          return;
+        }
+        controller.error(failure);
+      },
+    });
+    const budget = createTestTranslatorBudget();
+    const reader = relaySseWithPayloadRewrite(source, payload => payload, budget).getReader();
+
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toBe('event: partial\ndata: {"delta":"kept"}');
+    await expect(reader.read()).rejects.toBe(failure);
+    expect(budget.snapshot().currentBytes).toBe(0);
+    budget.dispose();
+  });
   test.each(["resolve", "reject"] as const)(
     "surfaces a rewrite failure before tee cancellation can %s",
     async cancellationOutcome => {
@@ -606,60 +685,5 @@ describe("SSE payload rewrite composition", () => {
       }
     },
   );
-
-  test("malformed UTF-8 falls back to byte-identical passthrough", async () => {
-    const encoder = new TextEncoder();
-    const prefix = encoder.encode('event: malformed\ndata: {"delta":"');
-    const suffix = encoder.encode('"}\r\n\r\nevent: later\r\ndata: {"delta":"ok"}\r\n\r\n');
-    const malformed = new Uint8Array(prefix.byteLength + 1 + suffix.byteLength);
-    malformed.set(prefix);
-    malformed[prefix.byteLength] = 0x80;
-    malformed.set(suffix, prefix.byteLength + 1);
-    let sent = false;
-    const source = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (sent) {
-          controller.close();
-          return;
-        }
-        sent = true;
-        controller.enqueue(malformed);
-      },
-    });
-    const budget = createTestTranslatorBudget();
-    const rewritten = relaySseWithBlockRewrite(
-      source,
-      block => [block.replace('"ok"', '"changed"')],
-      budget,
-    );
-
-    expect([...await readAllBytes(rewritten)]).toEqual([...malformed]);
-    expect(budget.snapshot().currentBytes).toBe(0);
-    budget.dispose();
-  });
-
-  test("source errors deliver an already-buffered partial tail before the original error", async () => {
-    const encoder = new TextEncoder();
-    const failure = new Error("synthetic upstream failure");
-    let pullCount = 0;
-    const source = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pullCount += 1;
-        if (pullCount === 1) {
-          controller.enqueue(encoder.encode('event: partial\ndata: {"delta":"kept"}'));
-          return;
-        }
-        controller.error(failure);
-      },
-    });
-    const budget = createTestTranslatorBudget();
-    const reader = relaySseWithPayloadRewrite(source, payload => payload, budget).getReader();
-
-    const first = await reader.read();
-    expect(first.done).toBe(false);
-    expect(new TextDecoder().decode(first.value)).toBe('event: partial\ndata: {"delta":"kept"}');
-    await expect(reader.read()).rejects.toBe(failure);
-    expect(budget.snapshot().currentBytes).toBe(0);
-    budget.dispose();
   });
 });

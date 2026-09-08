@@ -1650,6 +1650,10 @@ export async function handleResponsesCompact(
     compactionRoutingOverride: options.compactionRoutingOverride,
     ...(admission ? { admission } : {}),
     guardrailsTurn,
+    guardrailsSnapshot,
+    guardrailsCapturedPolicy: capturedGuardrailsPolicy,
+    guardrailsProviderScopeAnchor,
+    guardrailsPassthroughFailure: guardrailsBypassed,
   });
   if (!response.ok) return response;
   let json: { output?: unknown[]; status?: unknown; error?: unknown };
