@@ -567,6 +567,22 @@ describe("bun test argv", () => {
     }
   });
 
+  test("cold Guardrails files stay covered exactly once outside the parallel lane", () => {
+    const files = readdirSync(repoPath("tests", "guardrails"))
+      .filter(file => file.endsWith(".test.ts"))
+      .map(file => `guardrails/${file}`);
+    files.push("images/loop.test.ts", "responses/responses-state.test.ts",
+      "routing/routing-policy-fallback.test.ts", "server/agent-task-recovery.test.ts",
+      "server/server-management-auth.test.ts", "web-search/web-search.test.ts");
+    const plan = resolveBunTestPlan([]);
+    for (const file of files) {
+      expect(plan[0]!.args.filter(arg => arg === `**/${basename(file)}`)).toHaveLength(1);
+      const lanes = plan.filter(lane => lane.args.includes(`./tests/${file}`));
+      expect(lanes).toHaveLength(1);
+      expect(lanes[0]!.args).toContain("--parallel=1");
+    }
+  });
+
   test("sharded and reporter-file runs stay a single caller-controlled lane", () => {
     expect(resolveBunTestPlan(["--shard=1/3"])).toHaveLength(1);
     expect(resolveBunTestPlan(["--reporter=junit", "--reporter-outfile", "results.xml"]))
