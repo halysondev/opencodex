@@ -1,3 +1,4 @@
+import { completeSideChatCache } from "../../codex/side-chat-cache";
 import { createSteeringSettingsNormalizer } from "./native-steering-policy";
 import { nativeResponseControlEligible } from "./native-response-control";
 import { NativeInjectionReplay } from "./native-injection-replay";
@@ -617,6 +618,7 @@ export async function preparePassthroughExchange(
       const firstCompletion = !inspectedCompletionSeen;
       inspectedCompletionSeen = true;
       if (firstCompletion && (inspectedTerminal === null || firstTerminalAllowsRecall)) {
+        completeSideChatCache(request, response);
         // A model-less first completion permanently declines recall; later terminal
         // frames are hidden by the client boundary and cannot supply its identity.
         // Native inspection sees the pre-rewrite model. Only an actual terminal
