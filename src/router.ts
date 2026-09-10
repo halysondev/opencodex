@@ -39,7 +39,7 @@ import {
 } from "./providers/openai-tiers";
 import { decodeRoutedModelIdOrThrow, encodeRoutedModelId } from "./providers/slug-codec";
 import { effectiveProviderAliasDecision, resolveModelAlias } from "./providers/default-aliases";
-import { resolveBlockedModelRedirect } from "./lib/shadow-call";
+import { resolveBlockedModelRedirect, resolveBlockedModelRedirectChain } from "./lib/shadow-call";
 import { getRoutingCached } from "./codex/model-cache";
 import { codexAccountNamespaceEntries } from "./codex/account-namespaces";
 import {
@@ -563,9 +563,26 @@ function routeResult(
   routeKind: RouteDecisionKind,
   routeReason: string,
 ): RouteResult {
-  const redirected = resolveBlockedModelRedirect(config, modelId);
-  const effectiveModelId = redirected ?? modelId;
-  const effectiveRouteReason = redirected ? "blocked-model-redirect" : routeReason;
+  const redirect = resolveBlockedModelRedirectChain(config, modelId);
+  if (redirect.redirected && config) {
+    const targetRoute = routeModelInternal(config, redirect.targetModel, true);
+    return {
+      ...targetRoute,
+      routeReason: "blocked-model-redirect",
+      ...(targetRoute.routeDecision
+        ? {
+            routeDecision: {
+              ...targetRoute.routeDecision,
+              requestedModel: modelId,
+              selected: {
+                ...targetRoute.routeDecision.selected,
+                reason: "blocked-model-redirect",
+              },
+            },
+          }
+        : {}),
+    };
+  }
   const codexAccountMode = providerCodexAccountMode(providerName, provider);
   const routedProvider = routedProviderConfig(providerName, provider);
   const effectiveAlias = config
@@ -574,10 +591,10 @@ function routeResult(
   return {
     providerName,
     provider: routedProvider,
-    modelId: effectiveModelId,
-    staticPolicy: captureRouteStaticPolicy(providerName, effectiveModelId, routedProvider, effectiveAlias),
+    modelId,
+    staticPolicy: captureRouteStaticPolicy(providerName, modelId, routedProvider, effectiveAlias),
     routeKind,
-    routeReason: effectiveRouteReason,
+    routeReason,
     ...(codexAccountMode ? { codexAccountMode } : {}),
   };
 }
@@ -667,12 +684,14 @@ function routeModelInternal(
       .find(([candidate]) => candidate === namespace);
     if (binding) {
       const nativeModelId = modelId.slice(slash + 1);
-      if (!isBareOpenAiFamilyModel(nativeModelId)) {
+      const redirect = resolveBlockedModelRedirectChain(config, nativeModelId);
+      const effectiveNativeModelId = redirect.targetModel;
+      if (!isBareOpenAiFamilyModel(effectiveNativeModelId)) {
         throw new Error(`Codex account namespace ${namespace} only supports native OpenAI model ids`);
       }
       const provider = config.providers[OPENAI_CODEX_PROVIDER_ID];
       if (!provider || provider.disabled === true) {
-        throw new NoEnabledOpenAiProviderError(nativeModelId);
+        throw new NoEnabledOpenAiProviderError(effectiveNativeModelId);
       }
       // Registry routing backfills an omitted authMode on the built-in OpenAI row to forward.
       // Mirror only that default here; explicit non-forward modes still fail closed.
@@ -680,10 +699,17 @@ function routeModelInternal(
         ? { ...provider, authMode: "forward" as const }
         : provider;
       if (!isCanonicalOpenAiForwardProvider(providerForCanonicalCheck)) {
-        throw new NoEnabledOpenAiProviderError(nativeModelId);
+        throw new NoEnabledOpenAiProviderError(effectiveNativeModelId);
       }
       return {
-        ...routeResult(config, OPENAI_CODEX_PROVIDER_ID, provider, nativeModelId, "explicit-account", "account-namespace"),
+        ...routeResult(
+          config,
+          OPENAI_CODEX_PROVIDER_ID,
+          provider,
+          effectiveNativeModelId,
+          "explicit-account",
+          redirect.redirected ? "blocked-model-redirect" : "account-namespace",
+        ),
         // Exact account injection uses the pool credential machinery even when the canonical
         // provider is globally Direct. The fixed id bypasses pool selection entirely.
         codexAccountMode: "pool",
@@ -691,6 +717,32 @@ function routeModelInternal(
         codexAccountNamespace: namespace,
       };
     }
+  }
+
+  const redirect = resolveBlockedModelRedirectChain(config, modelId);
+  if (redirect.redirected) {
+    const targetRoute = routeModelInternal(
+      config,
+      redirect.targetModel,
+      bypassCombos,
+      policyEvidence,
+      allowCompactionNativeFallback,
+    );
+    const routeDecision = targetRoute.routeDecision
+      ? {
+          ...targetRoute.routeDecision,
+          requestedModel: modelId,
+          selected: {
+            ...targetRoute.routeDecision.selected,
+            reason: "blocked-model-redirect",
+          },
+        }
+      : undefined;
+    return {
+      ...targetRoute,
+      routeReason: "blocked-model-redirect",
+      ...(routeDecision ? { routeDecision } : {}),
+    };
   }
 
   if (!bypassCombos && !preservesPhysicalComboProvider(config)) {
