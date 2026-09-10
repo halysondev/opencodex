@@ -370,7 +370,7 @@ export const providerConfigSchema = z.object({
   xaiResponsesXSearch: z.boolean().optional(),
   xaiResponsesDefaultVersion: z.number().int().positive().optional().catch(undefined),
   zaiResponsesDefaultVersion: z.number().int().positive().optional().catch(undefined),
-  requestTransforms: z.array(z.string().min(1))
+  requestTransforms: z.array(z.string().trim().min(1))
     .transform(normalizeNonBlankStringArray)
     .optional(),
 }).passthrough();

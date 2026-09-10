@@ -160,7 +160,7 @@ export const configSchema = z.object({
   emptyCompletionRetry: z.boolean().optional().catch(false),
   // Header suppression changes what Codex sees, so absence and malformed edits stay off.
   dropCodexSafetyBuffering: z.boolean().optional().catch(false),
-  requestTransforms: z.array(z.string().min(1))
+  requestTransforms: z.array(z.string().trim().min(1))
     .transform(normalizeNonBlankStringArray)
     .optional(),
   // A malformed hand edit must not silently stop opening the browser: fall back

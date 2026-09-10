@@ -667,17 +667,6 @@ function nativeContextOverlayError(raw: Record<string, unknown>): string | null 
  * string, or null when the provider may be persisted. Caller-controlled names/fields are
  * redacted and JSON-escaped so secrets never reach the response.
  */
-function requestTransformsConfigError(value: unknown, field = "requestTransforms"): string | null {
-  if (value === undefined) return null;
-  if (!Array.isArray(value)) return `${field} must be an array`;
-  for (const [index, entry] of value.entries()) {
-    if (typeof entry !== "string" || !entry.trim()) {
-      return `${field}.${index} must be a nonblank string`;
-    }
-  }
-  return null;
-}
-
 export function providerManagementConfigError(
   name: unknown,
   provider: unknown,
@@ -687,6 +676,9 @@ export function providerManagementConfigError(
     return "provider must be a plain object";
   }
   const raw = provider as Record<string, unknown>;
+  if (Object.hasOwn(raw, "requestTransforms")) {
+    return "requestTransforms may only be configured in the local config file";
+  }
   const capabilitiesError = modelCapabilitiesConfigError(raw.modelCapabilities);
   if (capabilitiesError) return capabilitiesError;
   const pinsError = providerReasoningPinsConfigError(raw);
@@ -755,7 +747,6 @@ export function providerManagementConfigError(
     // validation and then rejected by the seed comparison, so canonical OpenAI could never
     // set OR clear it — the value was admitted and then refused in the same request.
     delete canonicalCandidate.annotateEmptyToolOutputs;
-    delete canonicalCandidate.requestTransforms;
     // Canonical ChatGPT keeps WebSocket as the default, but an operator may
     // select the existing HTTP/SSE path without changing its auth or endpoint.
     if (raw.upstreamWebsocket !== undefined) {
@@ -874,8 +865,6 @@ export function providerManagementConfigError(
   if (jsonSchemaOptOutError) return `provider ${name} ${jsonSchemaOptOutError}`;
   const retainModelsError = nonBlankStringArrayConfigError(raw.retainModels, "retainModels");
   if (retainModelsError) return `provider ${name} ${retainModelsError}`;
-  const requestTransformsError = requestTransformsConfigError(raw.requestTransforms);
-  if (requestTransformsError) return `provider ${name} ${requestTransformsError}`;
   const toolReasoningOptOutError = nonBlankStringArrayConfigError(
     raw.omitReasoningEffortWithToolsModels,
     "omitReasoningEffortWithToolsModels",
@@ -950,7 +939,7 @@ export function copyIfDefined<K extends keyof OcxProviderConfig>(
  * admission. `satisfies Record<keyof OcxProviderConfig, ...>` makes a newly added
  * provider field fail typecheck until it is deliberately classified.
  *
- * `editor` fields are user-authored, `redacted` fields may contain credentials,
+ * `editor` fields are user-authored, `redacted` fields contain credentials or local-only authority,
  * and `runtime` fields are observations/limits that must never become editor write
  * authority. MCP and desktop executor blocks are redacted as a whole because both
  * contain arbitrary environment variables and/or headers.
@@ -1067,7 +1056,8 @@ const PROVIDER_CONFIG_FIELD_POLICY = {
   noPenaltyModels: "editor",
   noStructuredOutputModels: "editor",
   noJsonSchemaModels: "editor",
-  requestTransforms: "editor",
+  // Executable local module paths are neither public DTO data nor editor authority.
+  requestTransforms: "redacted",
   omitReasoningEffortWithToolsModels: "editor",
   parallelToolCalls: "editor",
   pinParallelToolCallsFalse: "editor",
