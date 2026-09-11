@@ -276,3 +276,7 @@ Dashboard Fast-row persistence and client refresh follow the [Fast selector rows
 Codex compaction can select a request-local model through the
 [existing Responses handlers](transports/responses-failover.md#compaction-routing-overrides) for the configured
 manual and automatic triggers, while subsequent turns keep their conversation settings. The optional [ongoing priority failback](providers/openai-accounts.md#ongoing-priority-failback) is distinct from default cache affinity and changes no credential-eligibility boundary.
+
+ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
+client integration exports. Their profile, catalog and transport contract is maintained in
+[ZCode saved accounts](adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.

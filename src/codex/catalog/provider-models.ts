@@ -248,7 +248,7 @@ export async function fetchProviderModelsWithAuth(
   );
   if (prov.adapter === "zcode") {
     try {
-      const models = discoverZcodeModels().map(model => ({
+      const models = discoverZcodeModels(prov.zcodeAccountId).map(model => ({
         id: model.id, provider: name,
         ...catalogHintsFromProviderConfig(name, prov, model.id, contextCap, metadataModelIdCaseFold, captured.effectiveAlias),
         displayName: model.label,

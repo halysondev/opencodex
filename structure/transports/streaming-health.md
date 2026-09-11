@@ -537,3 +537,7 @@ independent API credentials, unavailable-mode diagnostics and safe probe outcome
 Dashboard Fast-row persistence and client refresh follow the [Fast selector rows setting contract](../gui-and-management-api.md#fast-selector-rows-setting).
 
 WebSocket [compaction routing selection](responses-failover.md#compaction-routing-overrides) uses per-frame metadata; handshake metadata cannot supply a later frame's trigger.
+
+ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
+client integration exports. Their profile, catalog and transport contract is maintained in
+[ZCode saved accounts](../adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.

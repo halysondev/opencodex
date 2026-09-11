@@ -66,3 +66,7 @@ Account quota surfaces use [safe probe diagnostics](transports/inventory.md#acco
 Native-main reauthentication separates polling lifetime from flow ownership: a non-2xx GET normally stops polling, while cancellation requested for the same owned flow preserves the pending/committing device state and existing polling cadence even before DELETE settles. A retryable DELETE failure preserves or restores Cancel retry without a second login POST, and later trusted terminal results remain observable and release ownership.
 
 Dashboard Fast-row persistence and client refresh follow the [Fast selector rows setting contract](gui-and-management-api.md#fast-selector-rows-setting).
+
+ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
+client integration exports. Their profile, catalog and transport contract is maintained in
+[ZCode saved accounts](adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.

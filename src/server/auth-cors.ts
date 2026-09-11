@@ -678,6 +678,10 @@ export function providerManagementConfigError(
   const raw = provider as Record<string, unknown>;
   const capabilitiesError = modelCapabilitiesConfigError(raw.modelCapabilities);
   if (capabilitiesError) return capabilitiesError;
+  if (raw.zcodeAccountId !== undefined && (raw.adapter !== "zcode" || typeof raw.zcodeAccountId !== "string"
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(raw.zcodeAccountId))) {
+    return "zcodeAccountId must identify a saved ZCode account.";
+  }
   const pinsError = providerReasoningPinsConfigError(raw);
   if (pinsError) return pinsError;
   if (name === "openai" && (Object.hasOwn(raw, "autoReviewModel") || Object.hasOwn(raw, "autoReviewModelOverrides"))) {
@@ -944,6 +948,7 @@ export function copyIfDefined<K extends keyof OcxProviderConfig>(
 type ProviderConfigFieldPolicy = "editor" | "redacted" | "runtime";
 
 const PROVIDER_CONFIG_FIELD_POLICY = {
+  zcodeAccountId: "editor",
   alias: "editor",
   modelAliases: "editor",
   modelDisplayNames: "editor",

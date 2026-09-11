@@ -448,3 +448,7 @@ Dashboard Fast-row persistence and client refresh follow the [Fast selector rows
 The [compaction routing override](transports/responses-failover.md#compaction-routing-overrides) uses explicit request-kind and trigger metadata, independently of spawned-child markers.
 
 Ongoing priority failback keeps model-detour and independent-quota affinity isolated; preview remains read-only and no child changes an unrelated shared cursor. The routing details live in [OpenAI account operations](providers/openai-accounts.md#ongoing-priority-failback).
+
+ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
+client integration exports. Their profile, catalog and transport contract is maintained in
+[ZCode saved accounts](adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.

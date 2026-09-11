@@ -586,3 +586,7 @@ the existing snapshot; the fetch retains its own abort deadline. Routed effort r
 `src/reasoning-effort.ts` use a snapshot immediately and request a best-effort background refresh
 only when an existing snapshot answers with an expired ladder. Missing or corrupt snapshots do
 not fetch on the request path; catalog sync owns their bootstrap.
+
+ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
+client integration exports. Their profile, catalog and transport contract is maintained in
+[ZCode saved accounts](adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.

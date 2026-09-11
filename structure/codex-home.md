@@ -378,3 +378,7 @@ Upstream API-key usage follows the [physical-attempt account attribution contrac
 Stored Direct substitution follows the [credential identity contract](providers/openai-accounts.md#sidecars-management-and-ui): both synchronous and asynchronous materializers discard the caller account header before applying the stored credential; ordinary native Direct passthrough is unchanged.
 
 Native-main owner claims and credential-generation backoff remain authoritative during [priority failback priming](providers/openai-accounts.md#ongoing-priority-failback); the preference grants no access through a fenced main profile.
+
+ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
+client integration exports. Their profile, catalog and transport contract is maintained in
+[ZCode saved accounts](adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.
