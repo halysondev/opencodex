@@ -51,10 +51,11 @@ export async function prepareResponsesSidecarAuth(
   const visionDescribeTerminal = options.visionDescribeTerminal === true;
   const routedCompaction = parsed._compactionRequest === true
     && (!isCanonicalOpenAiForwardProvider(route.provider) || parsed._portableCompaction === true);
-  // Opt-in native agents own the entire execution path. Do not turn an unsupported attachment
-  // into a separate direct-API inference (or resolve helper credentials) before their adapter.
+  // Native agents retain tool execution. An explicit vision-only capability allows the
+  // configured describer to turn input images into text, without enabling other helper tools.
   const nativeAgentOwnsExecution = transportState.adapter.allowExternalSidecars === false;
-  const needsOpenAiVision = !nativeAgentOwnsExecution && !visionDescribeTerminal
+  const allowsVisionSidecar = !nativeAgentOwnsExecution || transportState.adapter.allowVisionSidecar === true;
+  const needsOpenAiVision = allowsVisionSidecar && !visionDescribeTerminal
     && shouldResolveOpenAiVisionSidecar(config, route.provider, route.modelId, parsed, route.providerName);
   const needsOpenAiSearch = !nativeAgentOwnsExecution && !routedCompaction && !transportState.adapter.runTurn
     && (shouldResolveOpenAiWebSearchSidecar(config, parsed, isPassthrough)
@@ -122,7 +123,7 @@ export async function prepareResponsesSidecarAuth(
   // call must never plan another describe. The flag arrives from the Chat
   // surface (whose bridge rebuilds headers) or as the raw header for native
   // Responses callers. Marked + text-only routed model → strip, depth cap 1.
-  const visionPlan = visionDescribeTerminal || nativeAgentOwnsExecution
+  const visionPlan = visionDescribeTerminal || !allowsVisionSidecar
     ? undefined
     : planVisionSidecar(config, route.provider, route.modelId, parsed, openAiSidecar, {
       admission: options.admission, codexAuthPolicy: options.codexAuthPolicy, providerName: route.providerName,
@@ -144,7 +145,7 @@ export async function prepareResponsesSidecarAuth(
       // outcome already consumed it, so this generation-bound release is a safe no-op.
       if (!needsOpenAiSearch) openAiSidecar?.releaseProbeLease?.();
     }
-  } else if (!nativeAgentOwnsExecution && requiresVisionPreprocessing(config, route.provider, route.modelId, route.providerName)) {
+  } else if (allowsVisionSidecar && requiresVisionPreprocessing(config, route.provider, route.modelId, route.providerName)) {
     // Image capability is not positively proven but no sidecar plan is dispatchable: fail closed.
     // Never forward raw image bytes to an unverified upstream.
     stripImagesInPlace(parsed, translatorBudget);
