@@ -25,6 +25,7 @@ export type {
 export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
   ...PROVIDER_REGISTRY_CORE,
   ...PROVIDER_REGISTRY_EXTENDED,
+
 ];
 
 export function providerRegistryFastWireError(

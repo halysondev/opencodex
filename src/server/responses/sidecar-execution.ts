@@ -145,13 +145,14 @@ export async function executeResponsesSidecars(
   //   - non-runTurn: web-search wins over image when both eligible (documented priority)
   //   - runTurn: image bridge may run (it supports runTurn); web-search is skipped so runTurn
   //     can proceed for web-search-only turns
-  const wsPlan = !routedCompaction
+  const nativeAgentOwnsExecution = transportState.adapter.allowExternalSidecars === false;
+  const wsPlan = !routedCompaction && !nativeAgentOwnsExecution
     ? planWebSearch(config, parsed, false, route.provider, route.modelId, openAiSidecar, {
       admission: options.admission, codexAuthPolicy: options.codexAuthPolicy, providerName: route.providerName,
     })
     : undefined;
-  const imgPlan = !routedCompaction ? await planImageBridge(config, parsed, route.provider) : undefined;
-  const vidPlan = !routedCompaction ? await planVideoBridge(config, parsed, route.provider) : undefined;
+  const imgPlan = !routedCompaction && !nativeAgentOwnsExecution ? await planImageBridge(config, parsed, route.provider) : undefined;
+  const vidPlan = !routedCompaction && !nativeAgentOwnsExecution ? await planVideoBridge(config, parsed, route.provider) : undefined;
   const canRunWebSearch = !!wsPlan && !transportState.adapter.runTurn;
   const rotateSidecarProviderOn429 = async (
     retryAfter: string | null,

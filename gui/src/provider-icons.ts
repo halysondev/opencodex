@@ -12,6 +12,7 @@ const PROVIDER_ICON_ALIASES: Record<string, string> = {
   "command-code": "commandcode-color.svg",
   commandcode: "commandcode-color.svg",
   cursor: "cursor-color.svg",
+  zcode: "zcode.svg",
   deepseek: "deepseek-color.svg",
   /*
    * One mark for the merged Devin provider. `devin` is Cognition's cloud; the
@@ -174,6 +175,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   stepfun: "StepFun",
   "tencent-coding-plan": "Tencent Cloud Coding Plan",
   codebuddy: "CodeBuddy",
+  zcode: "ZCode",
   "codebuddy-cn": "CodeBuddy CN",
   qoder: "Qoder",
   "qoder-cn": "Qoder CN",

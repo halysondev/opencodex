@@ -133,7 +133,7 @@ async function handleResponsesInner(
       sendBudgetState,
     );
     if (sidecarPlans instanceof Response) return sidecarPlans;
-    const completionPolicy = createResponsesCompletionPolicy(requestContext, sidecarState);
+    const completionPolicy = createResponsesCompletionPolicy(requestContext, sidecarState, transportState.adapter);
     if (transportState.adapter.runTurn) return await executeResponsesRunTurn(
       requestContext,
       admissionState,

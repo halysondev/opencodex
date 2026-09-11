@@ -51,9 +51,12 @@ export async function prepareResponsesSidecarAuth(
   const visionDescribeTerminal = options.visionDescribeTerminal === true;
   const routedCompaction = parsed._compactionRequest === true
     && (!isCanonicalOpenAiForwardProvider(route.provider) || parsed._portableCompaction === true);
-  const needsOpenAiVision = !visionDescribeTerminal
+  // Opt-in native agents own the entire execution path. Do not turn an unsupported attachment
+  // into a separate direct-API inference (or resolve helper credentials) before their adapter.
+  const nativeAgentOwnsExecution = transportState.adapter.allowExternalSidecars === false;
+  const needsOpenAiVision = !nativeAgentOwnsExecution && !visionDescribeTerminal
     && shouldResolveOpenAiVisionSidecar(config, route.provider, route.modelId, parsed, route.providerName);
-  const needsOpenAiSearch = !routedCompaction && !transportState.adapter.runTurn
+  const needsOpenAiSearch = !nativeAgentOwnsExecution && !routedCompaction && !transportState.adapter.runTurn
     && (shouldResolveOpenAiWebSearchSidecar(config, parsed, isPassthrough)
       || shouldResolveOpenAiPassthroughWebSearchBridge(route.provider, parsed, isPassthrough));
   if (needsOpenAiVision || needsOpenAiSearch) {
@@ -119,7 +122,7 @@ export async function prepareResponsesSidecarAuth(
   // call must never plan another describe. The flag arrives from the Chat
   // surface (whose bridge rebuilds headers) or as the raw header for native
   // Responses callers. Marked + text-only routed model → strip, depth cap 1.
-  const visionPlan = visionDescribeTerminal
+  const visionPlan = visionDescribeTerminal || nativeAgentOwnsExecution
     ? undefined
     : planVisionSidecar(config, route.provider, route.modelId, parsed, openAiSidecar, {
       admission: options.admission, codexAuthPolicy: options.codexAuthPolicy, providerName: route.providerName,
@@ -141,7 +144,7 @@ export async function prepareResponsesSidecarAuth(
       // outcome already consumed it, so this generation-bound release is a safe no-op.
       if (!needsOpenAiSearch) openAiSidecar?.releaseProbeLease?.();
     }
-  } else if (requiresVisionPreprocessing(config, route.provider, route.modelId, route.providerName)) {
+  } else if (!nativeAgentOwnsExecution && requiresVisionPreprocessing(config, route.provider, route.modelId, route.providerName)) {
     // Image capability is not positively proven but no sidecar plan is dispatchable: fail closed.
     // Never forward raw image bytes to an unverified upstream.
     stripImagesInPlace(parsed, translatorBudget);

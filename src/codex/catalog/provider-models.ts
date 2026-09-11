@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { discoverZcodeModels } from "../../adapters/zcode/settings";
 import { atomicWriteFile, expandUserPath, getConfigDir, websocketsEnabled } from "../../config";
 import { resolveProviderApiKey } from "../../providers/key-store";
 import { CODEX_CONFIG_PATH, CODEX_MODELS_CACHE_PATH, DEFAULT_CATALOG_PATH, readRootTomlString, resolveCodexConfigPath } from "../paths";
@@ -245,6 +246,21 @@ export async function fetchProviderModelsWithAuth(
       ? [...models, vertexDefaultSeed]
       : models
   );
+  if (prov.adapter === "zcode") {
+    try {
+      const models = discoverZcodeModels().map(model => ({
+        id: model.id, provider: name,
+        ...catalogHintsFromProviderConfig(name, prov, model.id, contextCap, metadataModelIdCaseFold, captured.effectiveAlias),
+        displayName: model.label,
+        ...(model.contextWindow ? { contextWindow: typeof contextCap === "number" && contextCap > 0
+          ? Math.min(model.contextWindow, contextCap) : model.contextWindow } : {}),
+        inputModalities: ["text"],
+      } as CatalogModel));
+      return observed(withConfiguredRetention(models), "authoritative");
+    } catch {
+      return observed([], "degraded");
+    }
+  }
   if (prov.adapter === "qoder") {
     if (!apiKey) return observed(configured, "degraded");
     const profile = resolveQoderProfile(prov.baseUrl);

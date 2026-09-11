@@ -1,3 +1,4 @@
+import type { ProviderAdapter } from "../../adapters/base";
 import type { ResponsesRequestContext } from "./core-options";
 import type { ResponsesSidecarAuth } from "./request-sidecar-auth";
 import { emptyCompletionRetryEnabled } from "./empty-completion-guard";
@@ -6,6 +7,7 @@ import { emptyCompletionRetryEnabled } from "./empty-completion-guard";
 export function createResponsesCompletionPolicy(
   requestContext: Pick<ResponsesRequestContext, "config" | "options">,
   sidecarState: Pick<ResponsesSidecarAuth, "routedCompaction">,
+  adapter: Pick<ProviderAdapter, "replaySafe">,
 ) {
   const { config, options } = requestContext;
   const { routedCompaction } = sidecarState;
@@ -22,6 +24,7 @@ export function createResponsesCompletionPolicy(
   // intentionally outside this guard and retain their existing one-send wire behavior.
   const emptyCompletionGuardEnabled =
     emptyCompletionRetryEnabled(config)
+    && adapter.replaySafe !== false
     && !options.comboAttempt
     && !routedCompaction;
 

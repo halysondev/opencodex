@@ -1217,6 +1217,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
             ...grokEffortFields(m.reasoningEfforts ?? [], m.defaultReasoningEffort),
             ...modelCapabilityFields({
               reasoningEfforts: m.reasoningEfforts,
+              supportsToolUse: provider?.adapter !== "zcode",
               // contextWindow is already the post-cap effective value; contextCap is the raw
               // operator knob and over-reports models whose real window sits below it.
               contextWindow: m.contextWindow,
