@@ -121,7 +121,10 @@ changing contract inheritance or generic Responses Lite handling; see
 `zcode` uses the direct `zcode` wire and `agent-owned-with-explicit-opt-in` mutation contract.
 Unlike routed function tools, native ZCode actions are informational output only. Its `runTurn`
 sets `replaySafe: false`; accepted failures terminate incomplete rather than becoming automatic
-failover candidates. Launcher authority comes only from the operator environment, never requests.
+failover candidates. Launcher authority comes from either the operator environment or a separately persisted,
+GUI-consented Desktop connection. Data-plane requests and ordinary provider configuration cannot
+set command/workspace paths. The managed Desktop bootstrap keeps credential-bearing runtime
+descriptors inside its OS sandbox; the parent sees public model identities only.
 
 Adding a production adapter requires:
 
