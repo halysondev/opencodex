@@ -196,7 +196,8 @@ import type { ReadinessGate } from "../readiness";
 import type { WorkflowRefusalLog } from "../workflow-refusal";
 
 import { readyProtocolMetadata } from "../../remote/protocol";
-import { modelCapabilityFields } from "../models-capabilities";
+import { comboPublicModelId } from "../../combos/identifiers";
+import { catalogRowSupportsToolUse, modelCapabilityFields } from "../models-capabilities";
 import { createWebsocketHandler } from "./websocket-handler";
 
 export type ServerIngress = "public" | "unauthenticated-loopback" | "hub-management" | "claude-intercept";
@@ -1197,6 +1198,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
           const publicId = m.alias ?? `${m.provider}/${fastModelId ?? m.id}`;
           const isCombo = m.provider === "combo" && exactComboSlugs.has(publicId);
           const provider = config.providers[m.provider];
+          const combo = isCombo ? Object.entries(config.combos ?? {}).find(([id, value]) =>
+            comboPublicModelId(id, value) === publicId)?.[1] : undefined;
           const effective = provider
             ? (await import("../../providers/default-aliases")).effectiveModelAliases(
                 config,
@@ -1217,7 +1220,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
             ...grokEffortFields(m.reasoningEfforts ?? [], m.defaultReasoningEffort),
             ...modelCapabilityFields({
               reasoningEfforts: m.reasoningEfforts,
-              supportsToolUse: provider?.adapter !== "zcode",
+              supportsToolUse: catalogRowSupportsToolUse(provider, combo, config.providers),
               // contextWindow is already the post-cap effective value; contextCap is the raw
               // operator knob and over-reports models whose real window sits below it.
               contextWindow: m.contextWindow,
