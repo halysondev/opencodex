@@ -339,3 +339,7 @@ because a later deadline still produces the same message. The firing half needs 
 on real timers in the same file: silence after the first frame, the progress budget alone failing a
 turn when the silence budget is out of reach, and `turnEnded` cancelling the watchdog while the
 server holds the stream open.
+
+ZCode native tool execution in `src/adapters/zcode/desktop.ts` uses host user permissions by default,
+not client-side tool dispatch. `OCX_ZCODE_SANDBOX=1` explicitly enables the optional
+Bubblewrap workspace boundary; harness restrictions apply where the native process runs.

@@ -479,3 +479,7 @@ replacement-decoded; other malformed-body usage, quota, reset evidence and class
 status-only fallback. Rebuilt failures remain non-replayable and cyber-policy failures carry neither
 `Retry-After` nor quota-reset metadata. The [Responses failover contract](responses-failover.md)
 owns the bounded recovery and replay decisions.
+
+ZCode native tool execution in `src/adapters/zcode/desktop.ts` uses host user permissions by default,
+not client-side tool dispatch. `OCX_ZCODE_SANDBOX=1` explicitly enables the optional
+Bubblewrap workspace boundary; harness restrictions apply where the native process runs.
