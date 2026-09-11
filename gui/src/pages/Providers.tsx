@@ -700,7 +700,8 @@ export default function Providers({ apiBase }: { apiBase: string }) {
           modelsNotice.open(name, !config.providers[name]);
           fetchConfig();
           fetchOauth();
-          fetchProviderQuotas(true);
+          // Desktop connection is protocol/catalog only, not consent to validate accounts.
+          fetchProviderQuotas(name !== "zcode" && config.providers[name]?.adapter !== "zcode");
           bumpModelsRefresh();
         }}
         onAccountLogin={onAccountLogin}
