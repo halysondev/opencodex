@@ -1,4 +1,5 @@
 
+import { readZcodeQuota, zcodeQuotaIdentity } from "../adapters/zcode/quota";
 import { listCodexAuthAccountsSnapshot } from "../codex/auth-api";
 import { resolveEnvValue } from "../config";
 import { getAccountCredential, getAccountSet } from "../oauth/store";
@@ -118,6 +119,14 @@ async function maybeFetchProviderQuota(
 ): Promise<ProviderQuotaProbeResult> {
   if (provider.disabled === true) return null;
   try {
+    if (provider.adapter === "zcode") {
+      const result = await readZcodeQuota(provider);
+      if (!result) return AUTHORITATIVE_EMPTY_QUOTA;
+      const report: ProviderQuotaReport = { provider: name, label: "ZCode", source: "zcode-desktop",
+        quota: result.quota, updatedAt: result.quota.updatedAt, reverseEngineered: true };
+      accountReportCurrent.set(report, () => zcodeQuotaIdentity(provider) === result.identity);
+      return report;
+    }
     if (isBuiltInChatGptForwardProvider(name, provider)) {
       return fetchChatGptForwardQuota(config, name, provider, forceRefresh, prefetchedCodexSnapshot);
     }
@@ -177,6 +186,7 @@ let pendingProviderObservation: Promise<void> = Promise.resolve();
  * mirrors that discriminator instead of inventing a second notion of identity.
  */
 function providerObservationAccountKey(provider: string, config: OcxConfig): string {
+  if (config.providers[provider]?.adapter === "zcode") return `${provider}\u0000zcode:${zcodeQuotaIdentity(config.providers[provider])}`;
   const oauthAccountId = getAccountSet(provider)?.activeAccountId;
   if (oauthAccountId !== undefined) return `${provider}\u0000${oauthAccountId}`;
   const providerConfig = config.providers[provider];

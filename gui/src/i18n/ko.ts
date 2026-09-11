@@ -43,6 +43,7 @@ export const ko: Record<TKey, string> = {
   "audio.error.network": "연결에 실패했습니다. 프록시 주소를 확인하세요.",
   "audio.error.timeout": "응답 시간이 초과됐습니다. 다시 시도하세요.",
   "audio.error.protocol": "음성 응답 형식이 맞지 않습니다. 제공자 호환성을 확인하세요.",
+  "quota.remainingPercent": "{pct}% 남음",
   "zcodeUsage.title": "GLM Coding Plan · 시간대별 혜택",
   "zcodeUsage.zone": "{zone} 시간으로 표시합니다. 기준: 싱가포르(UTC+8).",
   "zcodeUsage.peak": "피크 시간: {until}까지 표준 모델 크레딧 요금입니다.",

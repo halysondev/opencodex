@@ -43,6 +43,7 @@ export const ja: Record<TKey, string> = {
   "audio.error.network": "接続に失敗しました。プロキシのアドレスを確認してください。",
   "audio.error.timeout": "応答がタイムアウトしました。もう一度お試しください。",
   "audio.error.protocol": "音声の応答形式が異なります。プロバイダーの互換性を確認してください。",
+  "quota.remainingPercent": "残り {pct}%",
   "zcodeUsage.title": "GLM Coding Plan · 時間帯別特典",
   "zcodeUsage.zone": "表示時刻：{zone}。基準：シンガポール（UTC+8）。",
   "zcodeUsage.peak": "ピーク時間：{until}まで通常のモデルクレジット料金。",

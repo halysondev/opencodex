@@ -1,3 +1,4 @@
+import { zcodeQuotaIdentity } from "../../adapters/zcode/quota";
 import { createHash } from "node:crypto";
 import { effectiveCodexAuthAccountId, listCodexAuthAccountsSnapshot } from "../../codex/auth-api";
 import { withoutRetiredCodexQuota, type StoredAccountQuota } from "../../codex/quota";
@@ -108,7 +109,7 @@ function cacheKey(config: OcxConfig): string {
         ? resolveProviderApiKey(provider.apiKey)?.trim()
         : undefined;
       const activeKeyId = resolvedKey ? apiKeyPoolEntryId(resolvedKey) : "none";
-      return `${name}:${provider.adapter}:${provider.authMode ?? "key"}:${providerCodexAccountMode(name, provider) ?? "none"}:${provider.disabled === true ? "off" : "on"}:${provider.baseUrl}:${activeKeyId}`;
+      return `${name}:${provider.adapter}:${provider.authMode ?? "key"}:${providerCodexAccountMode(name, provider) ?? "none"}:${provider.disabled === true ? "off" : "on"}:${provider.baseUrl}:${activeKeyId}${provider.adapter === "zcode" ? `:${zcodeQuotaIdentity(provider)}` : ""}`;
     })
     .sort()
     .join("|");

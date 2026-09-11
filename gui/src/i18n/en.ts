@@ -45,6 +45,7 @@ export const en = {
   "audio.error.network": "Connection failed. Check the proxy address.",
   "audio.error.timeout": "The request timed out. Try again.",
   "audio.error.protocol": "Unexpected audio response. Check provider compatibility.",
+  "quota.remainingPercent": "{pct}% remaining",
   "zcodeUsage.title": "GLM Coding Plan · time-based benefits",
   "zcodeUsage.zone": "Times shown in {zone}. Schedule reference: Singapore (UTC+8).",
   "zcodeUsage.peak": "Peak hours: standard model credit rate until {until}.",

@@ -43,6 +43,7 @@ export const ru: Record<TKey, string> = {
   "audio.error.network": "Ошибка подключения. Проверьте адрес прокси.",
   "audio.error.timeout": "Время ожидания истекло. Повторите попытку.",
   "audio.error.protocol": "Неожиданный аудиоответ. Проверьте совместимость провайдера.",
+  "quota.remainingPercent": "Осталось {pct}%",
   "zcodeUsage.title": "GLM Coding Plan · льготы по времени",
   "zcodeUsage.zone": "Время в {zone}. Основа расписания: Сингапур (UTC+8).",
   "zcodeUsage.peak": "Пиковые часы: стандартная ставка кредитов модели до {until}.",

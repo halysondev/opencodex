@@ -44,6 +44,7 @@ export const tr: Record<TKey, string> = {
   "audio.error.network": "Bağlantı başarısız. Proxy adresini kontrol edin.",
   "audio.error.timeout": "İstek zaman aşımına uğradı. Tekrar deneyin.",
   "audio.error.protocol": "Beklenmeyen ses yanıtı. Sağlayıcı uyumluluğunu kontrol edin.",
+  "quota.remainingPercent": "%{pct} kaldı",
   "zcodeUsage.title": "GLM Coding Plan · saat bazlı avantajlar",
   "zcodeUsage.zone": "Saatler {zone} diliminde gösterilir. Referans: Singapur (UTC+8).",
   "zcodeUsage.peak": "Yoğun saatler: {until} tarihine kadar standart model kredi tarifesi.",

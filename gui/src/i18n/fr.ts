@@ -43,6 +43,7 @@ export const fr: Record<TKey, string> = {
   "audio.error.network": "Connexion impossible. Vérifiez l’adresse du proxy.",
   "audio.error.timeout": "Délai dépassé. Réessayez.",
   "audio.error.protocol": "Réponse audio inattendue. Vérifiez la compatibilité du fournisseur.",
+  "quota.remainingPercent": "{pct}% restant",
   "zcodeUsage.title": "GLM Coding Plan · avantages horaires",
   "zcodeUsage.zone": "Heures affichées dans {zone}. Référence : Singapour (UTC+8).",
   "zcodeUsage.peak": "Heures de pointe : tarif standard en crédits jusqu’à {until}.",

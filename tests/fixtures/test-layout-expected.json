@@ -1626,6 +1626,6 @@
   "grok-47-build-fast-metadata.test.ts": "providers/xai",
   "zcode-adapter.test.ts": "providers",
   "zcode-transport.test.ts": "providers",
-  "zcode-routing.test.ts": "providers"
-  "zz-pr-coderabbit-readiness-revalidation.test.ts": "ci-workflows"
+  "zcode-routing.test.ts": "providers",
+  "zcode-quota.test.ts": "providers"
 }

@@ -43,6 +43,7 @@ export const zh: Record<TKey, string> = {
   "audio.error.network": "连接失败。请检查代理地址。",
   "audio.error.timeout": "请求超时。请重试。",
   "audio.error.protocol": "音频响应格式异常。请检查提供商兼容性。",
+  "quota.remainingPercent": "剩余 {pct}%",
   "zcodeUsage.title": "GLM Coding Plan · 时段优惠",
   "zcodeUsage.zone": "时间显示为 {zone}。时段基准：新加坡（UTC+8）。",
   "zcodeUsage.peak": "高峰时段：截至 {until} 按标准模型积分费率计费。",

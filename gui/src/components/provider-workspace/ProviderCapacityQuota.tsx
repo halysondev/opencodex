@@ -91,6 +91,7 @@ export function ProviderCapacityQuota({ report, pending }: { report: ProviderQuo
       {showsAggregate && <div className="pws-capacity-label">{t("pws.capacity.estimate")}</div>}
       {(primaryQuota || pending) && (
         <QuotaBars
+          showRemaining={report.source === "zcode-desktop"}
           quota={primaryQuota}
           threshold={80}
           t={t}
