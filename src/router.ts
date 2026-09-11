@@ -1,3 +1,4 @@
+import { desktopRoutingModelIds } from "./adapters/zcode/desktop";
 import type { CodexAccountMode, OcxConfig, OcxProviderConfig } from "./types";
 import { createHash } from "node:crypto";
 import { peekAuthStore } from "./oauth/store";
@@ -142,6 +143,9 @@ export function knownModelIdsForProvider(
 ): string[] {
   const ids = new Set<string>();
   for (const id of prov.models ?? []) ids.add(id);
+  if (prov.adapter === "zcode") {
+    for (const id of desktopRoutingModelIds()) ids.add(id);
+  }
   if (prov.defaultModel) ids.add(prov.defaultModel);
   const registry = providerMatchesRegistryTransportWithStaticGuards(provName, prov)
     ? PROVIDER_REGISTRY.find(entry => entry.id === provName)
