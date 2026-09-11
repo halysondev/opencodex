@@ -1,3 +1,4 @@
+import { sideChatCacheLogFields, type SideChatCacheMetrics } from "./side-chat-cache";
 import { createHash, type Hash } from "node:crypto";
 import { chmodSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -176,6 +177,7 @@ export interface PersistedUsageAttempt {
   effectiveEffort?: string;
   reasoningWireField?: string;
   reasoningWireValue?: string | number | boolean;
+  sideChatCache?: SideChatCacheMetrics;
   /** Adapter-produced tier fact for this physical attempt; absent on pre-B0 rows. */
   tierOutcome?: AttemptTierOutcome;
   /**
@@ -328,6 +330,7 @@ export interface PersistedUsageEntry {
   effectiveEffort?: string;
   reasoningWireField?: string;
   reasoningWireValue?: string | number | boolean;
+  sideChatCache?: SideChatCacheMetrics;
   /** Raw caller tier captured before routing, sanitized and bounded for durable logs. */
   callerServiceTier?: string;
   requestedServiceTier?: string;
@@ -764,6 +767,7 @@ function normalizeUsageAttempt(raw: unknown): PersistedUsageAttempt | null {
     ...(typeof attempt.reasoningWireField === "string" && attempt.reasoningWireField
       ? { reasoningWireField: capMetadataString(attempt.reasoningWireField) }
       : {}),
+    ...sideChatCacheLogFields(attempt.sideChatCache),
     ...(isValidReasoningWireValue(attempt.reasoningWireField, attempt.reasoningWireValue)
       ? typeof attempt.reasoningWireValue === "string"
         ? { reasoningWireValue: capMetadataString(attempt.reasoningWireValue) }
@@ -981,6 +985,7 @@ function normalizeUsageEntry(entry: PersistedUsageEntry): PersistedUsageEntry {
     ...(typeof entry.reasoningWireField === "string" && entry.reasoningWireField
       ? { reasoningWireField: capMetadataString(entry.reasoningWireField) }
       : {}),
+    ...sideChatCacheLogFields(entry.sideChatCache),
     ...(isValidReasoningWireValue(entry.reasoningWireField, entry.reasoningWireValue)
       ? typeof entry.reasoningWireValue === "string"
         ? { reasoningWireValue: capMetadataString(entry.reasoningWireValue) }

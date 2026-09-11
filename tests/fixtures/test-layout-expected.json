@@ -1620,5 +1620,7 @@
   "mimo-token-plan-capacity.test.ts": "providers",
   "command-code-tool-text-prose-split.test.ts": "providers",
   "cli-effort-slug.test.ts": "cli",
-  "grok-47-build-fast-metadata.test.ts": "providers/xai"
+  "grok-47-build-fast-metadata.test.ts": "providers/xai",
+  "side-chat-cache-metrics.test.ts": "usage",
+  "side-chat-cache-proxy.test.ts": "responses"
 }

@@ -66,6 +66,7 @@ import { restoreMuseToolNames } from "../../responses/muse-tool-name-alias";
 import { restorePlaintextV2AgentMessageCalls } from "../../responses/plaintext-v2-agent-messages";
 import {
   recordAdapterReasoning,
+  recordAdapterSideChatCache,
   recordAdapterTier,
   sealRequestAttemptIdentity,
   recordAttemptCredentialSource,
@@ -619,6 +620,7 @@ export async function preparePassthroughExchange(
       inspectedCompletionSeen = true;
       if (firstCompletion && (inspectedTerminal === null || firstTerminalAllowsRecall)) {
         completeSideChatCache(request, response);
+        recordAdapterSideChatCache(logCtx, request);
         // A model-less first completion permanently declines recall; later terminal
         // frames are hidden by the client boundary and cannot supply its identity.
         // Native inspection sees the pre-rewrite model. Only an actual terminal
