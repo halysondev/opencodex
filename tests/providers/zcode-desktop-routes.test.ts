@@ -465,11 +465,18 @@ test("partial catalog activation retries without login; busy and referenced acco
   expect(await (await f.call("remove", { accountId: a.accountId })).json()).toMatchObject({ error: "account_referenced" });
 });
 
-test("account removal recognizes case-insensitive provider aliases in routed selectors", async () => {
+test("account removal recognizes case-insensitive provider and model aliases in routed selectors", async () => {
   const f = accountFixture(), account = await f.login();
   const ready = await (await f.call("complete", { jobId: account.jobId })).json();
   f.ctx.config.providers[ready.providerName].alias = "personal";
   f.ctx.config.subagentModels = [`PeRsOnAl/${models[0]!.id}`];
+  expect(await (await f.call("remove", { accountId: account.accountId })).json())
+    .toEqual({ error: "account_referenced" });
+  expect(listAccounts().map(saved => saved.id)).toEqual([account.accountId]);
+  expect(f.ctx.config.providers[ready.providerName]).toBeDefined();
+
+  f.ctx.config.providers[ready.providerName].modelAliases = { [models[0]!.id]: "personal-glm" };
+  f.ctx.config.subagentModels = ["PeRsOnAl-GlM"];
   expect(await (await f.call("remove", { accountId: account.accountId })).json())
     .toEqual({ error: "account_referenced" });
   expect(listAccounts().map(saved => saved.id)).toEqual([account.accountId]);

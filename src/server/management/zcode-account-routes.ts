@@ -191,8 +191,12 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
       const names = Object.keys(ctx.config.providers).filter(name => ctx.config.providers[name]?.zcodeAccountId === id);
       const { providers: _providers, ...rest } = ctx.config;
       const namespaces = new Set(names.flatMap(name => {
-        const alias = ctx.config.providers[name]?.alias?.trim();
-        return [name, ...(alias ? [alias] : [])];
+        const provider = ctx.config.providers[name];
+        const alias = provider?.alias?.trim();
+        const modelAliases = Object.values(provider?.modelAliases ?? {})
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .map(value => value.trim());
+        return [name, ...(alias ? [alias] : []), ...modelAliases];
       }).map(name => name.toLowerCase()));
       if (configReferencesNamespaces(rest, namespaces)) return fail("account_referenced");
       // Revoke first. A failed config/catalog save is explicit and cannot silently use another account.
