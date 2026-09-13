@@ -382,8 +382,11 @@ export function catalogHintsFromProviderConfig(
   contextCap?: number,
   metadataModelIdCaseFold?: boolean,
   effectiveAlias?: string | null,
+  contextWindow?: number,
 ): Partial<CatalogModel> {
-  const hinted = applyProviderConfigHints(name, prov, { id, provider: name }, contextCap, metadataModelIdCaseFold, effectiveAlias);
+  const hinted = applyProviderConfigHints(name, prov, {
+    id, provider: name, ...(contextWindow ? { contextWindow } : {}),
+  }, contextCap, metadataModelIdCaseFold, effectiveAlias);
   const { provider: _provider, id: _id, ...hints } = hinted;
   return hints;
 }

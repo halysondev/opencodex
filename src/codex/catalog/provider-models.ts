@@ -252,6 +252,7 @@ export async function fetchProviderModelsWithAuth(
       const models = discoverZcodeModels(prov.zcodeAccountId).map(model => {
         const hints = catalogHintsFromProviderConfig(
           name, prov, model.id, contextCap, metadataModelIdCaseFold, captured.effectiveAlias,
+          model.contextWindow,
         );
         const reasoning = zcodeReasoningContract(model.id);
         return {
@@ -260,9 +261,7 @@ export async function fetchProviderModelsWithAuth(
           // future models expose no generic picker unless the operator configured one explicitly.
           ...(reasoning ?? (hints.reasoningEfforts === undefined ? { reasoningEfforts: [] } : {})),
           displayName: model.label,
-          ...(model.contextWindow ? { contextWindow: typeof contextCap === "number" && contextCap > 0
-            ? Math.min(model.contextWindow, contextCap) : model.contextWindow } : {}),
-          inputModalities: ["text"],
+          inputModalities: hints.inputModalities ?? ["text"],
         } as CatalogModel;
       });
       return observed(withConfiguredRetention(models), "authoritative");
