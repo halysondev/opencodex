@@ -76,6 +76,8 @@ their charge/release lifecycle while it asks the pure progressive decoder in
 charges nor releases translator budget; extracting it from `src/bridge/sse.ts` does not create a
 second retention owner or change terminal, failure, incomplete, or disposal release behavior.
 
+A saved-account ZCode refresh in `src/adapters/zcode/adapter.ts` completes before native dispatch or output admission. Caller cancellation stops only that request's wait on the shared official refresh, emits no native stream bytes, and does not transfer cancellation ownership to sibling requests.
+
 `src/adapters/openai-responses.ts` counts new compaction fragments, including surrogate pairs formed
 across deltas, while retaining snapshot/done/delta precedence and existing terminal ownership.
 Serialized request and buffered-response observations use byte counts without measurement arrays.

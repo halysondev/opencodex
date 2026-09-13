@@ -158,6 +158,27 @@ describe("ZCode local agent", () => {
       expect(events.at(-1)).toMatchObject({ type: "error", message: code, retryable: false });
     }
   });
+  test("saved-account cancellation stops only the caller waiting on a shared refresh", async () => {
+    const shared = Promise.withResolvers<void>();
+    let refreshFinished = false; let children = 0;
+    const work = shared.promise.finally(() => { refreshFinished = true; });
+    const adapter = createZcodeAdapter({ ...provider, zcodeAccountId: crypto.randomUUID() }, {
+      refreshAccount: async () => work,
+      client: () => { children++; return new FakeClient(); },
+    });
+    const events: AdapterEvent[] = [];
+    const controller = new AbortController();
+    const pending = adapter.runTurn!(request(), { headers: new Headers(), abortSignal: controller.signal,
+      translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
+    controller.abort();
+    const stopped = await Promise.race([pending.then(() => true), Bun.sleep(50).then(() => false)]);
+    expect(stopped).toBe(true);
+    expect(refreshFinished).toBe(false);
+    expect(children).toBe(0);
+    expect(events.at(-1)).toMatchObject({ type: "error", message: "ZCode request cancelled before dispatch.", retryable: false });
+    shared.resolve(); await work;
+    expect(refreshFinished).toBe(true);
+  });
   test("advanced settings allow an isolated home when the proxy HOME is absent", () => {
     const settings = fixture();
     const env = { OCX_ZCODE_NATIVE_TOOLS: "1", OCX_ZCODE_COMMAND: JSON.stringify(["/isolated-launcher"]),

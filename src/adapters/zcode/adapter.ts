@@ -9,6 +9,7 @@ import { zcodeThoughtLevel } from "./reasoning";
 type Client = Pick<ZcodeClient, "request" | "close" | "onEvent" | "onFailure">;
 const MAX_ZCODE_INPUT_CHARS = 200_000;
 const HISTORY_TRUNCATED = "[Earlier OpenCodex conversation history truncated to fit the ZCode bridge.]";
+const CANCELLED_BEFORE_DISPATCH = "ZCode request cancelled before dispatch.";
 const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_identity_mismatch", "native_oauth_failed"]);
 export interface ZcodeAdapterDeps {
   settings?: () => ZcodeSettings;
@@ -22,8 +23,21 @@ export interface ZcodeAdapterDeps {
 const locks = new Map<string, Promise<void>>();
 const sessions = new Map<string, string>();
 let reservations = 0;
+/** Stop only this caller's wait; the official refresh may be shared by another request. */
+function waitForSharedRefresh(work: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return work;
+  if (signal.aborted) { void work.catch(() => {}); return Promise.reject(new Error(CANCELLED_BEFORE_DISPATCH)); }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new Error(CANCELLED_BEFORE_DISPATCH));
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      () => { signal.removeEventListener("abort", onAbort); resolve(); },
+      error => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
 async function lock(key: string, signal?: AbortSignal): Promise<() => void> {
-  if (signal?.aborted) throw new Error("ZCode request cancelled before dispatch.");
+  if (signal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
   if (reservations >= 32) throw new Error("ZCode profile queue is full.");
   reservations++;
   const previous = locks.get(key) ?? Promise.resolve();
@@ -40,10 +54,10 @@ async function lock(key: string, signal?: AbortSignal): Promise<() => void> {
   let onAbort = () => {};
   try {
     await Promise.race([previous, new Promise<never>((_, reject) => {
-      onAbort = () => reject(new Error("ZCode request cancelled before dispatch."));
+      onAbort = () => reject(new Error(CANCELLED_BEFORE_DISPATCH));
       signal?.addEventListener("abort", onAbort, { once: true });
     })]);
-    if (signal?.aborted) throw new Error("ZCode request cancelled before dispatch.");
+    if (signal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
   } catch (error) { release(); throw error; }
   finally { signal?.removeEventListener("abort", onAbort); }
   return release;
@@ -153,9 +167,14 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
       let stop = () => {};
       const cancelled = () => stop();
       try {
+        if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
         if (provider.zcodeAccountId && !deps.settings) {
-          try { await (deps.refreshAccount ?? refreshAccount)(provider.zcodeAccountId); }
+          try {
+            const refresh = (deps.refreshAccount ?? refreshAccount)(provider.zcodeAccountId);
+            await waitForSharedRefresh(refresh, incoming.abortSignal);
+          }
           catch (error) {
+            if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
             const code = error instanceof Error && SAFE_ACCOUNT_REFRESH_ERRORS.has(error.message)
               ? error.message : "account_refresh_failed";
             throw new Error(code);
@@ -201,7 +220,7 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         void controller.promise.catch(() => {});
         stop = () => { controller.reject(new Error("ZCode turn cancelled or timed out.")); void active.close(); };
         incoming.abortSignal?.addEventListener("abort", cancelled, { once: true });
-        if (incoming.abortSignal?.aborted) throw new Error("ZCode request cancelled before dispatch.");
+        if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
         timer = setTimeout(stop, deps.timeoutMs ?? 300_000);
         heartbeat = setInterval(() => emit({ type: "heartbeat" }), 5_000);
         active.onFailure = error => controller.reject(error);
@@ -247,7 +266,7 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
           sessionId = id;
         }
         await active.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous" });
-        if (incoming.abortSignal?.aborted) throw new Error("ZCode request cancelled before dispatch.");
+        if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
         // Commit visible output before dispatch, so streaming combo routing cannot replay an
         // accepted task that already changed files. Post-send failure is non-retryable incomplete.
         emit({ type: "text_delta", text: settings.hostExecution

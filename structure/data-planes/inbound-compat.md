@@ -409,7 +409,7 @@ and inherited native tools, then removes the disposable turn home before returni
 
 ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
 client integration exports. Their profile, catalog and transport contract is maintained in
-[ZCode saved accounts](../adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.
+[ZCode saved accounts](../adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference. A cancelled caller stops waiting for a shared official account refresh without cancelling the refresh for other requests.
 
 For ZCode, input-image description is the explicit exception to native-agent helper exclusion;
 see [ZCode vision input adaptation](../adapters/registry.md#zcode-vision-input-adaptation). The configured
