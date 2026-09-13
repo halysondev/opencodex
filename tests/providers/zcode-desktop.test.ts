@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -212,13 +212,23 @@ test("host bootstrap reads and writes outside workspace without touching the sou
   const runtime = join(root, "official-runtime-fixture.cjs");
   writeFileSync(runtime, `
     const fs=require("node:fs");
+    const os=require("node:os");
+    const path=require("node:path");
+    const {spawnSync}=require("node:child_process");
     require("node:readline").createInterface({input:process.stdin}).on("line",line=>{
       const r=JSON.parse(line);
-      const path=${JSON.stringify(external)};
-      const value=fs.readFileSync(path,"utf8");
-      fs.writeFileSync(path,value);
+      const external=${JSON.stringify(external)};
+      const value=fs.readFileSync(external,"utf8");
+      fs.writeFileSync(external,value);
+      const runtimeHome=os.homedir();
+      const settings=JSON.parse(fs.readFileSync(path.join(runtimeHome,".zcode/cli/config.json"),"utf8"));
+      const nativeHome=spawnSync(process.execPath,["-e","process.stdout.write(require('node:os').homedir())"],
+        {encoding:"utf8",env:process.env}).stdout;
       process.stdout.write(JSON.stringify({id:r.id,result:{read:value,written:true,cwd:process.cwd(),
-        home:process.env.HOME,dataBase:process.env.ZCODE_DATA_BASE_DIR,args:process.argv.slice(2)}})+"\\n");
+        hostHome:process.env.HOME,runtimeHome,nativeHome,dataBase:process.env.ZCODE_DATA_BASE_DIR,
+        runtimeMarker:Object.hasOwn(process.env,"OCX_ZCODE_RUNTIME_HOME"),args:process.argv.slice(2),
+        providerIds:Object.keys(settings.provider),mainModel:settings.model.main,
+        storageDir:settings.storage.dir}})+"\\n");
     });
   `);
   const settings = { command: [resolveDesktopNode(), fileURLToPath(new URL("../../src/adapters/zcode/desktop-bootstrap.cjs", import.meta.url)),
@@ -233,12 +243,15 @@ test("host bootstrap reads and writes outside workspace without touching the sou
       const state = await client.request("workspace/readState", {}, 3000);
       const runtimeArgs = state.args as string[];
       expect(state).toMatchObject({ read: "report fixture", written: true, cwd: workspace,
-        home: homedir(), dataBase: home });
-      expect(runtimeArgs.slice(0, 2)).toEqual(["app-server", "--settings"]);
-      expect(runtimeArgs[2]).toContain("/turn-");
-      expect(runtimeArgs[2]).toEndWith("/config.json");
+        hostHome: homedir(), nativeHome: homedir(), dataBase: home, runtimeMarker: false,
+        providerIds: ["builtin:zai-coding-plan"], mainModel: "builtin:zai-coding-plan/model",
+        storageDir: join(home, ".zcode") });
+      expect(runtimeArgs).toEqual(["app-server"]);
+      expect(state.runtimeHome).toStartWith(join(home, "turn-"));
+      expect(state.runtimeHome).not.toBe(homedir());
     } finally { await client.close(); }
   }
+  expect(readdirSync(home).filter(name => name.startsWith("turn-"))).toEqual([]);
   expect(readFileSync(config, "utf8")).toBe(original);
 });
 

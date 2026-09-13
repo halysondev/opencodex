@@ -274,8 +274,10 @@ Bubblewrap workspace boundary; harness restrictions apply where the native proce
 consented managed connections use the official runtime's non-interactive `yolo` mode because the
 bridge cannot project interactive approval prompts; advanced operator launchers retain `edit` mode.
 The host child inherits only a named allowlist of tool environment variables and keeps ZCode-owned
-credentials/session state under its private data root, so host tools work without copying unrelated
-provider secrets into the child.
+credentials/session state under its private data root. Because the official app server has no
+config-path option, a one-shot Node preload redirects only its internal `os.homedir()` lookup to a
+turn-scoped private home; the process environment retains the user's real `HOME`, so native host
+tools work without copying unrelated provider secrets into the child.
 
 ## ZCode saved accounts
 

@@ -1,6 +1,6 @@
 // Runs on the host by default, or inside an explicitly enabled OS sandbox. Desktop credentials/configuration are mounted read-only.
-// Only the official runtime consumes provider keys. The compatible settings file lives in tmpfs,
-// never in OpenCodex's data directory, management responses, logs or the Desktop profile.
+// Only the official runtime consumes provider keys. The compatible settings file is private and
+// turn-scoped; it never reaches management responses, logs or the Desktop source profile.
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 
@@ -40,8 +40,8 @@ function desktopModelCatalog(config) {
 }
 module.exports = { normalizeDesktopConfig, desktopModelCatalog };
 if (require.main === module) {
-  let temporarySettings;
-  const cleanup = () => { if (temporarySettings) fs.rmSync(temporarySettings, { recursive: true, force: true }); };
+  let temporaryHome;
+  const cleanup = () => { if (temporaryHome) fs.rmSync(temporaryHome, { recursive: true, force: true }); };
   process.on("exit", cleanup);
   try {
     const args = process.argv.slice(2);
@@ -54,19 +54,24 @@ if (require.main === module) {
     let env = process.env;
     let settingsPath = `${env.HOME}/.zcode/cli/config.json`;
     if (host) {
-      // Keep only ZCode-owned state private. HOME/XDG remain the real host environment so
-      // native tools behave like ordinary host tools rather than an accidental soft sandbox.
+      // ZCode reads user config from os.homedir() and exposes no config-path CLI flag. Patch
+      // that lookup only in the official runtime process; process.env.HOME stays real for
+      // the native tools it starts. This is state separation, not filesystem confinement.
       const paths = require("node:path");
       const stateHome = args[4];
       if (!paths.isAbsolute(stateHome) || stateHome.includes("\0")) throw new Error("invalid state home");
-      temporarySettings = fs.mkdtempSync(paths.join(stateHome, "turn-"));
-      settingsPath = paths.join(temporarySettings, "config.json");
+      const stableDb = paths.join(stateHome, ".zcode/cli/db");
+      temporaryHome = fs.mkdtempSync(paths.join(stateHome, "turn-"));
+      fs.mkdirSync(paths.join(temporaryHome, ".zcode/cli"), { recursive: true, mode: 0o700 });
+      fs.symlinkSync(stableDb, paths.join(temporaryHome, ".zcode/cli/db"), "dir");
+      settingsPath = paths.join(temporaryHome, ".zcode/cli/config.json");
       config.storage = { dir: paths.join(stateHome, ".zcode") };
-      env = { ...process.env, ZCODE_DATA_BASE_DIR: stateHome };
+      env = { ...process.env, ZCODE_DATA_BASE_DIR: stateHome, OCX_ZCODE_RUNTIME_HOME: temporaryHome };
     }
     fs.writeFileSync(settingsPath, JSON.stringify(config), { mode: 0o600, flag: "wx" });
-    const childArgs = [host ? args[1] : "/runtime/zcode.cjs", "app-server"];
-    if (host) childArgs.push("--settings", settingsPath);
+    const childArgs = host
+      ? ["--require", require.resolve("./desktop-host-preload.cjs"), args[1], "app-server"]
+      : ["/runtime/zcode.cjs", "app-server"];
     const child = spawn(host ? process.execPath : "/usr/bin/node", childArgs, {
       stdio: ["pipe", "inherit", "inherit"], shell: false, env, ...(host ? { cwd: args[3] } : {}),
     });
