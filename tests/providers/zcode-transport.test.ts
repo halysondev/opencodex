@@ -7,7 +7,7 @@ import { accountRuntimeBusy, refreshAccount } from "../../src/adapters/zcode/acc
 import type { JsonObject, ZcodeSettings } from "../../src/adapters/zcode/settings";
 
 const settings: ZcodeSettings = { command: ["/isolated/launcher", "argument with spaces"], home: "/isolated/home",
-  workspace: "/workspace", settingsPath: "/isolated/config.json", scope: "test" };
+  workspace: "/workspace", settingsPath: "/isolated/config.json", lockKey: "profile", scope: "test" };
 function fixture(managed = false, hostExecution = false, accountId?: string, autoExit = true) {
   const child = new EventEmitter() as EventEmitter & { pid: number; stdin: Writable; stdout: PassThrough; stderr: PassThrough; kill: (signal?: string) => boolean };
   const writes: JsonObject[] = [];

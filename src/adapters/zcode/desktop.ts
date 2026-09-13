@@ -162,6 +162,9 @@ function settingsFor(connection: Connection, accountId?: string): ZcodeSettings 
   const profileStamp = createHash("sha256").update(JSON.stringify([profile.config, profile.credentials].filter(Boolean).map(path => {
     const st = statSync(path!); return [st.dev, st.ino, st.size, st.mtimeMs, st.ctimeMs];
   }))).digest("hex");
+  // Connection/profile generations fence continuations, but all generations backed by the same
+  // physical Desktop profile must still share one process-serialization queue.
+  const lockKey = createHash("sha256").update(JSON.stringify(["desktop", profile.config])).digest("hex");
   const privateHome = join(root(accountId), "home", connection.generation, profileStamp);
   const db = join(privateHome, ".zcode/cli/db");
   mkdirSync(db, { recursive: true, mode: 0o700 });
@@ -169,7 +172,7 @@ function settingsFor(connection: Connection, accountId?: string): ZcodeSettings 
     command: [node, fileURLToPath(new URL("./desktop-bootstrap.cjs", import.meta.url)),
       "--host", runtime, profile.config, workspace, privateHome],
     home: privateHome, workspace, settingsPath: "",
-    scope: `desktop:${connection.generation}:${profileStamp}:host`, desktopModels: connection.models,
+    lockKey, scope: `desktop:${connection.generation}:${profileStamp}:host`, desktopModels: connection.models,
     hostExecution: true, nativePermissionMode: "yolo",
   };
   const sandboxHome = homedir(); // preserve the official credential cipher's HOME/username identity
@@ -191,7 +194,7 @@ function settingsFor(connection: Connection, accountId?: string): ZcodeSettings 
     "--setenv", "ZCODE_DATA_BASE_DIR", "/desktop", "--chdir", "/workspace",
     "/usr/bin/node", "/bridge/desktop-bootstrap.cjs");
   return { accountId, command: [bwrap, ...args], home: privateHome, workspace: "/workspace", settingsPath: "",
-    scope: `desktop:${connection.generation}:${profileStamp}:sandbox`, desktopModels: connection.models,
+    lockKey, scope: `desktop:${connection.generation}:${profileStamp}:sandbox`, desktopModels: connection.models,
     nativePermissionMode: "yolo" };
 }
 

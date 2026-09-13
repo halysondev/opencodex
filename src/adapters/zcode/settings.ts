@@ -15,6 +15,9 @@ export interface ZcodeSettings {
   home: string;
   workspace: string;
   settingsPath: string;
+  /** Stable physical-profile identity used only for process serialization. */
+  lockKey: string;
+  /** Connection and credential generation used for continuations and freshness checks. */
   scope: string;
   /** Content generation for advanced settings; prevents sessions crossing credential changes. */
   profileGeneration?: string;
@@ -52,11 +55,12 @@ export function loadZcodeSettings(env: NodeJS.ProcessEnv = process.env, accountI
   if (env.HOME && realHome === realpathSync(env.HOME)) throw new Error("ZCode must use a separate home, not the proxy home.");
   if (!statSync(realHome).isDirectory()) throw new Error("ZCode home is not a directory.");
   const settingsPath = join(realHome, ".zcode", "cli", "config.json");
+  const lockKey = createHash("sha256").update(JSON.stringify([command, realHome, workspace])).digest("hex");
   const profileGeneration = createHash("sha256").update(readSettingsBytes(realHome, settingsPath)).digest("hex");
   return {
     command: command as string[], home: realHome, workspace, settingsPath,
-    profileGeneration,
-    scope: createHash("sha256").update(JSON.stringify([command, realHome, workspace, profileGeneration])).digest("hex"),
+    lockKey, profileGeneration,
+    scope: createHash("sha256").update(JSON.stringify([lockKey, profileGeneration])).digest("hex"),
   };
 }
 

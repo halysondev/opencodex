@@ -223,7 +223,7 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         if (parsed.options.toolChoice && parsed.options.toolChoice !== "auto") {
           throw new Error("ZCode owns its tools and does not support client tool_choice constraints.");
         }
-        release = await lock(settings.scope, incoming.abortSignal);
+        release = await lock(settings.lockKey, incoming.abortSignal);
         // A queued turn must not resurrect a revoked Desktop connection or old login.
         if ((deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))().scope !== settings.scope) {
           throw new Error("ZCode connection or profile changed while this turn was queued.");

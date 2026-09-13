@@ -23,7 +23,7 @@ function fixture(): ZcodeSettings {
     linkLocal: { options: { baseURL: "https://169.254.1.2/v1" }, models: { metadata: {} } },
     disabled: { enabled: false, models: { hidden: {} } },
   } }));
-  return { command: ["/isolated-launcher"], home, workspace: "/workspace", settingsPath, scope: home };
+  return { command: ["/isolated-launcher"], home, workspace: "/workspace", settingsPath, lockKey: home, scope: home };
 }
 class FakeClient {
   onEvent: (event: JsonObject) => void = () => {};
@@ -216,6 +216,7 @@ describe("ZCode local agent", () => {
     const contents = readFileSync(settings.settingsPath, "utf8");
     writeFileSync(settings.settingsPath, contents.replace("never-log-this", "other-key-here"));
     const after = loadZcodeSettings(env);
+    expect(after.lockKey).toBe(before.lockKey);
     expect(after.scope).not.toBe(before.scope);
     expect(after.profileGeneration).not.toBe(before.profileGeneration);
     expect(() => readZcodeModels(before)).toThrow("unavailable, invalid");
@@ -377,6 +378,33 @@ describe("ZCode local agent", () => {
     await pending;
     expect((await run(settings, new FakeClient())).at(-1)?.type).toBe("done");
   });
+  test("profile generations share one physical-profile serialization queue", async () => {
+    const settings = fixture();
+    const env = { OCX_ZCODE_NATIVE_TOOLS: "1", OCX_ZCODE_COMMAND: JSON.stringify(["/isolated-launcher"]),
+      OCX_ZCODE_HOME: settings.home, OCX_ZCODE_WORKSPACE: settings.workspace };
+    const before = loadZcodeSettings(env);
+    const first = new FakeClient("hang");
+    const firstController = new AbortController();
+    const firstTurn = run(before, first, request(), firstController.signal, 2_000);
+    await Bun.sleep(5);
+    expect(first.calls.some(call => call.method === "session/send")).toBe(true);
+
+    const contents = readFileSync(settings.settingsPath, "utf8");
+    writeFileSync(settings.settingsPath, contents.replace("never-log-this", "other-key-here"));
+    const after = loadZcodeSettings(env);
+    expect(after.lockKey).toBe(before.lockKey);
+    expect(after.scope).not.toBe(before.scope);
+
+    const second = new FakeClient();
+    const secondTurn = run(after, second, request(), undefined, 2_000);
+    await Bun.sleep(10);
+    expect(second.calls).toEqual([]);
+
+    firstController.abort();
+    expect((await firstTurn).at(-1)?.type).toBe("incomplete");
+    expect((await secondTurn).at(-1)?.type).toBe("done");
+    expect(second.calls.some(call => call.method === "session/send")).toBe(true);
+  });
   test("one saturated profile leaves reservation capacity for another profile", async () => {
     const settings = fixture();
     const controllers = Array.from({ length: 24 }, () => new AbortController());
@@ -385,7 +413,8 @@ describe("ZCode local agent", () => {
     ));
     const rejected = await run(settings, new FakeClient(), request(), undefined, 2_000);
     expect(rejected.at(-1)).toMatchObject({ type: "error", message: "ZCode profile queue is full." });
-    const other = await run({ ...settings, scope: settings.scope + ":other" }, new FakeClient(), request(), undefined, 2_000);
+    const other = await run({ ...settings, lockKey: settings.lockKey + ":other", scope: settings.scope + ":other" },
+      new FakeClient(), request(), undefined, 2_000);
     expect(other.at(-1)?.type).toBe("done");
     for (const controller of controllers) controller.abort();
     await Promise.all(pending);
