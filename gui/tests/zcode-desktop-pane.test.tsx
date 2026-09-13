@@ -4,6 +4,8 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
 import ZcodeDesktopPane from "../src/components/ZcodeDesktopPane";
+import ProviderSettings from "../src/components/provider-workspace/ProviderSettings";
+import type { WorkspaceItem } from "../src/provider-workspace/catalog";
 
 
 
@@ -184,6 +186,19 @@ test("explicit sandbox mode shows its filesystem boundary", async () => {
   expect(host.querySelector('[role="note"]')?.textContent).not.toContain("without an OpenCodex sandbox");
 });
 
+test("account-bound provider settings do not expose controls for the global Desktop connection", async () => {
+  const { createRoot } = await import("react-dom/client");
+  await act(async () => {
+    root = createRoot(host);
+    root.render(<LanguageProvider><ProviderSettings apiBase="" item={{
+      name: "zcode-personal", adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai",
+      zcodeAccountId: "00000000-0000-4000-8000-000000000001",
+    } satisfies WorkspaceItem} /></LanguageProvider>);
+  });
+  expect(host.querySelector('[aria-label="ZCode Desktop"]')).toBeNull();
+  expect(requests.some(request => request.path.startsWith("/api/zcode-desktop"))).toBe(false);
+});
+
 test("saved accounts offer separate manual login and never start OAuth without consent", async () => {
   await mountPane();
   expect(host.textContent).toContain("Saved ZCode accounts");
@@ -323,7 +338,7 @@ test("ready account activation treats its local refresh as best effort without a
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 
-test("ready account completion stays finished when its local refresh fails without a parent callback", async () => {
+test("transient completion failure retries without OAuth and stays finished after a local refresh failure", async () => {
   let completions = 0;
   let failNextRefresh = false;
   const prior = globalThis.fetch;
@@ -334,6 +349,7 @@ test("ready account completion stays finished when its local refresh fails witho
       phase: options?.method === "POST" ? "waiting" : "authenticated" });
     if (url.pathname.endsWith("/complete")) {
       completions++;
+      if (completions === 1) return Response.json({ error: "busy" }, { status: 400 });
       failNextRefresh = true;
       return Response.json({ activation: "ready", providerName: "zcode-saved" });
     }
@@ -351,6 +367,9 @@ test("ready account completion stays finished when its local refresh fails witho
   await click(button("Add account"));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
   expect(completions).toBe(1);
+  expect(host.textContent).toContain("busy");
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  expect(completions).toBe(2);
   expect(button("Add account").disabled).toBe(false);
   expect(host.textContent).not.toContain("native_oauth_failed");
   expect(host.textContent).not.toContain("refresh_failed");

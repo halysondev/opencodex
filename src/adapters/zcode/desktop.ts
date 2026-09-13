@@ -25,6 +25,8 @@ export const defaultDesktopWorkspace = (accountId?: string) => join(root(account
 const canonicalExistingOrResolved = (path: string): string => {
   try { return realpathSync(path); } catch { return resolve(path); }
 };
+export const isDefaultDesktopWorkspace = (path: string): boolean =>
+  canonicalExistingOrResolved(path) === canonicalExistingOrResolved(defaultDesktopWorkspace());
 
 function readConnection(accountId?: string): Connection | undefined {
   if (accountId) readAccount(accountId);

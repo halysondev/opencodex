@@ -297,7 +297,7 @@ closed, never to the legacy Desktop profile or another account. Legacy unbound `
 retains its previous profile. Account providers do not participate in an implicit pool.
 Native tools still run on the host by default; optional OS sandboxing is independent of
 profile separation and does not turn the latter into a security boundary. Refresh failures
-cross the adapter boundary only as bounded public codes, never filesystem or account paths. A caller waiting on the shared official refresh races only its own abort signal and returns promptly without cancelling that refresh for sibling requests. Authenticated account operations also delete valid hidden reconnect drafts whose in-memory job disappeared after restart, while preserving active drafts and visible accounts.
+cross the adapter boundary only as bounded public codes, never filesystem or account paths. A caller waiting on the shared official refresh races only its own abort signal and returns promptly without cancelling that refresh for sibling requests. Authenticated account operations also delete valid hidden reconnect drafts whose in-memory job disappeared after restart, while preserving active drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings, transient completion failures keep the OAuth job authenticated for retry, and canonical global-default aliases remap to the account default before validation.
 Advanced model descriptors reject loopback, private and link-local destinations before the
 official runtime receives them.
 
@@ -313,7 +313,7 @@ sidecar-backed image input and excludes these models from describer selection. D
 unavailable vision uses explicit omission markers; recursion protection and quota/cancellation
 bounds remain in the shared vision path. This does not implement native image support in ZCode.
 
-The hardened ZCode boundary accepts only exact active-session events, canonicalizes protected paths in
-optional sandbox mode, distinguishes unavailable quota probes from valid empty entitlements, requires
+The hardened ZCode boundary accepts only exact active-session events, canonicalizes protected paths and default-workspace aliases before
+optional sandbox validation, distinguishes unavailable quota probes from valid empty entitlements, requires
 unique provider bindings and GUI-session-only Desktop metadata, and disables caller-tool capability
 for every combo containing a ZCode target.

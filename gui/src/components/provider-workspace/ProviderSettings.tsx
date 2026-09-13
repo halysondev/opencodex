@@ -345,7 +345,7 @@ export default function ProviderSettings({
 
   return (
     <div className="pwi-settings-form">
-      {item.adapter === "zcode" && apiBase !== undefined && <ZcodeDesktopPane apiBase={apiBase} />}
+      {item.adapter === "zcode" && item.zcodeAccountId === undefined && apiBase !== undefined && <ZcodeDesktopPane apiBase={apiBase} />}
       <label className="pwi-settings-field">
         <span className="pwi-settings-label"><IconLock style={{ width: 12, height: 12 }} /> {t("pws.providerId")}</span>
         <input className="input" value={item.name} readOnly disabled />

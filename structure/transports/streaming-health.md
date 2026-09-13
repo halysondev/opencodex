@@ -546,7 +546,7 @@ For ZCode, input-image description is the explicit exception to native-agent hel
 see [ZCode vision input adaptation](../adapters/registry.md#zcode-vision-input-adaptation). The configured
 vision provider may consume its own quota; main inference remains in official ZCode.
 
-The hardened ZCode boundary accepts only exact active-session events, canonicalizes protected paths in
-optional sandbox mode, distinguishes unavailable quota probes from valid empty entitlements, requires
+The hardened ZCode boundary accepts only exact active-session events, canonicalizes protected paths and default-workspace aliases before
+optional sandbox validation, distinguishes unavailable quota probes from valid empty entitlements, requires
 unique provider bindings and GUI-session-only Desktop metadata, and disables caller-tool capability
 for every combo containing a ZCode target.

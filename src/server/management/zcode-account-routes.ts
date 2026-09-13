@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, renameSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { accountProfile, accountRoot, allocateAccount, listAccounts, readAccount, reconcileAccountDrafts, removeAccountFiles, writeAccount } from "../../adapters/zcode/accounts";
 import { accountRuntimeBusy, invalidateAccountRefresh } from "../../adapters/zcode/account-runtime";
-import { connectDesktop, defaultDesktopWorkspace, desktopStatus, disconnectDesktop, resolveDesktopRuntime, validateDesktopWorkspace } from "../../adapters/zcode/desktop";
+import { connectDesktop, defaultDesktopWorkspace, desktopStatus, disconnectDesktop, isDefaultDesktopWorkspace, resolveDesktopRuntime, validateDesktopWorkspace } from "../../adapters/zcode/desktop";
 import { runNativeOAuth } from "../../adapters/zcode/native-oauth";
 import { saveConfigPreservingClaudeCode, withConfigMutationLockSync } from "../../config";
 import { clearModelCache } from "../../codex/model-cache";
@@ -74,7 +74,7 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
       const targetId = replaceId ?? account.id;
       let workspace: string;
       try {
-        const requested = resolve(body.workspace) === resolve(defaultDesktopWorkspace())
+        const requested = isDefaultDesktopWorkspace(body.workspace)
           ? defaultDesktopWorkspace(targetId) : body.workspace;
         // Validate against the account that connectDesktop will eventually use. In optional
         // sandbox mode the global managed workspace is not an account workspace.

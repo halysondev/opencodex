@@ -62,23 +62,7 @@ partial-event, injection/drop, and EOF behavior. Output admission precedes its s
 failed enqueue and cancellation release the reservation without re-entering a disposed rewrite.
 Old/new buffer overlap remains charged against the same translator cap.
 
-Complete SSE blocks extract `data` fields with one indexed pass over the block rather than a
-regular-expression split and intermediate line array. Colonless `data` fields, one optional ASCII
-space after the colon, multiline joining, UTF-8 text, LF/CRLF input, and a trailing lone CR retain
-their event-stream semantics. `src/server/relay.ts` re-exports this canonical extractor instead of
-maintaining a second implementation. Empty byte results across the relay and
-`src/server/sse-frame-buffer.ts` reuse one immutable zero-length view; non-empty frame ownership,
-frame limits, cancellation, terminal detection, and wire bytes are unchanged.
-
-`src/server/responses-custom-tool-repair.ts` continues to own retained routed argument bytes and
-their charge/release lifecycle while it asks the pure progressive decoder in
-`src/responses/progressive-freeform-input.ts` which prefix is safe to publish. The decoder neither
-charges nor releases translator budget; extracting it from `src/bridge/sse.ts` does not create a
-second retention owner or change terminal, failure, incomplete, or disposal release behavior.
-
-A saved-account ZCode refresh in `src/adapters/zcode/adapter.ts` completes before native dispatch or output admission. Caller cancellation stops only that request's wait on the shared official refresh, emits no native stream bytes, and does not transfer cancellation ownership to sibling requests; authenticated orphan-draft
-reconciliation is likewise metadata-only.
-A saved-account ZCode refresh in `src/adapters/zcode/adapter.ts` completes before native dispatch or output admission. Caller cancellation stops only that request's wait on the shared official refresh, emits no native stream bytes, and does not transfer cancellation ownership to sibling requests; authenticated orphan-draft reconciliation is likewise metadata-only.
+A saved-account ZCode refresh in `src/adapters/zcode/adapter.ts` completes before native dispatch or output admission. Caller cancellation stops only that request's wait on the shared official refresh, emits no native stream bytes, and does not transfer cancellation ownership to sibling requests; authenticated orphan-draft reconciliation is likewise metadata-only, and default-workspace aliases are canonicalized before account-scope validation.
 
 `src/adapters/openai-responses.ts` counts new compaction fragments, including surrogate pairs formed
 across deltas, while retaining snapshot/done/delta precedence and existing terminal ownership.

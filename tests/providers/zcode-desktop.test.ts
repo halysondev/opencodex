@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, sy
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { desktopStatus, disconnectDesktop, loadDesktopSettings, resolveDesktopRuntime, validateDesktopWorkspace } from "../../src/adapters/zcode/desktop";
+import { defaultDesktopWorkspace, desktopStatus, disconnectDesktop, isDefaultDesktopWorkspace, loadDesktopSettings, resolveDesktopRuntime, validateDesktopWorkspace } from "../../src/adapters/zcode/desktop";
 import { readZcodeModels } from "../../src/adapters/zcode/settings";
 
 import { parseNativeOAuthEvent, nativeOAuthCommand } from "../../src/adapters/zcode/native-oauth";
@@ -87,6 +87,10 @@ describe("managed ZCode Desktop", () => {
     expect(() => validateDesktopWorkspace(protectedChild)).toThrow("workspace_invalid");
     const managed = join(linkedConfig, "zcode-desktop", "workspace");
     expect(validateDesktopWorkspace(managed)).toBe(join(realConfig, "zcode-desktop", "workspace"));
+    expect(isDefaultDesktopWorkspace(managed)).toBe(true);
+    expect(isDefaultDesktopWorkspace(join(realConfig, "zcode-desktop", "workspace"))).toBe(true);
+    expect(isDefaultDesktopWorkspace(join(realConfig, "zcode-desktop", "other"))).toBe(false);
+    expect(defaultDesktopWorkspace()).toBe(managed);
   });
   test("sandbox allows only the matching account-managed workspace below the config root", async () => {
     const { allocateAccount } = await import("../../src/adapters/zcode/accounts");

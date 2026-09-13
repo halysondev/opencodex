@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { handleZcodeDesktopRoutes } from "../../src/server/management/zcode-desktop-routes";
 import type { ManagementContext } from "../../src/server/management/context";
 
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDefaultConfig } from "../../src/config";
@@ -308,6 +308,22 @@ test("new accounts validate the displayed managed workspace in their eventual ac
   const account = await f.login({ workspace: defaultDesktopWorkspace() });
   expect(f.workspaceValidations()).toEqual([{ path: defaultDesktopWorkspace(account.accountId), accountId: account.accountId }]);
   expect(await (await f.call("complete", { jobId: account.jobId })).json()).toMatchObject({ activation: "ready" });
+});
+
+test("account workspace remapping recognizes the canonical target of a symlinked config root", async () => {
+  if (process.platform === "win32") return;
+  const realConfig = join(home, "real-config");
+  const linkedConfig = join(home, "linked-config");
+  mkdirSync(realConfig);
+  symlinkSync(realConfig, linkedConfig);
+  process.env.OPENCODEX_HOME = linkedConfig;
+  mkdirSync(defaultDesktopWorkspace(), { recursive: true });
+  const displayedCanonicalWorkspace = realpathSync(defaultDesktopWorkspace());
+  const f = accountFixture();
+  const account = await f.login({ workspace: displayedCanonicalWorkspace });
+  expect(f.workspaceValidations()).toEqual([{
+    path: defaultDesktopWorkspace(account.accountId), accountId: account.accountId,
+  }]);
 });
 
 test("workspace validation failure removes the newly allocated draft account", async () => {

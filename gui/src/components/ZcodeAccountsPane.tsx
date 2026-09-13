@@ -47,14 +47,23 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
         const next: Job = await read("/login?jobId=" + encodeURIComponent(jobId));
         if (stopped) return;
         if (next.phase === "authenticated") {
-          const result = await read("/complete", { jobId: next.jobId }) as Activation;
+          let result: Activation;
+          try {
+            result = await read("/complete", { jobId: next.jobId }) as Activation;
+          } catch (e) {
+            if (!stopped) {
+              setError(e instanceof Error ? e.message : "native_oauth_failed");
+              setJob({ ...next, phase: "authenticated", url: undefined });
+            }
+            return;
+          }
           if (stopped) return;
           setJob({ ...next, phase: "finished", url: undefined });
           const ready = result.activation === "ready";
-          if (!ready) setError("catalog_update_failed");
+          setError(ready ? "" : "catalog_update_failed");
           const activation = ready && result.providerName && onProviderActivatedRef.current
             ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
-          try { await refresh(); } catch (error) { if (!ready) throw error; }
+          try { await refresh(); } catch { /* Server completion is authoritative; this refresh is local only. */ }
           if (!stopped && activation) activation.notify(activation.name);
         } else { setJob(next); if (next.phase === "failed") { setError(next.error || "native_oauth_failed"); await refresh(); } }
       } catch (e) { if (!stopped) { setError(e instanceof Error ? e.message : "native_oauth_failed"); setJob(j => j ? { ...j, phase: "failed", url: undefined } : null); } }
@@ -74,7 +83,7 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
       const ready = path === "/activate" && result.activation === "ready";
       const activation = ready && result.providerName && onProviderActivatedRef.current
         ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
-      try { await refresh(); } catch (error) { if (!ready) throw error; }
+      try { await refresh(); } catch (error) { if (path !== "/activate") throw error; }
       if (activation) activation.notify(activation.name);
     } catch (e) { setError(e instanceof Error ? e.message : "native_oauth_failed"); }
     finally { setBusy(false); }

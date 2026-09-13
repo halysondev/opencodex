@@ -70,10 +70,11 @@ computer running OpenCodex.
 
 ### Add another account (manual selection)
 
-In **Providers → Add Provider → ZCode (local agent)**, or the existing provider's
-**Settings**, scroll to **Saved ZCode accounts**. This is separate from **Connect Desktop**:
-connecting Desktop continues to use its current local sign-in; saved accounts retain
-independent official ZCode profiles.
+In **Providers → Add Provider → ZCode (local agent)**, or an unbound ZCode Desktop
+provider's **Settings**, scroll to **Saved ZCode accounts**. This is separate from
+**Connect Desktop**: connecting Desktop continues to use its current local sign-in;
+saved accounts retain independent official ZCode profiles. Settings for an account-bound
+provider intentionally hide the unrelated global Desktop Connect/Disconnect controls.
 
 1. Select the installed Desktop runtime and working directory above the accounts section.
 2. Give the account a recognizable name, such as **Personal** or **Work**.
@@ -103,10 +104,12 @@ ZCode Desktop's original profile. Remove references from defaults/combos before 
 account, and wait for its active tasks. No task is stopped automatically.
 
 A protocol/registration/catalog failure is displayed as pending, not complete success.
-Use **Retry provider activation** for a saved connection whose catalog is pending. For a
-failed or expired login, cancel the draft and start again. Saved accounts and provider
-bindings persist across OpenCodex restarts; pending OAuth jobs do not. If a restart or
-closed panel leaves an unfinished account, remove that draft before trying again.
+Use **Retry provider activation** for a saved connection whose catalog is pending. A
+transient completion error keeps the authenticated job and the open panel retries it;
+for a failed or expired login, cancel the draft and start again. Saved accounts and
+provider bindings persist across OpenCodex restarts; pending OAuth jobs do not. If a
+restart or closed panel leaves an unfinished account, the next authenticated account
+operation removes only that orphaned draft.
 
 Native OAuth and Coding Plan credential setup run in the official installed ZCode host.
 The bridge only carries a short-lived authorization URL and safe status codes to the
