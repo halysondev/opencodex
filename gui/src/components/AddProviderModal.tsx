@@ -36,6 +36,7 @@ export default function AddProviderModal({
   apiBase, existingNames, onClose, onAdded, initialTier, initialCustom = false,
   accountRows, accountStatus, accountBusy, accountLoginHint = null,
   onAccountLogin, onAccountCancelLogin, onAccountLogout, onAccountManage, onOpen,
+  onProviderStateMutation,
 }: {
   apiBase: string;
   existingNames: string[];
@@ -53,6 +54,7 @@ export default function AddProviderModal({
   onAccountLogout?: (provider: string) => void;
   onAccountManage?: (provider: string) => void;
   onOpen?: () => void;
+  onProviderStateMutation?: () => void;
 }) {
   const t = useT();
   const fallbackPresets = useMemo<Preset[]>(() => [
@@ -304,7 +306,8 @@ export default function AddProviderModal({
           />
         ) : form && (
           preset.id === "zcode" ? (
-            <ZcodeDesktopPane apiBase={apiBase} onConnected={onAdded} onBack={() => dispatch({ type: "back" })} />
+            <ZcodeDesktopPane apiBase={apiBase} onConnected={onAdded}
+              onProviderStateMutation={onProviderStateMutation} onBack={() => dispatch({ type: "back" })} />
           ) : preset.auth === "oauth" && form.authMode === "oauth" ? (
             <AddProviderOAuthPane
               preset={preset}

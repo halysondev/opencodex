@@ -33,6 +33,7 @@ export function ProvidersPageModals({
   onAccountLogout,
   onAccountManage,
   onOpenAdd,
+  onProviderStateMutation,
   onCloseCodexLogin,
   onCodexAdded,
   onCancelRemove,
@@ -65,6 +66,7 @@ export function ProvidersPageModals({
   onAccountLogout: (provider: string) => void;
   onAccountManage?: (provider: string) => void;
   onOpenAdd: () => void;
+  onProviderStateMutation?: () => void;
   onCloseCodexLogin: () => void;
   onCodexAdded: (completion: CodexAccountMutationCompletion) => void;
   onCancelRemove: () => void;
@@ -95,6 +97,7 @@ export function ProvidersPageModals({
           onAccountLogout={onAccountLogout}
           onAccountManage={onAccountManage}
           onOpen={onOpenAdd}
+          onProviderStateMutation={onProviderStateMutation}
         />
       )}
       {codexLoginOpen && (

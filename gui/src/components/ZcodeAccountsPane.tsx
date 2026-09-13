@@ -138,6 +138,8 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
       {job.url && <a href={job.url} target="_blank" rel="noopener noreferrer">{t("zcodeAccounts.login")}</a>}
       <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void action("/cancel", { jobId: job.jobId })}>{t("common.cancel")}</button>
     </div>}
+    {job?.phase === "failed" && <button type="button" className="btn btn-ghost" disabled={busy}
+      onClick={() => void action("/cancel", { jobId: job.jobId })}>{t("common.cancel")}</button>}
     {job?.phase === "recovery" && <div role="status">
       <p>{t("zcodeAccounts.pending")}</p>
       <button type="button" className="btn btn-primary" disabled={!consent || busy}

@@ -407,10 +407,12 @@ independently of a parent callback; transient completion errors keep the job aut
 for polling retry. If partial completion succeeds server-side but the local account refresh
 fails, the pane retains the finished job ID and retries idempotent `/complete` directly
 instead of hiding recovery or repeating OAuth. No default selection or inference is
-part of this flow. When these controls run inside an existing provider's Settings tab,
+part of this flow. When these controls run inside either Add Provider or an existing provider's Settings tab,
 every successful provider/catalog mutation notifies the Providers owner to reload config and
 refresh model rows; a removal persisted before a catalog convergence failure performs the
-same invalidation on its bounded partial error. Account-bound provider
+same invalidation on its bounded partial error.
+Failed OAuth jobs retain an explicit Cancel action so their hidden capacity reservation can be
+released immediately instead of waiting for expiry. Account-bound provider
 settings hide the unrelated global Desktop controls.
 Reconnect retains custom provider settings and rejects a different identity.
 Rename changes only generated labels; removal refuses clients whose direct bootstrap is still exiting and recognizes generated

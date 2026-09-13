@@ -4,6 +4,7 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
 import ZcodeDesktopPane from "../src/components/ZcodeDesktopPane";
+import AddProviderModal from "../src/components/AddProviderModal";
 import ProviderSettings from "../src/components/provider-workspace/ProviderSettings";
 import type { WorkspaceItem } from "../src/provider-workspace/catalog";
 
@@ -163,6 +164,48 @@ test("partial activation remains visible and retries without a second protocol c
   expect(host.textContent).toContain("No processes will be restarted automatically");
 });
 
+test("the Add Provider ZCode flow refreshes parent state after partial activation", async () => {
+  let modalMutations = 0;
+  let modalAdditions = 0;
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path.endsWith("/api/provider-presets")) return Response.json({ providers: [{
+      id: "zcode", label: "ZCode (local agent)", adapter: "zcode", baseUrl: "https://zcode.z.ai", auth: "local",
+    }] });
+    if (path.endsWith("/api/oauth/providers")) return Response.json({ providers: [] });
+    if (path.endsWith("/api/usage")) return Response.json({ providers: [] });
+    if (path.endsWith("/api/zcode-accounts")) return Response.json({ accounts: [] });
+    if (path.endsWith("/api/zcode-desktop/connect")) return Response.json({ connected: true,
+      activation: "catalog_pending", error: "catalog_update_failed", providerName: "zcode",
+      runtimes: ["/installed/ZCode"], runtime: "/installed/ZCode", workspace: "/project", models: [] });
+    return Response.json({ connected: false, activation: "disconnected", runtimes: ["/installed/ZCode"],
+      runtime: "/installed/ZCode", workspace: "/project", models: [] });
+  } });
+  const { createRoot } = await import("react-dom/client");
+  await act(async () => {
+    root = createRoot(host);
+    root.render(<LanguageProvider><AddProviderModal apiBase="/partial-modal" existingNames={[]}
+      onClose={() => {}} onAdded={() => { modalAdditions++; }}
+      onProviderStateMutation={() => { modalMutations++; }} /></LanguageProvider>);
+  });
+  await waitUntil(() => !!host.querySelector(".provider-catalog-search"));
+  const search = host.querySelector<HTMLInputElement>(".provider-catalog-search")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")!.set!.call(search, "zcode");
+    search.dispatchEvent(new win.Event("input", { bubbles: true }));
+  });
+  await click(host.querySelector<HTMLElement>(".provider-catalog-row-wrap .list-row")!);
+  await waitUntil(() => !!host.querySelector('[aria-label="ZCode Desktop"]'));
+  const pane = host.querySelector<HTMLElement>('[aria-label="ZCode Desktop"]')!;
+  await click(pane.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Connect Desktop"));
+
+  expect(modalMutations).toBe(1);
+  expect(modalAdditions).toBe(0);
+  expect(host.querySelector(".modal-overlay")).toBeTruthy();
+  expect(host.textContent).toContain("catalog is not ready");
+});
+
 test("Desktop disconnect refreshes parent provider state", async () => {
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://localhost").pathname;
@@ -253,6 +296,36 @@ test("saved accounts offer separate manual login and never start OAuth without c
   expect(host.textContent).toContain("no pool or automatic account switch");
   expect(button("Add account").disabled).toBe(true);
   expect(requests.some(r => r.path.endsWith("/zcode-accounts/login"))).toBe(false);
+});
+
+test("a failed saved-account OAuth job keeps cancellation available", async () => {
+  let cancelled = false;
+  const prior = globalThis.fetch;
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    requests.push({ path: url.pathname, body: options?.body ? JSON.parse(String(options.body)) : undefined });
+    if (url.pathname.endsWith("/login")) return Response.json({ jobId: "failed-job", accountId: "failed-account",
+      phase: options?.method === "POST" ? "waiting" : "failed", error: "native_oauth_failed" });
+    if (url.pathname.endsWith("/cancel")) { cancelled = true; return Response.json({ ok: true }); }
+    return Response.json({ accounts: [] });
+  } });
+  await mountPane();
+  const section = host.querySelector("h3")!.closest("section")!;
+  const input = section.querySelector('input:not([type="checkbox"])') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")!.set!.call(input, "Failed fixture");
+    input.dispatchEvent(new win.Event("input", { bubbles: true }));
+  });
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Add account"));
+  await waitUntil(() => host.textContent?.includes("native_oauth_failed") === true
+    && [...section.querySelectorAll("button")].some(item => item.textContent === "Cancel"));
+  await click(button("Cancel"));
+
+  expect(cancelled).toBe(true);
+  expect(requests.find(request => request.path.endsWith("/cancel"))?.body).toMatchObject({ jobId: "failed-job" });
+  expect(button("Add account").disabled).toBe(false);
 });
 
 test("account activation failure stays partial and separate account labels remain visible", async () => {
