@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useT } from "../i18n/shared";
 
 type Account = { id: string; label: string; activation: string; busy: boolean; providerName?: string };
@@ -16,6 +16,8 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const onProviderActivatedRef = useRef(onProviderActivated);
+  useEffect(() => { onProviderActivatedRef.current = onProviderActivated; }, [onProviderActivated]);
   const read = useCallback(async (path: string, body?: Record<string, unknown>) => {
     const response = await fetch(apiBase + "/api/zcode-accounts" + path, body ? {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, consent: true }),
@@ -49,15 +51,17 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
           if (stopped) return;
           setJob({ ...next, phase: "finished", url: undefined });
           if (result.activation !== "ready") setError("catalog_update_failed");
-          await refresh();
-          if (!stopped && result.activation === "ready" && result.providerName) onProviderActivated?.(result.providerName);
+          const activation = result.activation === "ready" && result.providerName && onProviderActivatedRef.current
+            ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
+          try { await refresh(); } catch (error) { if (!activation) throw error; }
+          if (!stopped && activation) activation.notify(activation.name);
         } else { setJob(next); if (next.phase === "failed") { setError(next.error || "native_oauth_failed"); await refresh(); } }
       } catch (e) { if (!stopped) { setError(e instanceof Error ? e.message : "native_oauth_failed"); setJob(j => j ? { ...j, phase: "failed", url: undefined } : null); } }
       finally { pending = false; }
     };
     const timer = setInterval(() => void poll(), 2000);
     return () => { stopped = true; clearInterval(timer); };
-  }, [jobId, jobPhase, consent, read, refresh, onProviderActivated]);
+  }, [jobId, jobPhase, consent, read, refresh]);
   const action = async (path: string, body: Record<string, unknown>) => {
     if ((!consent && path !== "/cancel") || busy) return;
     setBusy(true); setError("");
@@ -66,8 +70,10 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
       if (path === "/login") setJob(result);
       else if (path === "/cancel") setJob(null);
       else if (result.activation && result.activation !== "ready") setError("catalog_update_failed");
-      await refresh();
-      if (path === "/activate" && result.activation === "ready" && result.providerName) onProviderActivated?.(result.providerName);
+      const activation = path === "/activate" && result.activation === "ready" && result.providerName && onProviderActivatedRef.current
+        ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
+      try { await refresh(); } catch (error) { if (!activation) throw error; }
+      if (activation) activation.notify(activation.name);
     } catch (e) { setError(e instanceof Error ? e.message : "native_oauth_failed"); }
     finally { setBusy(false); }
   };

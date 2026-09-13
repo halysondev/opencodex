@@ -272,6 +272,7 @@ test("saved account completion preserves an HTTP-200 partial activation", async 
 test("saved account activation refreshes the parent only after provider and catalog readiness", async () => {
   let activation = "catalog_pending";
   let attempts = 0;
+  let failNextRefresh = false;
   const prior = globalThis.fetch;
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
@@ -279,8 +280,10 @@ test("saved account activation refreshes the parent only after provider and cata
     if (url.pathname.endsWith("/activate")) {
       attempts++;
       activation = attempts === 1 ? "catalog_pending" : "ready";
+      failNextRefresh = activation === "ready";
       return Response.json({ activation, providerName: "zcode-saved", ...(activation === "ready" ? {} : { error: "catalog_update_failed" }) });
     }
+    if (failNextRefresh) { failNextRefresh = false; return Response.json({ error: "refresh_failed" }, { status: 500 }); }
     return Response.json({ accounts: [{ id: "saved", label: "Saved fixture", activation, providerName: "zcode-saved", busy: false }] });
   } });
   await mountPane();
