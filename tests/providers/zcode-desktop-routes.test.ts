@@ -330,6 +330,29 @@ test("reconnect validation failure removes only its draft and preserves the save
   expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
   expect(readFileSync(join(accountProfile(account.accountId), "sentinel"), "utf8")).toBe("original");
 });
+test("account listing after restart removes only orphaned hidden reconnect drafts", async () => {
+  const f = accountFixture();
+  const account = await f.login();
+  expect(await (await f.call("complete", { jobId: account.jobId })).json()).toMatchObject({ activation: "ready" });
+  const reconnect = await f.login({ accountId: account.accountId });
+  expect(reconnect).not.toHaveProperty("error");
+  expect(readdirSync(join(home, "zcode-accounts"))).toHaveLength(2);
+
+  const liveRequest = context("/api/zcode-accounts", {}, "gui-session", "GET");
+  f.ctx.req = liveRequest.req; f.ctx.url = liveRequest.url;
+  expect(await (await handleZcodeAccountRoutes(f.ctx, f.deps))!.json()).toMatchObject({
+    accounts: [{ id: account.accountId }],
+  });
+  expect(readdirSync(join(home, "zcode-accounts"))).toHaveLength(2);
+
+  resetZcodeAccountJobsForTests();
+  const restartedRequest = context("/api/zcode-accounts", {}, "gui-session", "GET");
+  f.ctx.req = restartedRequest.req; f.ctx.url = restartedRequest.url;
+  expect(await (await handleZcodeAccountRoutes(f.ctx, f.deps))!.json()).toMatchObject({
+    accounts: [{ id: account.accountId }],
+  });
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
+});
 test("manual accounts require GUI consent; account login enables an independent provider/catalog", async () => {
   const f = accountFixture(), originalDefault = f.ctx.config.defaultProvider;
   expect((await f.call("login", {}, "admin-token")).status).toBe(403);

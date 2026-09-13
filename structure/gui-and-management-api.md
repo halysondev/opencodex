@@ -405,7 +405,9 @@ checks identity and protocol before registering an account-bound provider and co
 catalog; a partial result stays visible and retryable. No default selection or inference is
 part of this flow. Reconnect retains custom provider settings and rejects a different identity.
 Rename changes only generated labels; removal refuses busy/referenced accounts. In-progress
-OAuth jobs expire and do not survive restart; saved account profiles and bindings do. `src/server/management/zcode-desktop-routes.ts`
+OAuth jobs expire and do not survive restart; saved account profiles and bindings do.
+Authenticated account operations also prune valid hidden reconnect drafts whose transient jobs
+disappeared on restart, without touching active drafts or visible accounts. `src/server/management/zcode-desktop-routes.ts`
 makes disconnect disable the legacy provider and converge its catalog rows while preserving
 customized settings; its optional verification action uses protocol metadata only and cannot
 start inference or tools.
@@ -419,3 +421,4 @@ The hardened ZCode boundary accepts only exact active-session events, canonicali
 optional sandbox mode, distinguishes unavailable quota probes from valid empty entitlements, requires
 unique provider bindings and GUI-session-only Desktop metadata, and disables caller-tool capability
 for every combo containing a ZCode target.
+`gui/src/components/ZcodeAccountsPane.tsx` and `src/server/management/zcode-account-routes.ts` own GUI-session-only saved-account login, polling, activation retry, rename and removal. Explicit consent starts the official OAuth job in a private profile; the displayed managed workspace is rebound and validated in the eventual account scope before OAuth begins. Completion verifies identity/protocol, registers one unique account-bound provider and converges the catalog without changing defaults or sending inference. Partial activation remains visible and retryable, reconnect preserves custom settings and rejects a different identity, removal refuses busy/referenced accounts, and authenticated account operations prune valid hidden reconnect drafts whose transient jobs disappeared on restart without touching active drafts or visible accounts. `src/server/management/zcode-desktop-routes.ts` makes disconnect disable the legacy provider and converge its catalog rows while preserving customized settings; its optional verification action uses protocol metadata only and cannot start inference or tools. Input images use the configured vision describer as the sole native-agent sidecar and may consume its quota; main inference remains in official ZCode. Exact active-session events, canonical optional-sandbox paths, honest unavailable quota, session-only Desktop metadata and no caller-tool capability for combos harden the boundary. See [the ZCode runtime contract](adapters/registry.md#zcode-saved-accounts).

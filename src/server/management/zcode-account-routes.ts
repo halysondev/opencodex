@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { accountProfile, accountRoot, allocateAccount, listAccounts, readAccount, removeAccountFiles, writeAccount } from "../../adapters/zcode/accounts";
+import { accountProfile, accountRoot, allocateAccount, listAccounts, readAccount, reconcileAccountDrafts, removeAccountFiles, writeAccount } from "../../adapters/zcode/accounts";
 import { accountRuntimeBusy, invalidateAccountRefresh } from "../../adapters/zcode/account-runtime";
 import { connectDesktop, defaultDesktopWorkspace, desktopStatus, disconnectDesktop, resolveDesktopRuntime, validateDesktopWorkspace } from "../../adapters/zcode/desktop";
 import { runNativeOAuth } from "../../adapters/zcode/native-oauth";
@@ -42,6 +42,9 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
   // URLs and account operations belong to a real GUI principal, not data/admin-token callers.
   if (ctx.principal !== "gui-session") return jsonResponse({ error: "dashboard_required" }, 403);
   try {
+    // Reconnect drafts are intentionally hidden and owned by in-memory jobs. A restart drops those
+    // jobs, so reconcile before every authenticated account operation without touching active jobs.
+    reconcileAccountDrafts(new Set([...jobs.values()].map(job => job.accountId)));
     if (path === "/api/zcode-accounts" && ctx.req.method === "GET") {
       return jsonResponse({ accounts: listAccounts().map(({ id, label }) => {
         const status = desktopActivation(ctx, desktopStatus(id), readDesktopCatalogSlugs);
