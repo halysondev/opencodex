@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { accountProfile, accountRoot, allocateAccount, listAccounts, readAccount, removeAccountFiles, writeAccount } from "../../adapters/zcode/accounts";
 import { accountRuntimeBusy, invalidateAccountRefresh } from "../../adapters/zcode/account-runtime";
-import { connectDesktop, desktopStatus, disconnectDesktop, resolveDesktopRuntime, validateDesktopWorkspace } from "../../adapters/zcode/desktop";
+import { connectDesktop, defaultDesktopWorkspace, desktopStatus, disconnectDesktop, resolveDesktopRuntime, validateDesktopWorkspace } from "../../adapters/zcode/desktop";
 import { runNativeOAuth } from "../../adapters/zcode/native-oauth";
 import { saveConfigPreservingClaudeCode, withConfigMutationLockSync } from "../../config";
 import { clearModelCache } from "../../codex/model-cache";
@@ -65,9 +65,21 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
       if (typeof body.label !== "string" || typeof body.runtime !== "string" || typeof body.workspace !== "string") return fail("account_invalid");
       if (body.accountId !== undefined && typeof body.accountId !== "string") return fail("account_invalid");
       const replaceId = typeof body.accountId === "string" ? readAccount(body.accountId).id : undefined;
-      const runtime = resolveDesktopRuntime(body.runtime), workspace = validateDesktopWorkspace(body.workspace, replaceId);
+      const runtime = resolveDesktopRuntime(body.runtime);
       if (replaceId && (accountRuntimeBusy(replaceId) || pendingFor(replaceId))) return fail("account_busy");
       const account = allocateAccount(body.label, replaceId);
+      const targetId = replaceId ?? account.id;
+      let workspace: string;
+      try {
+        const requested = resolve(body.workspace) === resolve(defaultDesktopWorkspace())
+          ? defaultDesktopWorkspace(targetId) : body.workspace;
+        // Validate against the account that connectDesktop will eventually use. In optional
+        // sandbox mode the global managed workspace is not an account workspace.
+        workspace = validateDesktopWorkspace(requested, targetId);
+      } catch (error) {
+        removeAccountFiles(account.id);
+        throw error;
+      }
       const job: Job = { id: randomUUID(), accountId: account.id, replaceId, runtime, workspace,
         phase: "waiting", controller: new AbortController(), timer: undefined! };
       job.timer = setTimeout(() => {

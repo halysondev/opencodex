@@ -292,7 +292,8 @@ app-server settings, session/DB scope and quota reads. An invalid or revoked bin
 closed, never to the legacy Desktop profile or another account. Legacy unbound `zcode`
 retains its previous profile. Account providers do not participate in an implicit pool.
 Native tools still run on the host by default; optional OS sandboxing is independent of
-profile separation and does not turn the latter into a security boundary.
+profile separation and does not turn the latter into a security boundary. Refresh failures
+cross the adapter boundary only as bounded public codes, never filesystem or account paths.
 
 ## ZCode vision input adaptation
 

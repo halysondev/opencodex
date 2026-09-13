@@ -1,10 +1,11 @@
 import { handleZcodeAccountRoutes, resetZcodeAccountJobsForTests } from "../../src/server/management/zcode-account-routes";
 import { listAccounts, accountProfile } from "../../src/adapters/zcode/accounts";
+import { defaultDesktopWorkspace } from "../../src/adapters/zcode/desktop";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { handleZcodeDesktopRoutes } from "../../src/server/management/zcode-desktop-routes";
 import type { ManagementContext } from "../../src/server/management/context";
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDefaultConfig } from "../../src/config";
@@ -32,7 +33,9 @@ function context(path: string, body: unknown, principal?: ManagementContext["pri
   return { req, url: new URL(req.url), principal, config,
     deps: { saveConfigPreservingClaudeCode: c => writeFileSync(join(home, "config.json"), JSON.stringify(c)) },
     convergeCodexCatalog: async () => {
-      writeFileSync(catalog, JSON.stringify(models.map(m => "zcode/" + m.id.replaceAll("/", "-"))));
+      const slugs = Object.entries(config.providers).filter(([, provider]) => provider.adapter === "zcode" && provider.disabled !== true)
+        .flatMap(([name]) => models.map(model => name + "/" + model.id.replaceAll("/", "-")));
+      writeFileSync(catalog, JSON.stringify(slugs));
       return { status: "committed", changed: true, degraded: false, notices: [] };
     },
   } as ManagementContext;
@@ -118,6 +121,41 @@ test("registration failure rolls back config, preserves protocol state and allow
   expect((await activateDesktopProvider(ctx, connected, f.deps.readDesktopCatalogSlugs)).activation).toBe("ready");
 });
 
+test("disconnect disables the provider, preserves customization and removes its catalog rows", async () => {
+  const f = fixture(), ctx = context("/api/zcode-desktop/disconnect", {}, "gui-session");
+  const beforeDefault = ctx.config.defaultProvider;
+  ctx.config.providers.zcode = { adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai",
+    disabled: false, defaultModel: models[0]!.id, note: "keep custom settings", contextWindow: 64_000 };
+  await ctx.convergeCodexCatalog();
+  expect(f.deps.readDesktopCatalogSlugs()).toHaveLength(2);
+  const response = await handleZcodeDesktopRoutes(ctx, f.deps);
+  expect(await response?.json()).toMatchObject({ connected: false, activation: "disconnected", providerRegistered: false });
+  expect(ctx.config.providers.zcode).toEqual({ adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai",
+    disabled: true, defaultModel: models[0]!.id, note: "keep custom settings", contextWindow: 64_000 });
+  expect(JSON.parse(readFileSync(join(home, "config.json"), "utf8")).providers.zcode.disabled).toBe(true);
+  expect(f.deps.readDesktopCatalogSlugs()).toEqual([]);
+  expect(ctx.config.defaultProvider).toBe(beforeDefault);
+});
+
+test("partial disconnect cleanup is explicit and idempotently retryable", async () => {
+  const f = fixture(), ctx = context("/api/zcode-desktop/disconnect", {}, "gui-session");
+  ctx.config.providers.zcode = { adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai", disabled: false };
+  await ctx.convergeCodexCatalog();
+  const converge = ctx.convergeCodexCatalog;
+  ctx.convergeCodexCatalog = async () => ({ status: "failed", reason: "disk", phase: "commit", retryable: true, partialWrite: false });
+  expect(await (await handleZcodeDesktopRoutes(ctx, f.deps))?.json()).toMatchObject({
+    connected: false, providerRegistered: false, error: "catalog_update_failed",
+  });
+  expect(f.deps.readDesktopCatalogSlugs()).toHaveLength(2);
+  ctx.convergeCodexCatalog = converge;
+  const retry = context("/api/zcode-desktop/disconnect", {}, "gui-session");
+  ctx.req = retry.req; ctx.url = retry.url;
+  expect(await (await handleZcodeDesktopRoutes(ctx, f.deps))?.json()).toMatchObject({
+    connected: false, providerRegistered: false, activation: "disconnected",
+  });
+  expect(f.deps.readDesktopCatalogSlugs()).toEqual([]);
+});
+
 test("failed or skipped catalog and committed-but-missing models remain partial", async () => {
   const f = fixture(), ctx = context("/api/zcode-desktop/connect", {}, "gui-session");
   const converge = ctx.convergeCodexCatalog, connected = { ...status, connected: true };
@@ -181,9 +219,10 @@ function accountFixture() {
   const connected = new Set<string>();
   let hash = "a".repeat(64), failCatalog = false, active = false;
   let slugs: string[] = [];
+  const workspaceValidations: Array<{ path: string; accountId?: string }> = [];
   const deps = {
     resolveDesktopRuntime: (path: string) => path,
-    validateDesktopWorkspace: (path: string) => path,
+    validateDesktopWorkspace: (path: string, accountId?: string) => { workspaceValidations.push({ path, accountId }); return path; },
     accountRuntimeBusy: () => active,
     desktopStatus: (accountId?: string) => ({ ...status, sandbox: false, accountId, connected: !!accountId && connected.has(accountId) }),
     connectDesktop: async (_r: string, _w: string, accountId?: string) => {
@@ -211,9 +250,37 @@ function accountFixture() {
     await Promise.resolve(); await Promise.resolve();
     return result;
   };
-  return { ctx, deps, call, login, slugs: () => slugs, hash: (h: string) => { hash = h; },
+  return { ctx, deps, call, login, slugs: () => slugs, workspaceValidations: () => workspaceValidations,
+    hash: (h: string) => { hash = h; },
     failCatalog: (v: boolean) => { failCatalog = v; }, active: (v: boolean) => { active = v; } };
 }
+test("new accounts validate the displayed managed workspace in their eventual account scope", async () => {
+  const f = accountFixture();
+  const account = await f.login({ workspace: defaultDesktopWorkspace() });
+  expect(f.workspaceValidations()).toEqual([{ path: defaultDesktopWorkspace(account.accountId), accountId: account.accountId }]);
+  expect(await (await f.call("complete", { jobId: account.jobId })).json()).toMatchObject({ activation: "ready" });
+});
+
+test("workspace validation failure removes the newly allocated draft account", async () => {
+  const f = accountFixture();
+  f.deps.validateDesktopWorkspace = () => { throw new Error("workspace_invalid"); };
+  expect(await (await f.call("login", { label: "Invalid", runtime: "/runtime", workspace: "/denied" })).json())
+    .toEqual({ error: "workspace_invalid" });
+  expect(listAccounts()).toEqual([]);
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([]);
+});
+test("reconnect validation failure removes only its draft and preserves the saved account", async () => {
+  const f = accountFixture();
+  const account = await f.login();
+  expect(await (await f.call("complete", { jobId: account.jobId })).json()).toMatchObject({ activation: "ready" });
+  writeFileSync(join(accountProfile(account.accountId), "sentinel"), "original");
+  f.deps.validateDesktopWorkspace = () => { throw new Error("workspace_invalid"); };
+  expect(await f.login({ accountId: account.accountId, workspace: "/denied" }))
+    .toEqual({ error: "workspace_invalid" });
+  expect(listAccounts().map(saved => saved.id)).toEqual([account.accountId]);
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
+  expect(readFileSync(join(accountProfile(account.accountId), "sentinel"), "utf8")).toBe("original");
+});
 test("manual accounts require GUI consent; account login enables an independent provider/catalog", async () => {
   const f = accountFixture(), originalDefault = f.ctx.config.defaultProvider;
   expect((await f.call("login", {}, "admin-token")).status).toBe(403);

@@ -399,12 +399,15 @@ origins record no limiter state, and a valid grant redeems even from a throttled
 `gui/src/components/ZcodeAccountsPane.tsx` uses
 `src/server/management/zcode-account-routes.ts` for saved-account login, polling, completion,
 activation retry, rename and removal. These routes require a GUI-session principal; mutations
-require explicit consent. The official OAuth job uses a fresh private profile. Completion
+require explicit consent. The official OAuth job uses a fresh private profile. The displayed managed workspace is
+rebound and validated in the eventual account scope before OAuth begins. Completion
 checks identity and protocol before registering an account-bound provider and converging the
 catalog; a partial result stays visible and retryable. No default selection or inference is
 part of this flow. Reconnect retains custom provider settings and rejects a different identity.
 Rename changes only generated labels; removal refuses busy/referenced accounts. In-progress
-OAuth jobs expire and do not survive restart; saved account profiles and bindings do.
+OAuth jobs expire and do not survive restart; saved account profiles and bindings do. `src/server/management/zcode-desktop-routes.ts`
+makes disconnect disable the legacy provider and converge its catalog rows while preserving
+customized settings.
 See [the ZCode account runtime contract](adapters/registry.md#zcode-saved-accounts).
 
 For ZCode, input-image description is the explicit exception to native-agent helper exclusion;

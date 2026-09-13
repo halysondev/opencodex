@@ -56,10 +56,11 @@ or subscription terms; those remain the vendor's policy.
    custom Desktop providers and routes back to OpenCodex are not imported.
 
 For an existing provider, the same panel is in **Settings**. **Disconnect** revokes the managed
-connection and closes its owned app-server children. It does not log out of Desktop, delete
-Desktop conversations, or change its configuration. A saved disconnected state also prevents
-an older environment-based setup from silently reactivating. Reconnect to refresh the model
-catalog after changing Desktop's model configuration.
+connection, disables that provider and removes its models from the converged Codex catalog while
+preserving its customized settings for reconnection. It closes owned app-server children but does
+not log out of Desktop, delete Desktop conversations, or change ZCode Desktop's own configuration.
+A saved disconnected state also prevents an older environment-based setup from silently
+reactivating. Reconnect to refresh the model catalog after changing Desktop's model configuration.
 
 The proxy host needs a Node.js version compatible with the installed ZCode
 runtime. Missing prerequisites and unsupported platforms are shown in the panel. Managed setup

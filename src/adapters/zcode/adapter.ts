@@ -9,9 +9,11 @@ import { zcodeThoughtLevel } from "./reasoning";
 type Client = Pick<ZcodeClient, "request" | "close" | "onEvent" | "onFailure">;
 const MAX_ZCODE_INPUT_CHARS = 200_000;
 const HISTORY_TRUNCATED = "[Earlier OpenCodex conversation history truncated to fit the ZCode bridge.]";
+const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_identity_mismatch", "native_oauth_failed"]);
 export interface ZcodeAdapterDeps {
   settings?: () => ZcodeSettings;
   client?: (settings: ZcodeSettings) => Client;
+  refreshAccount?: (id: string) => Promise<void>;
   timeoutMs?: number;
 }
 
@@ -151,7 +153,14 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
       let stop = () => {};
       const cancelled = () => stop();
       try {
-        if (provider.zcodeAccountId && !deps.settings) await refreshAccount(provider.zcodeAccountId);
+        if (provider.zcodeAccountId && !deps.settings) {
+          try { await (deps.refreshAccount ?? refreshAccount)(provider.zcodeAccountId); }
+          catch (error) {
+            const code = error instanceof Error && SAFE_ACCOUNT_REFRESH_ERRORS.has(error.message)
+              ? error.message : "account_refresh_failed";
+            throw new Error(code);
+          }
+        }
         let settings: ZcodeSettings;
         try { settings = (deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))(); }
         catch { throw new Error("ZCode native execution is unavailable. Configure the isolated launcher, home, workspace and explicit opt-in."); }

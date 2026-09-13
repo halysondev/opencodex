@@ -6,7 +6,7 @@ import { createTranslatorBudget } from "../../lib/translator-budget";
 import { invalidateCodexModelsCache } from "../../codex/catalog";
 import { clearGatherRoutedModelsInflight } from "../../codex/catalog/provider-fetch";
 import { readBoundedJsonRequestBody } from "../request-decompress";
-import { activateDesktopProvider, desktopActivation, readDesktopCatalogSlugs } from "./zcode-desktop-activation";
+import { activateDesktopProvider, deactivateDesktopProvider, desktopActivation, readDesktopCatalogSlugs } from "./zcode-desktop-activation";
 
 const services = { connectDesktop, desktopStatus, disconnectDesktop, readDesktopCatalogSlugs };
 let activating = false;
@@ -42,7 +42,7 @@ export async function handleZcodeDesktopRoutes(ctx: ManagementContext, deps = se
     if (url.pathname === "/api/zcode-desktop/disconnect" && req.method === "POST") {
       if (activating) return jsonResponse({ error: "busy" }, 409);
       await deps.disconnectDesktop(); invalidateCodexModelsCache(); clearGatherRoutedModelsInflight();
-      return jsonResponse(deps.desktopStatus());
+      return jsonResponse(await deactivateDesktopProvider(ctx, deps.desktopStatus(), deps.readDesktopCatalogSlugs));
     }
     if (url.pathname === "/api/zcode-desktop/test" && req.method === "POST") {
       if (testing) return jsonResponse({ error: "busy" }, 409);

@@ -137,6 +137,26 @@ describe("ZCode local agent", () => {
     expect(() => loadZcodeSettings({})).toThrow("disabled");
     expect(() => loadZcodeSettings({ OCX_ZCODE_NATIVE_TOOLS: "1", OCX_ZCODE_COMMAND: "echo unsafe" })).toThrow("JSON argv");
   });
+  test("saved-account refresh failures emit only bounded public codes", async () => {
+    const events: AdapterEvent[] = [];
+    const adapter = createZcodeAdapter({ ...provider, zcodeAccountId: crypto.randomUUID() }, {
+      refreshAccount: async () => { throw new Error("/private/config/zcode-accounts/identity/account.json"); },
+    });
+    await adapter.runTurn!(request(), { headers: new Headers(), translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
+    expect(events.at(-1)).toMatchObject({ type: "error", message: "account_refresh_failed", retryable: false });
+    expect(JSON.stringify(events)).not.toContain("/private/");
+    expect(JSON.stringify(events)).not.toContain("account.json");
+  });
+  test("saved-account refresh preserves actionable public codes", async () => {
+    for (const code of ["account_login_required", "account_identity_mismatch", "native_oauth_failed"]) {
+      const events: AdapterEvent[] = [];
+      const adapter = createZcodeAdapter({ ...provider, zcodeAccountId: crypto.randomUUID() }, {
+        refreshAccount: async () => { throw new Error(code); },
+      });
+      await adapter.runTurn!(request(), { headers: new Headers(), translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
+      expect(events.at(-1)).toMatchObject({ type: "error", message: code, retryable: false });
+    }
+  });
   test("advanced settings allow an isolated home when the proxy HOME is absent", () => {
     const settings = fixture();
     const env = { OCX_ZCODE_NATIVE_TOOLS: "1", OCX_ZCODE_COMMAND: JSON.stringify(["/isolated-launcher"]),

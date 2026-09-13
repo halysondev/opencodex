@@ -10,8 +10,12 @@ type DesktopStatus = ReturnType<typeof desktopStatus>;
 export const readDesktopCatalogSlugs = (): string[] => (readCatalog(readCodexCatalogPath())?.models ?? [])
   .filter(row => row.visibility === "list").map(row => String(row.slug));
 
+function providerNames(ctx: ManagementContext, accountId?: string): string[] {
+  return Object.keys(ctx.config.providers).filter(name => ctx.config.providers[name]?.adapter === "zcode" && ctx.config.providers[name]?.zcodeAccountId === accountId);
+}
+
 function providerName(ctx: ManagementContext, accountId?: string): string | undefined {
-  const matches = Object.keys(ctx.config.providers).filter(name => ctx.config.providers[name]?.adapter === "zcode" && ctx.config.providers[name]?.zcodeAccountId === accountId);
+  const matches = providerNames(ctx, accountId);
   return matches.length === 1 ? matches[0] : undefined;
 }
 
@@ -66,5 +70,40 @@ export async function activateDesktopProvider(ctx: ManagementContext, status: De
     return current;
   } catch {
     return { ...desktopActivation(ctx, status, readSlugs), activation: "catalog_pending", error: "catalog_update_failed" };
+  }
+}
+
+/** Revoke catalog visibility without deleting customized provider settings. */
+export async function deactivateDesktopProvider(ctx: ManagementContext, status: DesktopStatus, readSlugs = readDesktopCatalogSlugs) {
+  const names = providerNames(ctx, status.accountId);
+  if (names.length) {
+    try {
+      const enabled = names.filter(name => ctx.config.providers[name]?.disabled !== true);
+      if (enabled.length) {
+        withConfigMutationLockSync(() => {
+          const previous = new Map(enabled.map(name => [name, ctx.config.providers[name]!]));
+          try {
+            for (const [name, provider] of previous) ctx.config.providers[name] = { ...provider, disabled: true };
+            (ctx.deps.saveConfigPreservingClaudeCode ?? saveConfigPreservingClaudeCode)(ctx.config);
+          } catch (error) {
+            for (const [name, provider] of previous) ctx.config.providers[name] = provider;
+            throw error;
+          }
+        });
+        reconcileLiveStateStores();
+      }
+      for (const name of names) clearModelCache(name);
+    } catch {
+      return { ...desktopActivation(ctx, status, readSlugs), error: "provider_registration_failed" };
+    }
+  }
+  try {
+    const result = await ctx.convergeCodexCatalog();
+    if (result.status !== "committed") {
+      return { ...desktopActivation(ctx, status, readSlugs), error: "catalog_update_failed" };
+    }
+    return desktopActivation(ctx, status, readSlugs);
+  } catch {
+    return { ...desktopActivation(ctx, status, readSlugs), error: "catalog_update_failed" };
   }
 }
