@@ -75,6 +75,7 @@ export const de: Record<TKey, string> = {
   "zcodeAccounts.rename": "Umbenennen",
   "zcodeAccounts.remove": "Konto entfernen",
   "zcodeAccounts.removeConfirm": "Gespeichertes Konto und Anbieter entfernen? Aktive Aufgaben und Routing-Verweise müssen zuerst beendet werden.",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "ZCode Desktop verbinden, um den lokalen Anbieter zu aktivieren und seine Modelle in Codex bereitzustellen. Standardwerte bleiben unverändert; keine Inferenz.",
   "zcodeDesktop.connected": "ZCode bereit · Anbieter aktiviert · Modelle veröffentlicht",
   "zcodeDesktop.notConnected": "Desktop nicht verbunden",

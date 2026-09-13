@@ -74,6 +74,7 @@ export const ja: Record<TKey, string> = {
   "zcodeAccounts.rename": "名前を変更",
   "zcodeAccounts.remove": "アカウントを削除",
   "zcodeAccounts.removeConfirm": "このアカウントとプロバイダーを削除しますか？先に作業を終了し、ルーティング参照を除去してください。",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "ZCode Desktop を接続するとローカルプロバイダーが有効になり、Codex にモデルを公開します。既定値は変更せず、推論も送信しません。",
   "zcodeDesktop.connected": "ZCode 準備完了 · プロバイダー有効 · モデル公開済み",
   "zcodeDesktop.notConnected": "Desktop 未接続",

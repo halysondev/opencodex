@@ -22,7 +22,10 @@ export interface ZcodeAdapterDeps {
 // session. Each turn owns a child; completing/cancelling it cannot kill another conversation.
 const locks = new Map<string, Promise<void>>();
 const sessions = new Map<string, string>();
+const reservationsByScope = new Map<string, number>();
 let reservations = 0;
+const MAX_RESERVATIONS = 32;
+const MAX_RESERVATIONS_PER_SCOPE = 24;
 /** Stop only this caller's wait; the official refresh may be shared by another request. */
 function waitForSharedRefresh(work: Promise<void>, signal?: AbortSignal): Promise<void> {
   if (!signal) return work;
@@ -38,8 +41,12 @@ function waitForSharedRefresh(work: Promise<void>, signal?: AbortSignal): Promis
 }
 async function lock(key: string, signal?: AbortSignal): Promise<() => void> {
   if (signal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
-  if (reservations >= 32) throw new Error("ZCode profile queue is full.");
+  const scopeReservations = reservationsByScope.get(key) ?? 0;
+  if (reservations >= MAX_RESERVATIONS || scopeReservations >= MAX_RESERVATIONS_PER_SCOPE) {
+    throw new Error("ZCode profile queue is full.");
+  }
   reservations++;
+  reservationsByScope.set(key, scopeReservations + 1);
   const previous = locks.get(key) ?? Promise.resolve();
   let unlock!: () => void;
   const current = new Promise<void>(resolve => { unlock = resolve; });
@@ -48,7 +55,11 @@ async function lock(key: string, signal?: AbortSignal): Promise<() => void> {
   let released = false;
   const release = () => {
     if (released) return;
-    released = true; reservations--; unlock();
+    released = true; reservations--;
+    const remaining = (reservationsByScope.get(key) ?? 1) - 1;
+    if (remaining > 0) reservationsByScope.set(key, remaining);
+    else reservationsByScope.delete(key);
+    unlock();
     void tail.then(() => { if (locks.get(key) === tail) locks.delete(key); });
   };
   let onAbort = () => {};

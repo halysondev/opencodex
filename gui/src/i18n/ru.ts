@@ -74,6 +74,7 @@ export const ru: Record<TKey, string> = {
   "zcodeAccounts.rename": "Переименовать",
   "zcodeAccounts.remove": "Удалить аккаунт",
   "zcodeAccounts.removeConfirm": "Удалить этот аккаунт и провайдера? Сначала завершите задачи и удалите ссылки маршрутизации.",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "Подключение ZCode Desktop включает локального провайдера и публикует модели в Codex. Значения по умолчанию сохраняются; генерация не запускается.",
   "zcodeDesktop.connected": "ZCode готов · провайдер включён · модели опубликованы",
   "zcodeDesktop.notConnected": "Desktop не подключён",

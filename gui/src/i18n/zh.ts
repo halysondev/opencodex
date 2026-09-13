@@ -74,6 +74,7 @@ export const zh: Record<TKey, string> = {
   "zcodeAccounts.rename": "重命名",
   "zcodeAccounts.remove": "移除账户",
   "zcodeAccounts.removeConfirm": "移除此账户及其提供商？请先结束活动任务并移除路由引用。",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "连接 ZCode Desktop 将启用本地提供商并将模型发布到 Codex。不更改默认设置，也不执行推理。",
   "zcodeDesktop.connected": "ZCode 已就绪 · 提供商已启用 · 模型已发布",
   "zcodeDesktop.notConnected": "Desktop 未连接",

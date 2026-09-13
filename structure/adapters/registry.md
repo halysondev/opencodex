@@ -306,6 +306,8 @@ hidden reconnect drafts whose in-memory job disappeared after restart, while pre
 drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings,
 transient completion failures keep the OAuth job authenticated for retry, and canonical
 global-default aliases remap to the account default before validation.
+Native turn admission retains a 32-request process ceiling and a 24-request per-profile ceiling,
+so one stalled profile cannot consume every reservation needed by independent saved accounts.
 Advanced model descriptors reject loopback, private and link-local destinations before the
 official runtime receives them.
 

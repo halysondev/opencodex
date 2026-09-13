@@ -72,6 +72,7 @@ export const zhTW: Record<TKey, string> = {
   "zcodeAccounts.rename": "重新命名",
   "zcodeAccounts.remove": "移除帳戶",
   "zcodeAccounts.removeConfirm": "移除此帳戶及其供應商？請先結束工作並移除路由參照。",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "連接 ZCode Desktop 將啟用本機供應商並將模型發佈至 Codex。不變更預設設定，也不執行推論。",
   "zcodeDesktop.connected": "ZCode 已就緒 · 供應商已啟用 · 模型已發佈",
   "zcodeDesktop.notConnected": "Desktop 未連接",

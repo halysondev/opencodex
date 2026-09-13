@@ -76,6 +76,7 @@ export const en = {
   "zcodeAccounts.rename": "Rename",
   "zcodeAccounts.remove": "Remove account",
   "zcodeAccounts.removeConfirm": "Remove this saved account and its provider? Active tasks and routing references must be cleared first.",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "Connect ZCode Desktop to enable its local provider and publish its models to Codex. Defaults stay unchanged; no inference is sent.",
   "zcodeDesktop.connected": "ZCode ready · provider enabled · models published",
   "zcodeDesktop.notConnected": "Desktop not connected",

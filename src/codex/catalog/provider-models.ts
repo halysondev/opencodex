@@ -260,7 +260,7 @@ export async function fetchProviderModelsWithAuth(
           // The official Desktop catalog is authoritative for current GLM-5.3 levels. Unknown
           // future models expose no generic picker unless the operator configured one explicitly.
           ...(reasoning ?? (hints.reasoningEfforts === undefined ? { reasoningEfforts: [] } : {})),
-          displayName: model.label,
+          displayName: hints.displayName ?? model.label,
           inputModalities: hints.inputModalities ?? ["text"],
         } as CatalogModel;
       });

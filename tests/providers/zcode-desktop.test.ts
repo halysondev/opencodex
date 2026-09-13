@@ -5,6 +5,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultDesktopWorkspace, desktopStatus, disconnectDesktop, isDefaultDesktopWorkspace, loadDesktopSettings, resolveDesktopRuntime, validateDesktopWorkspace } from "../../src/adapters/zcode/desktop";
 import { readZcodeModels } from "../../src/adapters/zcode/settings";
+import { accountProfile, accountRoot, allocateAccount } from "../../src/adapters/zcode/accounts";
+import { fetchProviderModels } from "../../src/codex/catalog/provider-fetch";
 
 import { parseNativeOAuthEvent, nativeOAuthCommand } from "../../src/adapters/zcode/native-oauth";
 import { resolveDesktopNode } from "../../src/adapters/zcode/desktop-node";
@@ -114,6 +116,31 @@ describe("managed ZCode Desktop", () => {
       scope: "desktop:test", desktopModels: [{ id: "builtin:zai/model", providerId: "builtin:zai", modelId: "model", label: "Model" }] });
     expect(result[0]?.id).toBe("builtin:zai/model");
     expect(result[0]?.runtimeModel).toEqual({});
+  });
+  test("managed discovery preserves a configured account model display name", async () => {
+    process.env.OCX_ZCODE_SANDBOX = "0";
+    const account = allocateAccount("Personal");
+    const profile = join(accountProfile(account.id), ".zcode/v2");
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(join(profile, "config.json"), "{}", { mode: 0o600 });
+    const resources = join(root, "catalog-app/resources");
+    mkdirSync(join(resources, "glm"), { recursive: true });
+    writeFileSync(join(resources, "app.asar"), "fixture");
+    const runtime = join(resources, "glm/zcode.cjs");
+    writeFileSync(runtime, "");
+    const workspace = defaultDesktopWorkspace(account.id);
+    mkdirSync(workspace, { recursive: true });
+    const model = { id: "builtin:zai-coding-plan/GLM-5.3", providerId: "builtin:zai-coding-plan",
+      modelId: "GLM-5.3", label: "Z.AI / GLM-5.3" };
+    writeFileSync(join(accountRoot(account.id), "connection.json"), JSON.stringify({
+      version: 1, connected: true, generation: crypto.randomUUID(), runtime, workspace, models: [model],
+    }), { mode: 0o600 });
+    const discovered = await fetchProviderModels("zcode-personal", {
+      adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai", zcodeAccountId: account.id,
+      modelDisplayNames: { [model.id]: "Personal / Custom GLM" },
+    }, 0);
+    expect(discovered).toHaveLength(1);
+    expect(discovered[0]?.displayName).toBe("Personal / Custom GLM");
   });
 });
 

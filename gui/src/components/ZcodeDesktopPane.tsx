@@ -80,8 +80,8 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
     : error ? t("zcodeDesktop.failed") : "";
   const changed = runtime !== status?.runtime || workspace !== status?.workspace;
   const partial = status?.connected && status.activation !== "ready";
-  return <section className="setup-guide" style={{ padding: 16, display: "grid", gap: 12 }} aria-label="ZCode Desktop">
-    <strong>ZCode Desktop</strong>
+  return <section className="setup-guide" style={{ padding: 16, display: "grid", gap: 12 }} aria-label={t("zcodeDesktop.title")}>
+    <strong>{t("zcodeDesktop.title")}</strong>
     <p className="muted text-label">{t("zcodeDesktop.intro")}</p>
     <p role="note">{t(status?.sandbox ? "zcodeDesktop.sandboxAccess" : "zcodeDesktop.hostAccess")}</p>
     <div role="status">{status?.connected ? status.activation === "ready" ? t("zcodeDesktop.connected")

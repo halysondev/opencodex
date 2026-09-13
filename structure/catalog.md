@@ -590,6 +590,8 @@ not fetch on the request path; catalog sync owns their bootstrap.
 ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
 client integration exports. Their profile, catalog and transport contract is maintained in
 [ZCode saved accounts](adapters/registry.md#zcode-saved-accounts); adding one never changes defaults or runs inference.
+Live Desktop discovery uses the official model label only as a fallback; configured
+`modelDisplayNames` remain authoritative for renamed accounts and operator customizations.
 
 For ZCode, input-image description is the explicit exception to native-agent helper exclusion;
 see [ZCode vision input adaptation](adapters/registry.md#zcode-vision-input-adaptation). The configured

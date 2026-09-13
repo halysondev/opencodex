@@ -74,6 +74,7 @@ export const ko: Record<TKey, string> = {
   "zcodeAccounts.rename": "이름 변경",
   "zcodeAccounts.remove": "계정 제거",
   "zcodeAccounts.removeConfirm": "이 계정과 공급자를 제거할까요? 먼저 작업을 끝내고 라우팅 참조를 제거하세요.",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "ZCode Desktop을 연결하면 로컬 공급자를 활성화하고 Codex에 모델을 게시합니다. 기본값은 유지되며 추론은 실행하지 않습니다.",
   "zcodeDesktop.connected": "ZCode 준비 완료 · 공급자 활성화 · 모델 게시 완료",
   "zcodeDesktop.notConnected": "Desktop 연결 안 됨",

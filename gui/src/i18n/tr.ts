@@ -75,6 +75,7 @@ export const tr: Record<TKey, string> = {
   "zcodeAccounts.rename": "Yeniden adlandır",
   "zcodeAccounts.remove": "Hesabı kaldır",
   "zcodeAccounts.removeConfirm": "Bu hesap ve sağlayıcı kaldırılsın mı? Önce etkin işleri bitirin ve yönlendirme referanslarını kaldırın.",
+  "zcodeDesktop.title": "ZCode Desktop",
   "zcodeDesktop.intro": "ZCode Desktop bağlantısı yerel sağlayıcıyı etkinleştirip modellerini Codex’e ekler. Varsayılanlar değişmez; çıkarım yapılmaz.",
   "zcodeDesktop.connected": "ZCode hazır · sağlayıcı etkin · modeller yayımlandı",
   "zcodeDesktop.notConnected": "Desktop bağlı değil",

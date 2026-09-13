@@ -67,9 +67,9 @@ class FakeClient {
 const provider: OcxProviderConfig = { adapter: "zcode", baseUrl: "https://zcode.z.ai", authMode: "local" };
 const request = (): OcxParsedRequest => ({ modelId: "test/model", stream: true, options: {},
   context: { messages: [{ role: "user", content: "Say hello", timestamp: 0 }] } });
-async function run(settings: ZcodeSettings, client: FakeClient, parsed = request(), signal?: AbortSignal) {
+async function run(settings: ZcodeSettings, client: FakeClient, parsed = request(), signal?: AbortSignal, timeoutMs = 40) {
   const events: AdapterEvent[] = [];
-  const adapter = createZcodeAdapter(provider, { settings: () => settings, client: () => client, timeoutMs: 40 });
+  const adapter = createZcodeAdapter(provider, { settings: () => settings, client: () => client, timeoutMs });
   await adapter.runTurn!(parsed, { headers: new Headers(), abortSignal: signal,
     translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
   return events;
@@ -307,6 +307,19 @@ describe("ZCode local agent", () => {
     expect(second.calls).toHaveLength(0);
     await pending;
     expect((await run(settings, new FakeClient())).at(-1)?.type).toBe("done");
+  });
+  test("one saturated profile leaves reservation capacity for another profile", async () => {
+    const settings = fixture();
+    const controllers = Array.from({ length: 24 }, () => new AbortController());
+    const pending = controllers.map(controller => run(
+      settings, new FakeClient("hang"), request(), controller.signal, 2_000,
+    ));
+    const rejected = await run(settings, new FakeClient(), request(), undefined, 2_000);
+    expect(rejected.at(-1)).toMatchObject({ type: "error", message: "ZCode profile queue is full." });
+    const other = await run({ ...settings, scope: settings.scope + ":other" }, new FakeClient(), request(), undefined, 2_000);
+    expect(other.at(-1)?.type).toBe("done");
+    for (const controller of controllers) controller.abort();
+    await Promise.all(pending);
   });
   test("pre-aborted requests never spawn or send", async () => {
     const client = new FakeClient(); const events = await run(fixture(), client, request(), AbortSignal.abort());
