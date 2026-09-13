@@ -121,7 +121,10 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
     setBusy(true); setError("");
     try { await completeJob(job); } finally { setBusy(false); }
   };
-  const loggingIn = !!job && ["waiting", "authenticated"].includes(job.phase);
+  // Failed jobs retain their hidden profile until Cancel, so they must also block another Add or
+  // Reconnect attempt. The server applies the same ownership rule and the ten-minute expiry is a
+  // final cleanup bound rather than the ordinary retry path.
+  const loggingIn = !!job && ["waiting", "authenticated", "failed"].includes(job.phase);
   return <section style={{ display: "grid", gap: 8 }}>
     <h3>{t("zcodeAccounts.title")}</h3>
     <p className="muted text-label">{t("zcodeAccounts.help")}</p>

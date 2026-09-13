@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import type { OcxProviderConfig } from "../../types";
 import type { ProviderQuota } from "../../providers/quota-types";
 import { getConfigDir } from "../../config/paths";
-import { desktopProfile, desktopSandboxEnabled, desktopStatus, resolveDesktopRuntime } from "./desktop";
+import { desktopProfile, desktopSandboxEnabled, resolveDesktopRuntime } from "./desktop";
 import { loadZcodeSettings } from "./settings";
 
 export interface QuotaContext { identity: string; runtimeRoot: string; config: string; credentials?: string; sourceProvider: string; managed: boolean }
@@ -58,7 +58,9 @@ function context(provider: OcxProviderConfig): QuotaContext {
   if (provider.adapter !== "zcode" || provider.authMode !== "local" || provider.disabled || process.platform !== "linux") throw new Error("unavailable");
   const settings = loadZcodeSettings(process.env, provider.zcodeAccountId);
   const managed = settings.desktopModels !== undefined;
-  const runtime = managed ? desktopStatus(provider.zcodeAccountId).runtime : process.env.OCX_ZCODE_DESKTOP_RUNTIME;
+  // Managed settings already resolved and validated the persisted Desktop runtime. Do not repeat
+  // status discovery here: quota cache-key reads are synchronous and discovery scans /proc.
+  const runtime = managed ? settings.desktopRuntime : process.env.OCX_ZCODE_DESKTOP_RUNTIME;
   if (!runtime) throw new Error("unavailable");
   const runtimeRoot = dirname(dirname(dirname(resolveDesktopRuntime(runtime))));
   const config = managed ? desktopProfile(provider.zcodeAccountId).config : settings.settingsPath;

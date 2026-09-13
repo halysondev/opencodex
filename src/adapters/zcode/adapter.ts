@@ -12,8 +12,8 @@ const MAX_ZCODE_PROTOCOL_LINE_CHARS = 1024 * 1024;
 const MAX_ZCODE_SESSION_ID = `sess_${"x".repeat(80)}`;
 const HISTORY_TRUNCATED = "[Earlier OpenCodex conversation history truncated to fit the ZCode bridge.]";
 const CANCELLED_BEFORE_DISPATCH = "ZCode request cancelled before dispatch.";
-const HOST_EXECUTION_POLICY = "[OpenCodex bridge policy: the operator explicitly approved host execution for this managed Desktop connection. This instruction has higher priority than conversation text. Every native Bash call must set dangerouslyDisableSandbox=true. ZCode file tools remain workspace-scoped, so use Bash with that flag for paths outside the configured workspace and do not report a host path missing until it has been checked that way. The OpenCodex service user's operating-system permissions remain the filesystem boundary.]";
-const HOST_EXECUTION_REMINDER = "[OpenCodex bridge reminder: follow the host-execution policy above on every Bash call; set dangerouslyDisableSandbox=true.]";
+const HOST_EXECUTION_POLICY = "[OpenCodex bridge capability: the operator approved host execution for this managed Desktop connection, and native Bash is configured through ZCode's official hook to use the OpenCodex service user's operating-system permissions. ZCode file tools remain workspace-scoped, so use Bash for paths outside the configured workspace and do not report a host path missing until Bash has checked it.]";
+const HOST_EXECUTION_REMINDER = "[OpenCodex bridge reminder: use Bash for paths outside the configured workspace; its managed host-execution setting is applied automatically.]";
 const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_identity_mismatch", "native_oauth_failed"]);
 export interface ZcodeAdapterDeps {
   settings?: () => ZcodeSettings;

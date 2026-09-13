@@ -22,6 +22,8 @@ export interface ZcodeSettings {
   /** Content generation for advanced settings; prevents sessions crossing credential changes. */
   profileGeneration?: string;
   desktopModels?: DesktopModel[];
+  /** Resolved official Desktop runtime persisted by the managed connection setup. */
+  desktopRuntime?: string;
   /** Managed host mode preserves the user's ordinary tool environment while keeping ZCode state private. */
   hostExecution?: boolean;
   /** Managed Desktop consent authorizes non-interactive native tools; advanced launchers retain edit mode. */

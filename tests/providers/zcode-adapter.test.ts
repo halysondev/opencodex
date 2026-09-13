@@ -96,14 +96,14 @@ describe("ZCode local agent", () => {
     }
     expect(client.calls.find(call => call.method === "session/create")?.params.mode).toBe("yolo");
     expect(String(client.calls.find(call => call.method === "session/send")?.params.content))
-      .toContain("dangerouslyDisableSandbox=true");
+      .toContain("configured through ZCode's official hook");
     expect(String(client.calls.find(call => call.method === "session/send")?.params.content))
-      .toMatch(/^\[OpenCodex bridge policy:.*\[OpenCodex bridge reminder:/s);
+      .toMatch(/^\[OpenCodex bridge capability:.*\[OpenCodex bridge reminder:/s);
     const advancedClient = new FakeClient();
     expect((await run(fixture(), advancedClient)).find(event => event.type === "text_delta"
       && event.phase === "commentary")?.text).toContain("configured launcher");
     expect(String(advancedClient.calls.find(call => call.method === "session/send")?.params.content))
-      .not.toContain("dangerouslyDisableSandbox=true");
+      .not.toContain("managed host-execution setting");
     expect((await run(settings, new FakeClient())).find(event => event.type === "text_delta"
       && event.phase === "commentary")?.text).toContain("host-user access");
   });

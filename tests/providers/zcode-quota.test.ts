@@ -52,6 +52,9 @@ describe("ZCode native subscription quota", () => {
     const bootstrap = readFileSync(repoPath("src/adapters/zcode/quota-bootstrap.cjs"), "utf8");
     expect(bootstrap).toContain("getEntitlementSnapshot");
     expect(bootstrap).not.toMatch(/\bfetch\s*\(|https\.request|useCodingPlanReset|session\/send/);
+    const quotaSource = readFileSync(repoPath("src/adapters/zcode/quota.ts"), "utf8");
+    expect(quotaSource).toContain("settings.desktopRuntime");
+    expect(quotaSource).not.toMatch(/\bdesktopStatus\s*\(/);
   });
   test("preserves unavailable and authoritative-empty probe states separately", async () => {
     expect(await readZcodeQuota(provider, { context: () => context(), probe: async () => null })).toBeNull();

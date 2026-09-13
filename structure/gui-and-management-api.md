@@ -411,8 +411,9 @@ part of this flow. When these controls run inside either Add Provider or an exis
 every successful provider/catalog mutation notifies the Providers owner to reload config and
 refresh model rows; a removal persisted before a catalog convergence failure performs the
 same invalidation on its bounded partial error.
-Failed OAuth jobs retain an explicit Cancel action so their hidden capacity reservation can be
-released immediately instead of waiting for expiry. Account-bound provider
+Failed OAuth jobs retain their hidden draft and capacity reservation until explicit Cancel or
+bounded expiry, so Add/Reconnect stays disabled and retries cannot stack drafts for the same
+account. Account-bound provider
 settings hide the unrelated global Desktop controls.
 Reconnect retains custom provider settings and rejects a different identity.
 Rename changes only generated labels; removal refuses clients whose direct bootstrap is still exiting and recognizes generated

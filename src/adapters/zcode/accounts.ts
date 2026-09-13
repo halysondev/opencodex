@@ -5,6 +5,9 @@ import { getConfigDir } from "../../config/paths";
 
 export interface ZcodeAccount { id: string; label: string; subjectHash?: string; draftFor?: string; pending?: boolean }
 const ACCOUNT_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+// Normal operation has at most 20 saved accounts plus eight live OAuth jobs. Keep enough room to
+// recover older orphaned drafts without turning a user-writable directory into unbounded sync IO.
+const MAX_ACCOUNT_DIRECTORIES = 256;
 export function accountRoot(id: string): string {
   if (!ACCOUNT_ID.test(id)) throw new Error("account_invalid");
   return join(getConfigDir(), "zcode-accounts", id);
@@ -36,10 +39,18 @@ export function writeAccount(account: ZcodeAccount): void {
   writeFileSync(temp, JSON.stringify({ ...account, label }), { mode: 0o600, flag: "wx" });
   renameSync(temp, join(dir, "account.json"));
 }
-function storedAccounts(): ZcodeAccount[] {
+function storedAccountIds(): string[] {
   const dir = join(getConfigDir(), "zcode-accounts");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter(id => ACCOUNT_ID.test(id)).slice(0, 100).flatMap(id => {
+  const ids = readdirSync(dir).filter(id => ACCOUNT_ID.test(id));
+  if (ids.length > MAX_ACCOUNT_DIRECTORIES) throw new Error("account_invalid");
+  return ids;
+}
+function storedAccounts(): ZcodeAccount[] {
+  // Read every bounded, syntactically valid account directory before applying visibility or
+  // capacity rules. Slicing directory entries first can omit a real account when legacy/orphaned
+  // drafts sort ahead of it, which makes duplicate and account-limit checks order-dependent.
+  return storedAccountIds().flatMap(id => {
     try { return [readAccount(id)]; } catch { return []; }
   });
 }
@@ -48,9 +59,7 @@ export function listAccounts(): ZcodeAccount[] {
 }
 /** Remove hidden OAuth profiles whose owning in-memory job vanished after a process restart. */
 export function reconcileAccountDrafts(activeDraftIds: ReadonlySet<string>): void {
-  const dir = join(getConfigDir(), "zcode-accounts");
-  if (!existsSync(dir)) return;
-  for (const id of readdirSync(dir).filter(id => ACCOUNT_ID.test(id))) {
+  for (const id of storedAccountIds()) {
     if (activeDraftIds.has(id)) continue;
     try { const account = readAccount(id); if (account.draftFor || account.pending) removeAccountFiles(id); }
     catch { /* Invalid state is never deleted implicitly. */ }

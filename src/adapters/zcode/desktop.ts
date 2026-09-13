@@ -173,7 +173,7 @@ function settingsFor(connection: Connection, accountId?: string): ZcodeSettings 
       "--host", runtime, profile.config, workspace, privateHome],
     home: privateHome, workspace, settingsPath: "",
     lockKey, scope: `desktop:${connection.generation}:${profileStamp}:host`, desktopModels: connection.models,
-    hostExecution: true, nativePermissionMode: "yolo",
+    desktopRuntime: runtime, hostExecution: true, nativePermissionMode: "yolo",
   };
   const sandboxHome = homedir(); // preserve the official credential cipher's HOME/username identity
   const args = ["--unshare-all", "--share-net", "--die-with-parent", "--new-session", "--ro-bind", "/usr", "/usr"];
@@ -195,6 +195,7 @@ function settingsFor(connection: Connection, accountId?: string): ZcodeSettings 
     "/usr/bin/node", "/bridge/desktop-bootstrap.cjs");
   return { accountId, command: [bwrap, ...args], home: privateHome, workspace: "/workspace", settingsPath: "",
     lockKey, scope: `desktop:${connection.generation}:${profileStamp}:sandbox`, desktopModels: connection.models,
+    desktopRuntime: runtime,
     nativePermissionMode: "yolo" };
 }
 

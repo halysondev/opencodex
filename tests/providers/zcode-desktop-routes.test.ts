@@ -1,5 +1,5 @@
 import { handleZcodeAccountRoutes, resetZcodeAccountJobsForTests } from "../../src/server/management/zcode-account-routes";
-import { listAccounts, accountProfile } from "../../src/adapters/zcode/accounts";
+import { allocateAccount, listAccounts, accountProfile, writeAccount } from "../../src/adapters/zcode/accounts";
 import { defaultDesktopWorkspace } from "../../src/adapters/zcode/desktop";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { handleZcodeDesktopRoutes } from "../../src/server/management/zcode-desktop-routes";
@@ -512,6 +512,25 @@ test("a hidden new-account draft reserves the last account slot only while its j
   await f.call("cancel", { jobId: pending.jobId });
   expect(await f.login({ label: "Replacement" })).not.toHaveProperty("error");
 });
+test("account enumeration considers saved accounts after more than one hundred reconnect drafts", () => {
+  const target = "11111111-1111-4111-8111-111111111111";
+  for (let i = 0; i < 100; i++) {
+    writeAccount({
+      id: `00000000-0000-4000-8000-${i.toString().padStart(12, "0")}`,
+      label: `Reconnect ${i}`,
+      draftFor: target,
+    });
+  }
+  for (let i = 0; i < 20; i++) {
+    writeAccount({
+      id: `ffffffff-ffff-4fff-8fff-${i.toString().padStart(12, "0")}`,
+      label: `Saved ${i}`,
+      subjectHash: i.toString(16).padStart(64, "0"),
+    });
+  }
+  expect(listAccounts()).toHaveLength(20);
+  expect(() => allocateAccount("Overflow")).toThrow("account_limit");
+});
 test("partial catalog activation retries without login; busy and referenced accounts cannot be removed", async () => {
   const f = accountFixture(), a = await f.login();
   f.failCatalog(true);
@@ -674,6 +693,30 @@ test("failed official OAuth has a safe error and cancel removes the draft only",
   expect(JSON.stringify(result)).not.toContain("private vendor token");
   expect(await (await f.call("cancel", { jobId: a.jobId })).json()).toEqual({ ok: true });
   expect(listAccounts()).toHaveLength(0);
+});
+
+test("failed reconnect retains one hidden draft and blocks retry until explicit cancel", async () => {
+  const f = accountFixture();
+  const account = await f.login();
+  expect(await (await f.call("complete", { jobId: account.jobId })).json()).toMatchObject({ activation: "ready" });
+  f.deps.runNativeOAuth = async () => { throw new Error("private reconnect failure"); };
+  const failed = await f.login({ accountId: account.accountId });
+  const poll = context("/api/zcode-accounts/login?jobId=" + failed.jobId, {}, "gui-session", "GET");
+  const result = await (await handleZcodeAccountRoutes(poll, f.deps))!.json();
+  expect(result).toMatchObject({ phase: "failed", error: "native_oauth_failed", accountId: account.accountId });
+  expect(readdirSync(join(home, "zcode-accounts"))).toHaveLength(2);
+
+  expect(await f.login({ accountId: account.accountId })).toEqual({ error: "account_busy" });
+  expect(readdirSync(join(home, "zcode-accounts"))).toHaveLength(2);
+  expect(await (await f.call("cancel", { jobId: failed.jobId })).json()).toEqual({ ok: true });
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
+
+  f.deps.runNativeOAuth = async options => {
+    options.onEvent({ type: "authenticated", subjectHash: "a".repeat(64) });
+  };
+  const retry = await f.login({ accountId: account.accountId });
+  expect(retry).not.toHaveProperty("error");
+  await f.call("cancel", { jobId: retry.jobId });
 });
 
 test("concurrent completions cannot register the same identity twice", async () => {

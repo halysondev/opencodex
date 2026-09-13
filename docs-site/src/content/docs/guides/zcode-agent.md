@@ -149,12 +149,14 @@ paths retain their host meaning. The selected workspace is a starting directory,
 filesystem boundary. This default also applies to previously connected installations after
 upgrading. Managed connections start ZCode in its non-interactive `yolo` permission mode so
 native commands do not stop for an approval prompt that the OpenCodex protocol cannot display.
-Because the official Bash tool otherwise creates its own sandbox, OpenCodex also places a
-bridge-owned instruction before and after every managed host turn requiring each Bash call to set
-ZCode's official `dangerouslyDisableSandbox=true` input. Native file tools remain limited to the
-selected workspace, so work on other absolute paths is directed through Bash. This disables
-ZCode's per-command sandbox; it does not elevate privileges or bypass the operating system or an
-outer harness sandbox.
+Because the official Bash tool otherwise creates its own sandbox, the disposable private ZCode
+configuration also installs an official `PreToolUse` process hook for Bash. The hook preserves the
+requested command and sets ZCode's supported `dangerouslyDisableSandbox=true` input
+deterministically, even when a model omits it. OpenCodex does not patch the Desktop runtime or send
+the request to a different API. Native file tools remain limited to the selected workspace, so a
+bridge-owned reminder directs work on other absolute paths through Bash. This disables ZCode's
+per-command sandbox; it does not elevate privileges or bypass the operating system or an outer
+harness sandbox.
 
 Any isolation must be applied by the harness/operator **where the native ZCode process
 executes**. A sandbox in a remote calling client does not automatically constrain this
@@ -178,7 +180,7 @@ export OCX_ZCODE_SANDBOX=1
 Bubblewrap is required only when this option is enabled. The existing restricted workspace
 mounts and real sandbox preflight apply; failure never falls back to host execution. In this
 mode the selected workspace appears as `/workspace`; other host files are not mounted, and the
-managed host-execution instruction is omitted.
+managed host-execution hook and reminder are omitted.
 Unset the variable to restore the default host execution. Environment changes apply to
 existing managed connections without requiring another connection. They do not reconfigure
 an advanced operator-supplied launcher.
@@ -272,8 +274,9 @@ or discovery APIs.
 - Native execution requires either a persisted, explicitly consented Desktop connection or all
   four advanced environment settings. Disconnecting revokes managed execution.
 - Managed Desktop sessions use ZCode's non-interactive `yolo` permission mode after the explicit
-  connection consent and direct native Bash to use its official unsandboxed-call input. Advanced
-  operator launchers retain `edit` mode and their own isolation policy. Interactive permission
+  connection consent. Their disposable private config uses ZCode's official hook surface to apply
+  the supported unsandboxed-call input to native Bash. Advanced operator launchers retain `edit`
+  mode and their own isolation policy. Interactive permission
   requests are still denied, and user-input requests are cancelled rather than answered
   automatically; continue those workflows in the ZCode client itself.
 - Each turn owns a child process. A profile has one active turn at a time because ZCode writes
@@ -365,8 +368,9 @@ unsupported profile is reported as unavailable. This opt-in does not change
 inference routing or migrate your model IDs.
 
 The dashboard's existing quota cache and Refresh quotas controls apply. Concurrent
-reads share one native probe. Account/configuration changes invalidate snapshots;
-errors clear the ZCode report rather than leaving a misleading full balance.
+reads share one native probe. Account/configuration identity changes invalidate snapshots. A
+transient probe error retains only the bounded same-key last-good reading; it never fabricates a
+full balance, and the report disappears after the last-good age expires.
 These bars are informational and do not enable quota-based automatic rerouting.
 The native session app-server's token accounting remains unavailable; subscription
 quota is a distinct measurement. See [ZCode Usage Stats](https://zcode.z.ai/en/docs/usage-stats)

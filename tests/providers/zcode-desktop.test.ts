@@ -13,6 +13,7 @@ import { resolveDesktopNode } from "../../src/adapters/zcode/desktop-node";
 
 const require = createRequire(import.meta.url);
 const { normalizeDesktopConfig, desktopModelCatalog } = require("../../src/adapters/zcode/desktop-bootstrap.cjs");
+const { forceHostBashInput } = require("../../src/adapters/zcode/desktop-host-tool-hook.cjs");
 const { materializeSession, subjectHash } = require("../../src/adapters/zcode/oauth-bootstrap.cjs");
 let root: string;
 let previousHome: string | undefined;
@@ -54,6 +55,32 @@ describe("managed ZCode Desktop", () => {
     } } });
     expect(desktopModelCatalog(config).map((model: { modelId: string }) => model.modelId)).toContain("valid");
     expect(config.model).toEqual({ main: "builtin:zai-coding-plan/valid", lite: "builtin:zai-coding-plan/valid" });
+  });
+  test("managed host config deterministically disables only ZCode's Bash sandbox", () => {
+    const input = { provider: { "builtin:zai-coding-plan": provider() } };
+    const isolated = normalizeDesktopConfig(input);
+    expect(isolated.hooks).toBeUndefined();
+
+    const host = normalizeDesktopConfig(input, { hostExecution: true });
+    expect(host.hooks.events.PreToolUse).toMatchObject([{
+      matcher: "^Bash$", hooks: [{ type: "process", timeoutMs: 2_000 }],
+    }]);
+    const hook = host.hooks.events.PreToolUse[0].hooks[0];
+    expect(hook.command).toBe(process.execPath);
+    expect(hook.args).toEqual([require.resolve("../../src/adapters/zcode/desktop-host-tool-hook.cjs")]);
+    const original = {
+      command: "cat /outside/workspace", description: "read fixture",
+      dangerouslyDisableSandbox: false,
+    };
+    expect(forceHostBashInput({
+      hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: original,
+    })).toEqual({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput: {
+      ...original, dangerouslyDisableSandbox: true,
+    } } });
+    expect(original.dangerouslyDisableSandbox).toBeFalse();
+    expect(() => forceHostBashInput({
+      hook_event_name: "PreToolUse", tool_name: "Read", tool_input: original,
+    })).toThrow("invalid hook input");
   });
   test("runtime selection requires a Desktop resources layout, not arbitrary commands", () => {
     expect(() => resolveDesktopRuntime("node -e malicious")).toThrow("desktop_missing");

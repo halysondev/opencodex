@@ -126,7 +126,9 @@ GUI-consented Desktop connection. Data-plane requests and ordinary provider conf
 set command/workspace paths. The managed Desktop bootstrap keeps credential-bearing runtime
 descriptors inside the official child process; the parent sees public model identities only.
 Subscription quota is separately read through the official Desktop host entitlement RPC in a
-short-lived private profile copy, optionally inside Bubblewrap when enabled. Only numeric quota windows leave that process. An advanced launcher
+short-lived private profile copy, optionally inside Bubblewrap when enabled. Managed quota cache
+identity reuses the runtime already resolved and validated while loading Desktop settings instead
+of repeating synchronous host process discovery. Only numeric quota windows leave that process. An advanced launcher
 requires explicit `OCX_ZCODE_DESKTOP_RUNTIME` authority and reuses its own isolated model key;
 quota discovery must not silently import another Desktop account or affect routing policy.
 
@@ -273,11 +275,12 @@ not client-side tool dispatch. `OCX_ZCODE_SANDBOX=1` explicitly enables the opti
 Bubblewrap workspace boundary; harness restrictions apply where the native process runs. Explicitly
 consented managed connections use the official runtime's non-interactive `yolo` mode because the
 bridge cannot project interactive approval prompts; advanced operator launchers retain `edit` mode.
-The managed host path in `src/adapters/zcode/adapter.ts` also brackets every native turn with a
-bridge-owned instruction requiring ZCode's official Bash input to set
-`dangerouslyDisableSandbox=true`. ZCode's file-oriented tools remain workspace-scoped, so the
-instruction directs outside-workspace access through Bash and requires that check before reporting
-a host path absent. The optional Bubblewrap path and advanced launchers receive no such instruction.
+The managed host bootstrap writes an official `PreToolUse` process hook into the disposable private
+ZCode config. It preserves Bash input and deterministically sets the supported
+`dangerouslyDisableSandbox=true` field; this is configuration through the vendor hook surface, not
+a patch to the official runtime. ZCode's file-oriented tools remain workspace-scoped, so a
+bridge-owned reminder directs outside-workspace access through Bash before reporting a host path
+absent. The optional Bubblewrap path and advanced launchers receive neither the hook nor reminder.
 The host child inherits only a named allowlist of tool environment variables and keeps ZCode-owned
 credentials/session state under its private data root. Because the official app server has no
 config-path option, a one-shot Node preload redirects only its internal `os.homedir()` lookup to a
@@ -311,7 +314,9 @@ waiting on that shared official refresh races only its own abort signal and retu
 cancelling the refresh for sibling requests. Authenticated account operations also delete valid
 hidden new-account and reconnect drafts whose in-memory job disappeared after restart, while preserving active
 drafts and visible accounts. Active standalone drafts reserve their eventual account-limit slot without becoming
-visible; restart reconciliation releases abandoned reservations. Global Desktop controls are hidden for account-bound provider settings,
+visible; restart reconciliation releases abandoned reservations. A failed OAuth job continues to
+own its hidden draft and capacity reservation until explicit cancellation or bounded expiry, so a
+retry cannot stack drafts for the same account. Global Desktop controls are hidden for account-bound provider settings,
 transient completion failures keep the OAuth job authenticated for retry, and canonical
 global-default aliases remap to the account default before validation.
 Provider activation updates config and catalog without invalidating the quota view; entitlement

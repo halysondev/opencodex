@@ -19,7 +19,10 @@ type Job = { id: string; accountId: string; replaceId?: string; runtime: string;
   phase: "waiting" | "authenticated" | "completing" | "finished" | "failed";
   url?: string; task?: Promise<void>; identity?: string; error?: string; controller: AbortController; timer: ReturnType<typeof setTimeout> };
 const jobs = new Map<string, Job>();
-const pendingFor = (id: string) => [...jobs.values()].some(j => (j.accountId === id || j.replaceId === id) && !["failed", "finished"].includes(j.phase));
+// A failed OAuth job still owns its hidden profile and account reservation until the user
+// explicitly cancels it (or the bounded expiry removes it). This makes reconnect failure
+// idempotent instead of allowing an unbounded stack of hidden drafts for the same account.
+const pendingFor = (id: string) => [...jobs.values()].some(j => (j.accountId === id || j.replaceId === id) && j.phase !== "finished");
 const safeJob = (job: Job) => ({ jobId: job.id, accountId: job.replaceId ?? job.accountId,
   phase: job.phase, ...(job.url ? { url: job.url } : {}), ...(job.error ? { error: job.error } : {}) });
 const fail = (code: string): never => { throw new Error(code); };
@@ -116,7 +119,7 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
     if (body.consent !== true) return jsonResponse({ error: "consent_required" }, 400);
 
     if (path === "/api/zcode-accounts/login") {
-      if ([...jobs.values()].filter(job => !["failed", "finished"].includes(job.phase)).length >= 8) return jsonResponse({ error: "account_busy" }, 409);
+      if ([...jobs.values()].filter(job => job.phase !== "finished").length >= 8) return jsonResponse({ error: "account_busy" }, 409);
       if (typeof body.label !== "string" || typeof body.runtime !== "string" || typeof body.workspace !== "string") return fail("account_invalid");
       if (body.accountId !== undefined && typeof body.accountId !== "string") return fail("account_invalid");
       const replaceId = typeof body.accountId === "string" ? readAccount(body.accountId).id : undefined;

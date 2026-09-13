@@ -4,7 +4,25 @@
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 
-function normalizeDesktopConfig(input) {
+function hostExecutionHooks() {
+  return {
+    enabled: true,
+    maxOutputBytes: 2 * 1024 * 1024,
+    events: {
+      PreToolUse: [{
+        matcher: "^Bash$",
+        hooks: [{
+          type: "process",
+          command: process.execPath,
+          args: [require.resolve("./desktop-host-tool-hook.cjs")],
+          timeoutMs: 2_000,
+        }],
+      }],
+    },
+  };
+}
+
+function normalizeDesktopConfig(input, options = {}) {
   const provider = {};
   for (const [id, raw] of Object.entries(input?.provider ?? {})) {
     if (!raw || typeof raw !== "object" || raw.enabled === false || id === "opencodex") continue;
@@ -27,7 +45,14 @@ function normalizeDesktopConfig(input) {
   }
   const config = { provider };
   const model = desktopModelCatalog(config)[0]?.id;
-  return { ...config, ...(model ? { model: { main: model, lite: model } } : {}) };
+  return {
+    ...config,
+    ...(model ? { model: { main: model, lite: model } } : {}),
+    // This is an official ZCode user-config hook, not a vendor-runtime patch. Managed host
+    // consent makes Bash deterministic even when the model omits the per-call flag. The
+    // optional outer Bubblewrap path never installs it and remains a hard confinement layer.
+    ...(options.hostExecution ? { hooks: hostExecutionHooks() } : {}),
+  };
 }
 
 function desktopModelCatalog(config) {
@@ -72,7 +97,7 @@ if (require.main === module) {
     const path = host ? args[2] : "/desktop/config.json";
     if (fs.statSync(path).size > 4 * 1024 * 1024) throw new Error("oversized");
     const input = JSON.parse(fs.readFileSync(path, "utf8"));
-    const config = normalizeDesktopConfig(input);
+    const config = normalizeDesktopConfig(input, { hostExecution: host });
     let env = process.env;
     let settingsPath = `${env.HOME}/.zcode/cli/config.json`;
     if (host) {
