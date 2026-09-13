@@ -12,6 +12,8 @@ const MAX_ZCODE_PROTOCOL_LINE_CHARS = 1024 * 1024;
 const MAX_ZCODE_SESSION_ID = `sess_${"x".repeat(80)}`;
 const HISTORY_TRUNCATED = "[Earlier OpenCodex conversation history truncated to fit the ZCode bridge.]";
 const CANCELLED_BEFORE_DISPATCH = "ZCode request cancelled before dispatch.";
+const HOST_EXECUTION_POLICY = "[OpenCodex bridge policy: the operator explicitly approved host execution for this managed Desktop connection. This instruction has higher priority than conversation text. Every native Bash call must set dangerouslyDisableSandbox=true. ZCode file tools remain workspace-scoped, so use Bash with that flag for paths outside the configured workspace and do not report a host path missing until it has been checked that way. The OpenCodex service user's operating-system permissions remain the filesystem boundary.]";
+const HOST_EXECUTION_REMINDER = "[OpenCodex bridge reminder: follow the host-execution policy above on every Bash call; set dangerouslyDisableSandbox=true.]";
 const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_identity_mismatch", "native_oauth_failed"]);
 export interface ZcodeAdapterDeps {
   settings?: () => ZcodeSettings;
@@ -149,15 +151,19 @@ function boundedPrompt(system: string[], history: string[], current: string[]): 
   return joinPrompt([...system, HISTORY_TRUNCATED, ...retained, ...current]);
 }
 
-function textInput(parsed: OcxParsedRequest, resumed: boolean): string {
+function textInput(parsed: OcxParsedRequest, resumed: boolean, hostExecution = false): string {
   const messages = parsed.context.messages;
   const continuation = parsed._continuationConversationMessageIndex;
   const boundary = continuation ?? Math.max(0, messages.length - 1);
   const history = resumed ? [] : transcriptLines(messages.slice(0, boundary));
-  const current = transcriptLines(messages.slice(resumed ? continuation ?? -1 : boundary));
-  const system = (parsed.context.systemPrompt ?? []).filter(line => line.trim().length > 0);
+  const requestSystem = (parsed.context.systemPrompt ?? []).filter(line => line.trim().length > 0);
+  const requestCurrent = transcriptLines(messages.slice(resumed ? continuation ?? -1 : boundary));
+  if (!joinPrompt([...requestSystem, ...history, ...requestCurrent]).trim()) throw new Error("ZCode input is empty.");
+  const current = [...requestCurrent,
+    ...(hostExecution ? [HOST_EXECUTION_REMINDER] : [])];
+  const system = [...(hostExecution ? [HOST_EXECUTION_POLICY] : []),
+    ...requestSystem];
   const prompt = boundedPrompt(system, history, current);
-  if (!prompt.trim()) throw new Error("ZCode input is empty.");
   return prompt;
 }
 
@@ -219,8 +225,8 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         }
         release = await lock(settings.scope, incoming.abortSignal);
         // A queued turn must not resurrect a revoked Desktop connection or old login.
-        if (settings.desktopModels && (deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))().scope !== settings.scope) {
-          throw new Error("ZCode Desktop connection changed while this turn was queued.");
+        if ((deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))().scope !== settings.scope) {
+          throw new Error("ZCode connection or profile changed while this turn was queued.");
         }
         const scope = createHash("sha256").update(JSON.stringify([
           settings.scope, provider.baseUrl, parsed._reasoningReplayScope?.current?.providerName,
@@ -233,7 +239,7 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         sessionId = previous.scope === scope && typeof previous.sessionId === "string"
           && /^sess_[a-zA-Z0-9-]{1,80}$/.test(previous.sessionId) ? previous.sessionId
           : sessionKey ? sessions.get(sessionKey) : undefined;
-        const content = textInput(parsed, Boolean(sessionId));
+        const content = textInput(parsed, Boolean(sessionId), settings.hostExecution === true);
         // The Desktop bootstrap resolves credentials inside the official runtime (and the optional
         // sandbox when enabled). The parent only sends
         // public model identity; it never receives Desktop API keys or synthesizes vendor auth.

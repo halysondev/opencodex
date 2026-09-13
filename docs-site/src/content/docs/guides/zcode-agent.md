@@ -43,8 +43,9 @@ or subscription terms; those remain the vendor's policy.
 3. Click **Detect again** if needed. OpenCodex finds running Desktop installations and standard
    installation folders. For portable/extracted installations, the advanced folder field lets
    you select the application directory; it never accepts a shell command.
-4. Choose a **workspace folder** with the folder browser. The default is a private disposable
-   folder. Do not select your entire home or a credentials/configuration directory.
+4. Choose a **workspace folder** with the folder browser. It is the initial working directory,
+   not a filesystem boundary in the default host mode; choose a narrower project folder when
+   convenient, even though native Bash can still reach other files owned by the proxy user.
 5. Review the native file/command execution notice, check the consent box and click
    **Connect Desktop**. OpenCodex constructs the native launcher, verifies the protocol, enables the ZCode provider and updates the Codex catalog;
    no environment variables, API-key entry, token import or separate CLI login is required.
@@ -102,8 +103,9 @@ clears it.
 and custom settings. A different identity is rejected; use **Add account** for it instead.
 Duplicate saved identities are rejected too. **Rename** updates generated picker labels,
 not customized model names. **Remove** deletes OpenCodex's saved profile and provider, not
-ZCode Desktop's original profile. Remove references from defaults/combos before removing an
-account, and wait for its active tasks. No task is stopped automatically.
+ZCode Desktop's original profile. Remove references from defaults, combos and subagent routes
+before removing an account; provider aliases count as references too. Wait for active tasks and
+their native child processes to finish. No task is stopped automatically.
 
 A protocol/registration/catalog failure is displayed as pending, not complete success.
 Use **Retry provider activation** for a saved connection whose catalog is pending. A
@@ -135,9 +137,13 @@ selected working directory, including sensitive files accessible to that user. A
 paths retain their host meaning. The selected workspace is a starting directory, not a
 filesystem boundary. This default also applies to previously connected installations after
 upgrading. Managed connections start ZCode in its non-interactive `yolo` permission mode so
-native commands can actually use that host access without stopping for an approval prompt that
-the OpenCodex protocol cannot display. This changes ZCode's approval policy, not operating-system
-permissions: there is no root elevation or sandbox bypass.
+native commands do not stop for an approval prompt that the OpenCodex protocol cannot display.
+Because the official Bash tool otherwise creates its own sandbox, OpenCodex also places a
+bridge-owned instruction before and after every managed host turn requiring each Bash call to set
+ZCode's official `dangerouslyDisableSandbox=true` input. Native file tools remain limited to the
+selected workspace, so work on other absolute paths is directed through Bash. This disables
+ZCode's per-command sandbox; it does not elevate privileges or bypass the operating system or an
+outer harness sandbox.
 
 Any isolation must be applied by the harness/operator **where the native ZCode process
 executes**. A sandbox in a remote calling client does not automatically constrain this
@@ -160,7 +166,8 @@ export OCX_ZCODE_SANDBOX=1
 
 Bubblewrap is required only when this option is enabled. The existing restricted workspace
 mounts and real sandbox preflight apply; failure never falls back to host execution. In this
-mode the selected workspace appears as `/workspace`; other host files are not mounted.
+mode the selected workspace appears as `/workspace`; other host files are not mounted, and the
+managed host-execution instruction is omitted.
 Unset the variable to restore the default host execution. Environment changes apply to
 existing managed connections without requiring another connection. They do not reconfigure
 an advanced operator-supplied launcher.
@@ -241,13 +248,18 @@ Models come from the isolated `.zcode/cli/config.json`, with selectors such as
 avoid recursive routing. Do not configure indirect routes or DNS aliases back to OpenCodex.
 The existing catalog refresh flow reloads these settings; no primary client configuration is
 rewritten. **Test connection** checks the local catalog only, not account entitlement or quota.
+The bridge fingerprints the bounded configuration contents into the native-session scope. Changing
+an account or credential in place invalidates prior continuations; a change while a request waits
+in the profile queue fails before the child starts. The fingerprint is not returned by management
+or discovery APIs.
 
 ## Safety and limitations
 
 - Native execution requires either a persisted, explicitly consented Desktop connection or all
   four advanced environment settings. Disconnecting revokes managed execution.
 - Managed Desktop sessions use ZCode's non-interactive `yolo` permission mode after the explicit
-  connection consent. Advanced operator launchers retain `edit` mode. Interactive permission
+  connection consent and direct native Bash to use its official unsandboxed-call input. Advanced
+  operator launchers retain `edit` mode and their own isolation policy. Interactive permission
   requests are still denied, and user-input requests are cancelled rather than answered
   automatically; continue those workflows in the ZCode client itself.
 - Each turn owns a child process. A profile has one active turn at a time because ZCode writes
@@ -379,12 +391,14 @@ required. It does not change default provider/model selections or execute infere
 Reconnection enables the existing ZCode provider without replacing custom options,
 aliases, model filters or pricing; conflicting provider registrations are not overwritten.
 
-Success is shown only when the provider is enabled and the connected models are visible
-in the actual Codex catalog. A protocol-only connection, failed config write or failed,
+Success is shown only when the provider is enabled and every model allowed by its existing
+visibility settings has converged into the actual Codex catalog. A protocol-only connection,
+failed config write or failed,
 skipped or incomplete catalog refresh remains a partial state. **Retry activation**
 finishes registration/catalog publication without sending a prompt or reconnecting the
-runtime. Review the activation consent again before retrying. Existing visibility filters
-are preserved; if they hide the connected models, the catalog state remains incomplete.
+runtime. Review the activation consent again before retrying. Existing `selectedModels` and
+`disabledModels` filters are preserved; models they intentionally hide are not required for a
+ready state.
 
 If a running Codex instance does not pick up the models, restart it after its tasks
 finish. OpenCodex does not terminate or restart Codex processes automatically.

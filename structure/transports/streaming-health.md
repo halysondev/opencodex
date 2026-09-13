@@ -550,5 +550,5 @@ The hardened ZCode boundary accepts only exact active-session events, canonicali
 optional sandbox validation, distinguishes unavailable quota probes from valid empty entitlements, requires
 unique provider bindings and GUI-session-only Desktop metadata, and disables caller-tool capability
 for every combo containing a ZCode target.
-ZCode continuation ownership, tool-free compaction and serialized-frame admission follow the
+Managed host Bash policy, close-until-exit profile fencing, alias-aware account removal, visibility-aware activation, continuation ownership, tool-free compaction and serialized-frame admission follow the
 [canonical adapter contract](../adapters/registry.md#zcode-saved-accounts).

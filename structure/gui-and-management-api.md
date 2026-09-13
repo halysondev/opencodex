@@ -407,13 +407,17 @@ independently of a parent callback; transient completion errors keep the job aut
 for polling retry, and a partial result stays visible and retryable. No default selection or inference is
 part of this flow. Account-bound provider settings hide the unrelated global Desktop controls.
 Reconnect retains custom provider settings and rejects a different identity.
-Rename changes only generated labels; removal refuses busy/referenced accounts. In-progress
+Rename changes only generated labels; removal refuses clients whose direct bootstrap is still exiting and recognizes generated
+provider names plus configured aliases in routed selectors before deleting an account.
+In-progress
 OAuth jobs expire and do not survive restart; saved account profiles and bindings do.
 Authenticated account operations also prune valid hidden reconnect drafts whose transient jobs
 disappeared on restart, without touching active drafts or visible accounts. `src/server/management/zcode-desktop-routes.ts`
 serializes connect, activation and disconnect across their complete provider/catalog
 transition; disconnect disables the legacy provider and converges its catalog rows while
-preserving customized settings. Its optional verification action uses protocol metadata
+preserving customized settings. Activation readiness filters the Desktop roster through
+the same `selectedModels` and `disabledModels` policy as convergence, so an intentionally
+hidden row is not a false partial failure. Its optional verification action uses protocol metadata
 only and cannot start inference or tools.
 Owner-fenced `store:false` continuation, fresh tool-free compaction sessions and serialized
 native-frame admission follow [the ZCode runtime contract](adapters/registry.md#zcode-saved-accounts).

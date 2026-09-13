@@ -157,6 +157,20 @@ test("reconnection preserves custom settings and restart observes actual persist
   expect(desktopActivation(ctx, connected, f.deps.readDesktopCatalogSlugs).activation).toBe("catalog_pending");
 });
 
+test("activation readiness follows selected and disabled model visibility", () => {
+  const ctx = context("/api/zcode-desktop/activate", {}, "gui-session");
+  const connected = { ...status, connected: true };
+  ctx.config.providers.zcode = { adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai",
+    selectedModels: [models[0]!.id] };
+  const firstSlug = "zcode/" + models[0]!.id.replaceAll("/", "-");
+  const secondSlug = "zcode/" + models[1]!.id.replaceAll("/", "-");
+  expect(desktopActivation(ctx, connected, () => [firstSlug])).toMatchObject({ activation: "ready" });
+
+  delete ctx.config.providers.zcode.selectedModels;
+  ctx.config.disabledModels = [firstSlug];
+  expect(desktopActivation(ctx, connected, () => [secondSlug])).toMatchObject({ activation: "ready" });
+});
+
 test("registration failure rolls back config, preserves protocol state and allows retry", async () => {
   const f = fixture(), ctx = context("/api/zcode-desktop/connect", {}, "gui-session");
   const save = ctx.deps.saveConfigPreservingClaudeCode;
@@ -449,6 +463,21 @@ test("partial catalog activation retries without login; busy and referenced acco
   f.active(false);
   f.ctx.config.defaultProvider = partial.providerName;
   expect(await (await f.call("remove", { accountId: a.accountId })).json()).toMatchObject({ error: "account_referenced" });
+});
+
+test("account removal recognizes case-insensitive provider aliases in routed selectors", async () => {
+  const f = accountFixture(), account = await f.login();
+  const ready = await (await f.call("complete", { jobId: account.jobId })).json();
+  f.ctx.config.providers[ready.providerName].alias = "personal";
+  f.ctx.config.subagentModels = [`PeRsOnAl/${models[0]!.id}`];
+  expect(await (await f.call("remove", { accountId: account.accountId })).json())
+    .toEqual({ error: "account_referenced" });
+  expect(listAccounts().map(saved => saved.id)).toEqual([account.accountId]);
+  expect(f.ctx.config.providers[ready.providerName]).toBeDefined();
+
+  f.ctx.config.subagentModels = [];
+  expect(await (await f.call("remove", { accountId: account.accountId })).json()).toEqual({ ok: true });
+  expect(listAccounts()).toEqual([]);
 });
 
 test("rename preserves custom model labels and saved accounts survive config reload", async () => {

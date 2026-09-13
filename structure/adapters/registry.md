@@ -273,6 +273,11 @@ not client-side tool dispatch. `OCX_ZCODE_SANDBOX=1` explicitly enables the opti
 Bubblewrap workspace boundary; harness restrictions apply where the native process runs. Explicitly
 consented managed connections use the official runtime's non-interactive `yolo` mode because the
 bridge cannot project interactive approval prompts; advanced operator launchers retain `edit` mode.
+The managed host path in `src/adapters/zcode/adapter.ts` also brackets every native turn with a
+bridge-owned instruction requiring ZCode's official Bash input to set
+`dangerouslyDisableSandbox=true`. ZCode's file-oriented tools remain workspace-scoped, so the
+instruction directs outside-workspace access through Bash and requires that check before reporting
+a host path absent. The optional Bubblewrap path and advanced launchers receive no such instruction.
 The host child inherits only a named allowlist of tool environment variables and keeps ZCode-owned
 credentials/session state under its private data root. Because the official app server has no
 config-path option, a one-shot Node preload redirects only its internal `os.homedir()` lookup to a
@@ -308,6 +313,9 @@ transient completion failures keep the OAuth job authenticated for retry, and ca
 global-default aliases remap to the account default before validation.
 Native turn admission retains a 32-request process ceiling and a 24-request per-profile ceiling,
 so one stalled profile cannot consume every reservation needed by independent saved accounts.
+Closing saved-account clients remain registered as busy until the direct bootstrap actually exits;
+concurrent close callers share the same shutdown promise, so refresh, reconnect and removal cannot
+enter while inherited native tools are still unwinding.
 Headerless `previous_response_id` chains persist owner-fenced ZCode state even with `store:false`;
 the non-secret local account slot identifies the owner, while the connection/profile generation in
 the adapter scope rejects stale sessions after reconnect. Internal Codex compaction always starts a
@@ -316,6 +324,13 @@ fails closed on an unexpected tool event. `session/send` is sized after JSON ser
 the native client starts, matching the managed bootstrap's one-MiB NDJSON limit.
 Advanced model descriptors reject loopback, private and link-local destinations before the
 official runtime receives them.
+Advanced launcher scope includes a bounded content generation for its isolated configuration and
+rejects a stale generation at model-read time; queued turns recheck the complete scope before
+starting a child, so an in-place account or credential change cannot resume the prior session.
+Account removal recognizes both the generated provider name and its configured alias in routed
+selectors outside the provider record. Activation/catalog readiness applies the same
+`selectedModels` and `disabledModels` visibility policy as catalog convergence, so intentionally
+hidden Desktop models do not leave a connection permanently pending.
 
 ## ZCode vision input adaptation
 

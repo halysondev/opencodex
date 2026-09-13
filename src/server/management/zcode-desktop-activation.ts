@@ -1,6 +1,6 @@
 import { readAccount } from "../../adapters/zcode/accounts";
 import { saveConfigPreservingClaudeCode, withConfigMutationLockSync } from "../../config";
-import { readCatalog, readCodexCatalogPath, catalogModelSlug, applyProviderConfigHints } from "../../codex/catalog";
+import { readCatalog, readCodexCatalogPath, catalogModelSlug, applyProviderConfigHints, filterCatalogVisibleModels } from "../../codex/catalog";
 import { clearModelCache } from "../../codex/model-cache";
 import { reconcileLiveStateStores } from "../../lib/state-store-registrations";
 import type { ManagementContext } from "./context";
@@ -27,9 +27,9 @@ export function desktopActivation(ctx: ManagementContext, status: DesktopStatus,
   let catalogReady = false;
   try {
     const slugs = new Set(readSlugs());
-    catalogReady = registered && status.models.length > 0 && status.models.every(model => slugs.has(
-      catalogModelSlug(applyProviderConfigHints(name!, provider!, { id: model.id, provider: name! })),
-    ));
+    const expected = registered ? filterCatalogVisibleModels(status.models.map(model =>
+      applyProviderConfigHints(name!, provider!, { id: model.id, provider: name! })), ctx.config) : [];
+    catalogReady = registered && status.models.length > 0 && expected.every(model => slugs.has(catalogModelSlug(model)));
   } catch { /* Unreadable catalog is partial, never success. */ }
   return { ...status, providerName: name, providerRegistered: registered,
     activation: !status.connected ? "disconnected" : !registered ? "provider_pending" : !catalogReady ? "catalog_pending" : "ready" };

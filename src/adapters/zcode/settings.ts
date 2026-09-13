@@ -16,6 +16,8 @@ export interface ZcodeSettings {
   workspace: string;
   settingsPath: string;
   scope: string;
+  /** Content generation for advanced settings; prevents sessions crossing credential changes. */
+  profileGeneration?: string;
   desktopModels?: DesktopModel[];
   /** Managed host mode preserves the user's ordinary tool environment while keeping ZCode state private. */
   hostExecution?: boolean;
@@ -50,9 +52,11 @@ export function loadZcodeSettings(env: NodeJS.ProcessEnv = process.env, accountI
   if (env.HOME && realHome === realpathSync(env.HOME)) throw new Error("ZCode must use a separate home, not the proxy home.");
   if (!statSync(realHome).isDirectory()) throw new Error("ZCode home is not a directory.");
   const settingsPath = join(realHome, ".zcode", "cli", "config.json");
+  const profileGeneration = createHash("sha256").update(readSettingsBytes(realHome, settingsPath)).digest("hex");
   return {
     command: command as string[], home: realHome, workspace, settingsPath,
-    scope: createHash("sha256").update(JSON.stringify([command, realHome, workspace])).digest("hex"),
+    profileGeneration,
+    scope: createHash("sha256").update(JSON.stringify([command, realHome, workspace, profileGeneration])).digest("hex"),
   };
 }
 
@@ -72,11 +76,11 @@ export function readZcodeModels(settings: ZcodeSettings): ZcodeModel[] {
   catch { throw new Error("ZCode isolated model settings are unavailable, invalid or exceed the size limit."); }
 }
 
-function readSettings(settings: ZcodeSettings): JsonObject {
-  const home = realpathSync(settings.home);
-  const resolved = realpathSync(settings.settingsPath);
+function readSettingsBytes(homePath: string, settingsPath: string): Buffer {
+  const home = realpathSync(homePath);
+  const resolved = realpathSync(settingsPath);
   if (!resolved.startsWith(home + sep)) throw new Error("Settings escaped the isolated home.");
-  const fd = openSync(settings.settingsPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(settingsPath, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     // Verify the opened object, not just the path checked before open (Linux sandbox host).
     if (process.platform === "linux" && !realpathSync(`/proc/self/fd/${fd}`).startsWith(home + sep)) {
@@ -92,8 +96,17 @@ function readSettings(settings: ZcodeSettings): JsonObject {
       length += count;
     }
     if (length === bytes.length) throw new Error("Settings grew beyond the size limit.");
-    return record(JSON.parse(bytes.subarray(0, length).toString("utf8")));
+    return bytes.subarray(0, length);
   } finally { closeSync(fd); }
+}
+
+function readSettings(settings: ZcodeSettings): JsonObject {
+  const bytes = readSettingsBytes(settings.home, settings.settingsPath);
+  if (settings.profileGeneration
+    && createHash("sha256").update(bytes).digest("hex") !== settings.profileGeneration) {
+    throw new Error("ZCode settings changed during request setup.");
+  }
+  return record(JSON.parse(bytes.toString("utf8")));
 }
 
 function readModels(settings: ZcodeSettings): ZcodeModel[] {

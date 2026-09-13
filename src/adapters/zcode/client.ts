@@ -75,6 +75,7 @@ export class ZcodeClient {
   private terminalError?: Error;
   private reading: Promise<void>;
   private exited: Promise<void>;
+  private closePromise?: Promise<void>;
   private detachShutdown: () => void;
   private closeGraceMs: number;
   onEvent: (message: JsonObject) => void = () => {};
@@ -91,7 +92,9 @@ export class ZcodeClient {
     }) as ChildProcessWithoutNullStreams;
     this.exited = new Promise(resolve => {
       this.child.once("exit", () => resolve());
-      this.child.once("error", () => resolve());
+      // A spawn failure has no process to fence. Later child errors (for example a failed
+      // signal) must not masquerade as exit while the official runtime can still be alive.
+      this.child.once("error", () => { if (this.child.pid === undefined) resolve(); });
     });
     // Discard vendor diagnostics: stderr may contain account or request data.
     this.child.stderr.resume();
@@ -172,21 +175,31 @@ export class ZcodeClient {
     });
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    this.closePromise ??= this.performClose();
+    return this.closePromise;
+  }
+
+  private async performClose(): Promise<void> {
     this.closed = true;
-    desktopClients.delete(this);
     this.detachShutdown();
     for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(new Error("ZCode client closed.")); }
     this.pending.clear();
     this.child.stdin.destroy();
-    this.child.kill("SIGTERM");
-    const killTimer = setTimeout(() => this.child.kill("SIGKILL"), this.closeGraceMs);
-    // Never await an uncooperative descendant that inherited stdout indefinitely.
-    await Promise.race([this.exited, new Promise(resolve => setTimeout(resolve, this.closeGraceMs + 250))]);
-    clearTimeout(killTimer);
-    this.child.stdout.destroy();
-    this.child.stderr.destroy();
-    notifyAccountIdle(this.accountId);
+    try { this.child.kill("SIGTERM"); } catch { /* launcher already exited */ }
+    const killTimer = setTimeout(() => {
+      try { this.child.kill("SIGKILL"); } catch { /* launcher already exited */ }
+    }, this.closeGraceMs);
+    try {
+      // The direct bootstrap owns descendant cleanup. Keep the account busy until that bootstrap
+      // really exits; timing out here would reopen a profile-mutation window while tools unwind.
+      await this.exited;
+    } finally {
+      clearTimeout(killTimer);
+      this.child.stdout.destroy();
+      this.child.stderr.destroy();
+      desktopClients.delete(this);
+      notifyAccountIdle(this.accountId);
+    }
   }
 }

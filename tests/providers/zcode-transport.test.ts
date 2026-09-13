@@ -2,22 +2,28 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { homedir } from "node:os";
-import { ZcodeClient, closeZcodeDesktopClients, waitForZcodeAccountClients, type ZcodeSpawn } from "../../src/adapters/zcode/client";
+import { ZcodeClient, closeZcodeDesktopClients, hasZcodeAccountClients, waitForZcodeAccountClients, type ZcodeSpawn } from "../../src/adapters/zcode/client";
 import { accountRuntimeBusy, refreshAccount } from "../../src/adapters/zcode/account-runtime";
 import type { JsonObject, ZcodeSettings } from "../../src/adapters/zcode/settings";
 
 const settings: ZcodeSettings = { command: ["/isolated/launcher", "argument with spaces"], home: "/isolated/home",
   workspace: "/workspace", settingsPath: "/isolated/config.json", scope: "test" };
-function fixture(managed = false, hostExecution = false, accountId?: string) {
-  const child = new EventEmitter() as EventEmitter & { stdin: Writable; stdout: PassThrough; stderr: PassThrough; kill: () => boolean };
+function fixture(managed = false, hostExecution = false, accountId?: string, autoExit = true) {
+  const child = new EventEmitter() as EventEmitter & { pid: number; stdin: Writable; stdout: PassThrough; stderr: PassThrough; kill: (signal?: string) => boolean };
   const writes: JsonObject[] = [];
+  child.pid = 1234;
   child.stdin = new Writable({ write(chunk, _encoding, callback) { writes.push(JSON.parse(chunk.toString())); callback(); } });
   child.stdout = new PassThrough(); child.stderr = new PassThrough();
-  child.kill = () => { child.stdout.end(); child.stderr.end(); queueMicrotask(() => child.emit("exit", 0)); return true; };
+  let exited = false;
+  const exit = () => {
+    if (exited) return;
+    exited = true; child.stdout.end(); child.stderr.end(); child.emit("exit", 0);
+  };
+  child.kill = () => { if (autoExit) queueMicrotask(exit); return true; };
   let invocation: unknown[] = [];
   const spawn = ((...args: unknown[]) => { invocation = args; return child; }) as ZcodeSpawn;
   const client = new ZcodeClient(managed ? { ...settings, desktopModels: [], hostExecution, accountId } : settings, spawn);
-  return { child, client, writes, invocation: () => invocation };
+  return { child, client, writes, exit, invocation: () => invocation };
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
 
@@ -41,6 +47,28 @@ describe("ZCode NDJSON transport", () => {
     await tick(); expect(idle).toBe(false);
     await active.client.close(); await waiting;
     expect(idle).toBe(true);
+  });
+  test("closing account clients stay busy and share shutdown until the child exits", async () => {
+    const id = crypto.randomUUID();
+    const active = fixture(true, false, id, false);
+    const first = active.client.close();
+    const second = active.client.close();
+    expect(second).toBe(first);
+    let firstClosed = false, secondClosed = false, lateIdle = false;
+    void first.then(() => { firstClosed = true; });
+    void second.then(() => { secondClosed = true; });
+    const waiting = waitForZcodeAccountClients(id).then(() => { lateIdle = true; });
+    await tick();
+    expect(hasZcodeAccountClients(id)).toBe(true);
+    expect([firstClosed, secondClosed, lateIdle]).toEqual([false, false, false]);
+    active.child.emit("error", new Error("signal failed"));
+    await tick();
+    expect(hasZcodeAccountClients(id)).toBe(true);
+    expect([firstClosed, secondClosed, lateIdle]).toEqual([false, false, false]);
+    active.exit();
+    await Promise.all([first, second, waiting]);
+    expect(hasZcodeAccountClients(id)).toBe(false);
+    expect([firstClosed, secondClosed, lateIdle]).toEqual([true, true, true]);
   });
   test("an expired saved-account refresh reserves the queue and waits out an active turn", async () => {
     const id = crypto.randomUUID();

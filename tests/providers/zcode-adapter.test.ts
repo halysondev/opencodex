@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createZcodeAdapter } from "../../src/adapters/zcode/adapter";
@@ -95,8 +95,15 @@ describe("ZCode local agent", () => {
       expect(serialized).not.toContain("apiKey");
     }
     expect(client.calls.find(call => call.method === "session/create")?.params.mode).toBe("yolo");
-    expect((await run(fixture(), new FakeClient())).find(event => event.type === "text_delta"
+    expect(String(client.calls.find(call => call.method === "session/send")?.params.content))
+      .toContain("dangerouslyDisableSandbox=true");
+    expect(String(client.calls.find(call => call.method === "session/send")?.params.content))
+      .toMatch(/^\[OpenCodex bridge policy:.*\[OpenCodex bridge reminder:/s);
+    const advancedClient = new FakeClient();
+    expect((await run(fixture(), advancedClient)).find(event => event.type === "text_delta"
       && event.phase === "commentary")?.text).toContain("configured launcher");
+    expect(String(advancedClient.calls.find(call => call.method === "session/send")?.params.content))
+      .not.toContain("dangerouslyDisableSandbox=true");
     expect((await run(settings, new FakeClient())).find(event => event.type === "text_delta"
       && event.phase === "commentary")?.text).toContain("host-user access");
   });
@@ -143,6 +150,15 @@ describe("ZCode local agent", () => {
   test("requires explicit operator opt-in and an argv launcher, never a shell string", () => {
     expect(() => loadZcodeSettings({})).toThrow("disabled");
     expect(() => loadZcodeSettings({ OCX_ZCODE_NATIVE_TOOLS: "1", OCX_ZCODE_COMMAND: "echo unsafe" })).toThrow("JSON argv");
+  });
+  test("managed host policy cannot turn an empty request into a native dispatch", async () => {
+    const settings = { ...fixture(), hostExecution: true,
+      desktopModels: [{ id: "test/model", providerId: "test", modelId: "model", label: "Model" }] };
+    const client = new FakeClient();
+    const parsed = request(); parsed.context.messages = [];
+    const events = await run(settings, client, parsed);
+    expect(events.at(-1)).toMatchObject({ type: "error", message: "ZCode input is empty." });
+    expect(client.calls).toEqual([]);
   });
   test("saved-account refresh failures emit only bounded public codes", async () => {
     const events: AdapterEvent[] = [];
@@ -191,6 +207,19 @@ describe("ZCode local agent", () => {
       OCX_ZCODE_HOME: settings.home, OCX_ZCODE_WORKSPACE: settings.workspace };
     expect(loadZcodeSettings(env)).toMatchObject({ home: settings.home, workspace: settings.workspace });
     expect(() => loadZcodeSettings({ ...env, HOME: settings.home })).toThrow("separate home");
+  });
+  test("advanced settings fence sessions across in-place credential changes", () => {
+    const settings = fixture();
+    const env = { OCX_ZCODE_NATIVE_TOOLS: "1", OCX_ZCODE_COMMAND: JSON.stringify(["/isolated-launcher"]),
+      OCX_ZCODE_HOME: settings.home, OCX_ZCODE_WORKSPACE: settings.workspace };
+    const before = loadZcodeSettings(env);
+    const contents = readFileSync(settings.settingsPath, "utf8");
+    writeFileSync(settings.settingsPath, contents.replace("never-log-this", "other-key-here"));
+    const after = loadZcodeSettings(env);
+    expect(after.scope).not.toBe(before.scope);
+    expect(after.profileGeneration).not.toBe(before.profileGeneration);
+    expect(() => readZcodeModels(before)).toThrow("unavailable, invalid");
+    expect(readZcodeModels(after).map(model => model.id)).toEqual(["test/model"]);
   });
   test("catalog excludes disabled, recursive and link-local entries and preserves canonical model identity", () => {
     const models = readZcodeModels(fixture());

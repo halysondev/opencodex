@@ -22,6 +22,20 @@ const pendingFor = (id: string) => [...jobs.values()].some(j => (j.accountId ===
 const safeJob = (job: Job) => ({ jobId: job.id, accountId: job.replaceId ?? job.accountId,
   phase: job.phase, ...(job.url ? { url: job.url } : {}), ...(job.error ? { error: job.error } : {}) });
 const fail = (code: string): never => { throw new Error(code); };
+function selectorUsesNamespace(value: string, namespaces: ReadonlySet<string>): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (namespaces.has(normalized)) return true;
+  const slash = normalized.indexOf("/");
+  return slash > 0 && namespaces.has(normalized.slice(0, slash));
+}
+function configReferencesNamespaces(value: unknown, namespaces: ReadonlySet<string>, seen = new Set<object>()): boolean {
+  if (typeof value === "string") return selectorUsesNamespace(value, namespaces);
+  if (value === null || typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  return Array.isArray(value)
+    ? value.some(item => configReferencesNamespaces(item, namespaces, seen))
+    : Object.values(value).some(item => configReferencesNamespaces(item, namespaces, seen));
+}
 const safeErrors = new Set(["account_invalid", "account_limit", "account_busy", "account_referenced",
   "account_duplicate", "account_identity_mismatch", "account_login_required", "job_invalid", "native_oauth_failed",
   "desktop_missing", "workspace_invalid", "node_missing", "node_incompatible", "sandbox_missing", "sandbox_unavailable",
@@ -176,7 +190,11 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
     if (path === "/api/zcode-accounts/remove") {
       const names = Object.keys(ctx.config.providers).filter(name => ctx.config.providers[name]?.zcodeAccountId === id);
       const { providers: _providers, ...rest } = ctx.config;
-      if (names.some(name => JSON.stringify(rest).includes(name))) return fail("account_referenced");
+      const namespaces = new Set(names.flatMap(name => {
+        const alias = ctx.config.providers[name]?.alias?.trim();
+        return [name, ...(alias ? [alias] : [])];
+      }).map(name => name.toLowerCase()));
+      if (configReferencesNamespaces(rest, namespaces)) return fail("account_referenced");
       // Revoke first. A failed config/catalog save is explicit and cannot silently use another account.
       await disconnectDesktop(id);
       withConfigMutationLockSync(() => {
