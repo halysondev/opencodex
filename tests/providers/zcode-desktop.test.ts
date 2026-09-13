@@ -257,6 +257,47 @@ test("host bootstrap reads and writes outside workspace without touching the sou
   expect(readFileSync(config, "utf8")).toBe(original);
 });
 
+test("host cancellation terminates the official runtime tree and cleans its turn home", async () => {
+  if (process.platform !== "linux") return; // Managed Desktop prerequisites currently support Linux only.
+  const { ZcodeClient } = await import("../../src/adapters/zcode/client");
+  const { fileURLToPath } = await import("node:url");
+  const home = join(root, "cancel-state"), workspace = join(root, "cancel-project");
+  mkdirSync(join(home, ".zcode/cli/db"), { recursive: true });
+  mkdirSync(workspace);
+  const config = join(root, "cancel-desktop-config.json");
+  writeFileSync(config, JSON.stringify({ provider: { "builtin:zai-coding-plan": provider() } }));
+  const runtime = join(root, "uncooperative-runtime-fixture.cjs");
+  writeFileSync(runtime, `
+    const {spawn}=require("node:child_process");
+    process.on("SIGTERM",()=>{});
+    const tool=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{stdio:"ignore"});
+    require("node:readline").createInterface({input:process.stdin}).on("line",line=>{
+      const request=JSON.parse(line);
+      process.stdout.write(JSON.stringify({id:request.id,result:{runtimePid:process.pid,toolPid:tool.pid}})+"\\n");
+    });
+    setInterval(()=>{},1000);
+  `);
+  const settings = { command: [resolveDesktopNode(), fileURLToPath(new URL("../../src/adapters/zcode/desktop-bootstrap.cjs", import.meta.url)),
+    "--host", runtime, config, workspace, home], home, workspace, settingsPath: "", scope: "desktop:test-cancel",
+    hostExecution: true, nativePermissionMode: "yolo" as const };
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  let runtimePid = 0, toolPid = 0;
+  const client = new ZcodeClient(settings);
+  try {
+    const state = await client.request("workspace/readState", {}, 3000);
+    runtimePid = state.runtimePid as number; toolPid = state.toolPid as number;
+    expect(alive(runtimePid)).toBe(true); expect(alive(toolPid)).toBe(true);
+    await client.close();
+    await Bun.sleep(100);
+    expect(alive(runtimePid)).toBe(false);
+    expect(alive(toolPid)).toBe(false);
+    expect(readdirSync(home).filter(name => name.startsWith("turn-"))).toEqual([]);
+  } finally {
+    await client.close();
+    for (const pid of [runtimePid, toolPid]) if (pid && alive(pid)) try { process.kill(pid, "SIGKILL"); } catch { /* already exited */ }
+  }
+});
+
 test("missing or denied optional sandbox never falls back, while default host mode needs no bwrap", () => {
   if (process.platform !== "linux") return;
   const path = process.env.PATH;

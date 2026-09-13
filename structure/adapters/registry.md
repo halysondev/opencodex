@@ -277,7 +277,9 @@ The host child inherits only a named allowlist of tool environment variables and
 credentials/session state under its private data root. Because the official app server has no
 config-path option, a one-shot Node preload redirects only its internal `os.homedir()` lookup to a
 turn-scoped private home; the process environment retains the user's real `HOME`, so native host
-tools work without copying unrelated provider secrets into the child.
+tools work without copying unrelated provider secrets into the child. On cancellation, the host
+bootstrap signals the official runtime and inherited native tools as one POSIX process group,
+escalates to a bounded forced stop, and removes the disposable turn home before returning.
 The dashboard's optional recheck repeats only model-catalog and `workspace/readState` protocol
 operations; it never creates or sends a model turn, starts a native tool or consumes inference quota.
 

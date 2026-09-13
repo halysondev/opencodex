@@ -45,12 +45,14 @@ export class ZcodeClient {
   private reading: Promise<void>;
   private exited: Promise<void>;
   private detachShutdown: () => void;
+  private closeGraceMs: number;
   onEvent: (message: JsonObject) => void = () => {};
   onFailure: (error: Error) => void = () => {};
 
   readonly accountId?: string;
   constructor(settings: ZcodeSettings, spawnProcess: ZcodeSpawn = spawn) {
     this.accountId = settings.accountId;
+    this.closeGraceMs = settings.hostExecution ? 1_000 : 500;
     const [command, ...args] = settings.command;
     this.child = spawnProcess(command!, [...args, "app-server"], {
       cwd: settings.home, shell: false, stdio: ["pipe", "pipe", "pipe"],
@@ -148,9 +150,9 @@ export class ZcodeClient {
     this.pending.clear();
     this.child.stdin.destroy();
     this.child.kill("SIGTERM");
-    const killTimer = setTimeout(() => this.child.kill("SIGKILL"), 500);
+    const killTimer = setTimeout(() => this.child.kill("SIGKILL"), this.closeGraceMs);
     // Never await an uncooperative descendant that inherited stdout indefinitely.
-    await Promise.race([this.exited, new Promise(resolve => setTimeout(resolve, 750))]);
+    await Promise.race([this.exited, new Promise(resolve => setTimeout(resolve, this.closeGraceMs + 250))]);
     clearTimeout(killTimer);
     this.child.stdout.destroy();
     this.child.stderr.destroy();

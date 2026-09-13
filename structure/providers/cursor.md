@@ -343,6 +343,8 @@ server holds the stream open.
 ZCode native tool execution in `src/adapters/zcode/desktop.ts` uses host user permissions by default,
 not client-side tool dispatch. `OCX_ZCODE_SANDBOX=1` explicitly enables the optional
 Bubblewrap workspace boundary; harness restrictions apply where the native process runs.
+Managed host cancellation stops the official runtime and inherited native tools as one process
+group and cleans the disposable turn home before the outer client can force-stop the bootstrap.
 
 ZCode saved accounts use explicit provider bindings, separate from native OpenAI pools and
 client integration exports. Their profile, catalog and transport contract is maintained in

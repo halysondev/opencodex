@@ -41,11 +41,33 @@ function desktopModelCatalog(config) {
 module.exports = { normalizeDesktopConfig, desktopModelCatalog };
 if (require.main === module) {
   let temporaryHome;
+  let child;
+  let host = false;
+  let terminating = false;
+  let forceTimer;
+  let exitTimer;
   const cleanup = () => { if (temporaryHome) fs.rmSync(temporaryHome, { recursive: true, force: true }); };
-  process.on("exit", cleanup);
+  const signalChildTree = signal => {
+    if (!child) return;
+    if (host && process.platform !== "win32" && child.pid) {
+      try { process.kill(-child.pid, signal); return; } catch { /* fall back to the direct child */ }
+    }
+    try { child.kill(signal); } catch { /* the child already exited */ }
+  };
+  const terminateChildTree = () => {
+    if (terminating) return;
+    terminating = true;
+    try { child?.stdin.destroy(); } catch { /* already closed */ }
+    signalChildTree("SIGTERM");
+    // The official runtime and every non-detached native tool share this process group.
+    // Escalate before the outer client can force-kill this bootstrap, so its exit cleanup runs.
+    forceTimer = setTimeout(() => signalChildTree("SIGKILL"), 250);
+    exitTimer = setTimeout(() => process.exit(1), 450);
+  };
+  process.on("exit", () => { signalChildTree("SIGKILL"); cleanup(); });
   try {
     const args = process.argv.slice(2);
-    const host = args[0] === "--host";
+    host = args[0] === "--host";
     if (host ? args.length !== 6 || args[5] !== "app-server" : args.length !== 1 || args[0] !== "app-server") throw new Error("unsupported command");
     const path = host ? args[2] : "/desktop/config.json";
     if (fs.statSync(path).size > 4 * 1024 * 1024) throw new Error("oversized");
@@ -72,8 +94,9 @@ if (require.main === module) {
     const childArgs = host
       ? ["--require", require.resolve("./desktop-host-preload.cjs"), args[1], "app-server"]
       : ["/runtime/zcode.cjs", "app-server"];
-    const child = spawn(host ? process.execPath : "/usr/bin/node", childArgs, {
-      stdio: ["pipe", "inherit", "inherit"], shell: false, env, ...(host ? { cwd: args[3] } : {}),
+    child = spawn(host ? process.execPath : "/usr/bin/node", childArgs, {
+      stdio: ["pipe", "inherit", "inherit"], shell: false, env,
+      ...(host ? { cwd: args[3], detached: process.platform !== "win32" } : {}),
     });
     const lines = require("node:readline").createInterface({ input: process.stdin });
     lines.on("line", line => {
@@ -105,13 +128,16 @@ if (require.main === module) {
           frame.params = params;
         }
         child.stdin.write(JSON.stringify(frame) + "\n");
-      } catch { child.kill("SIGTERM"); }
+      } catch { terminateChildTree(); }
     });
     lines.on("close", () => child.stdin.end());
-    child.stdin.on("error", () => child.kill("SIGTERM"));
-    process.on("SIGTERM", () => child.kill("SIGTERM"));
+    child.stdin.on("error", terminateChildTree);
+    process.on("SIGTERM", terminateChildTree);
     child.on("error", () => process.exit(1));
-    child.on("exit", code => process.exit(code ?? 1));
+    child.on("exit", code => {
+      clearTimeout(forceTimer); clearTimeout(exitTimer);
+      process.exit(code ?? 1);
+    });
   } catch {
     // Never expose parser excerpts, provider keys or paths from Desktop's configuration.
     process.stderr.write("ZCode Desktop configuration is unavailable or incompatible.\n");
