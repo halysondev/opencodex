@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getConfigDir } from "../../config/paths";
 
-export interface ZcodeAccount { id: string; label: string; subjectHash?: string; draftFor?: string }
+export interface ZcodeAccount { id: string; label: string; subjectHash?: string; draftFor?: string; pending?: boolean }
 const ACCOUNT_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 export function accountRoot(id: string): string {
   if (!ACCOUNT_ID.test(id)) throw new Error("account_invalid");
@@ -18,9 +18,10 @@ export function readAccount(id: string): ZcodeAccount {
     const value = JSON.parse(readFileSync(fd, "utf8"));
     if (value.id !== id || typeof value.label !== "string" || value.label.length > 80
       || (value.subjectHash !== undefined && !/^[a-f0-9]{64}$/.test(value.subjectHash))
-      || (value.draftFor !== undefined && !ACCOUNT_ID.test(value.draftFor))) throw new Error();
+      || (value.draftFor !== undefined && !ACCOUNT_ID.test(value.draftFor))
+      || (value.pending !== undefined && value.pending !== true)) throw new Error();
     return { id, label: value.label, ...(value.subjectHash ? { subjectHash: value.subjectHash } : {}),
-      ...(value.draftFor ? { draftFor: value.draftFor } : {}) };
+      ...(value.draftFor ? { draftFor: value.draftFor } : {}), ...(value.pending ? { pending: true } : {}) };
   } finally { closeSync(fd); }
 }
 export function writeAccount(account: ZcodeAccount): void {
@@ -28,7 +29,8 @@ export function writeAccount(account: ZcodeAccount): void {
   const label = account.label.trim();
   if (!label || label.length > 80 || /[\x00-\x1f]/.test(label)
     || (account.subjectHash !== undefined && !/^[a-f0-9]{64}$/.test(account.subjectHash))
-    || (account.draftFor !== undefined && !ACCOUNT_ID.test(account.draftFor))) throw new Error("account_invalid");
+    || (account.draftFor !== undefined && !ACCOUNT_ID.test(account.draftFor))
+    || (account.pending !== undefined && account.pending !== true)) throw new Error("account_invalid");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const temp = join(dir, randomUUID() + ".tmp");
   writeFileSync(temp, JSON.stringify({ ...account, label }), { mode: 0o600, flag: "wx" });
@@ -38,22 +40,23 @@ export function listAccounts(): ZcodeAccount[] {
   const dir = join(getConfigDir(), "zcode-accounts");
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter(id => ACCOUNT_ID.test(id)).slice(0, 100).flatMap(id => {
-    try { const account = readAccount(id); return account.draftFor ? [] : [account]; } catch { return []; }
+    try { const account = readAccount(id); return account.draftFor || account.pending ? [] : [account]; } catch { return []; }
   });
 }
-/** Remove reconnect-only profiles whose in-memory OAuth jobs vanished after a process restart. */
+/** Remove hidden OAuth profiles whose owning in-memory job vanished after a process restart. */
 export function reconcileAccountDrafts(activeDraftIds: ReadonlySet<string>): void {
   const dir = join(getConfigDir(), "zcode-accounts");
   if (!existsSync(dir)) return;
   for (const id of readdirSync(dir).filter(id => ACCOUNT_ID.test(id))) {
     if (activeDraftIds.has(id)) continue;
-    try { if (readAccount(id).draftFor) removeAccountFiles(id); } catch { /* Invalid state is never deleted implicitly. */ }
+    try { const account = readAccount(id); if (account.draftFor || account.pending) removeAccountFiles(id); }
+    catch { /* Invalid state is never deleted implicitly. */ }
   }
 }
 export function allocateAccount(label: string, replaceId?: string): ZcodeAccount {
   if (replaceId) readAccount(replaceId);
   if (!replaceId && listAccounts().length >= 20) throw new Error("account_limit");
-  const account = { id: randomUUID(), label, ...(replaceId ? { draftFor: replaceId } : {}) };
+  const account = { id: randomUUID(), label, ...(replaceId ? { draftFor: replaceId } : { pending: true as const }) };
   writeAccount(account);
   mkdirSync(accountProfile(account.id), { recursive: true, mode: 0o700 });
   return account;

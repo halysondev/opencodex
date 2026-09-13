@@ -309,10 +309,12 @@ the stable profile queue and again after acquiring it; if the short cache expire
 wait, it reloads the refreshed generation before dispatch instead of using the earlier snapshot. A caller
 waiting on that shared official refresh races only its own abort signal and returns promptly without
 cancelling the refresh for sibling requests. Authenticated account operations also delete valid
-hidden reconnect drafts whose in-memory job disappeared after restart, while preserving active
+hidden new-account and reconnect drafts whose in-memory job disappeared after restart, while preserving active
 drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings,
 transient completion failures keep the OAuth job authenticated for retry, and canonical
 global-default aliases remap to the account default before validation.
+Provider activation updates config and catalog without invalidating the quota view; entitlement
+refresh remains a separate, explicitly requested action rather than a side effect of connection.
 Account-list snapshots reuse one Desktop runtime discovery and one persisted-catalog read across all
 saved accounts. Removal checks only route-bearing selector fields (including aliases and provider
 reviewer targets), then revokes the official profile before deleting provider/catalog state. A later

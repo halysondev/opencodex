@@ -409,13 +409,32 @@ test("account listing after restart removes only orphaned hidden reconnect draft
   });
   expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
 });
+test("account listing after restart removes an orphaned hidden new-account draft", async () => {
+  const f = accountFixture();
+  const account = await f.login();
+  expect(listAccounts()).toEqual([]);
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
+
+  const liveRequest = context("/api/zcode-accounts", {}, "gui-session", "GET");
+  f.ctx.req = liveRequest.req; f.ctx.url = liveRequest.url;
+  expect(await (await handleZcodeAccountRoutes(f.ctx, f.deps))!.json()).toEqual({ accounts: [] });
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([account.accountId]);
+
+  resetZcodeAccountJobsForTests();
+  const restartedRequest = context("/api/zcode-accounts", {}, "gui-session", "GET");
+  f.ctx.req = restartedRequest.req; f.ctx.url = restartedRequest.url;
+  expect(await (await handleZcodeAccountRoutes(f.ctx, f.deps))!.json()).toEqual({ accounts: [] });
+  expect(readdirSync(join(home, "zcode-accounts"))).toEqual([]);
+});
 test("manual accounts require GUI consent; account login enables an independent provider/catalog", async () => {
   const f = accountFixture(), originalDefault = f.ctx.config.defaultProvider;
   expect((await f.call("login", {}, "admin-token")).status).toBe(403);
   expect((await f.call("login", { consent: false })).status).toBe(400);
   expect(listAccounts()).toHaveLength(0);
   const a = await f.login();
+  expect(listAccounts()).toHaveLength(0);
   expect(await (await f.call("complete", { jobId: a.jobId })).json()).toMatchObject({ activation: "ready", accountId: a.accountId });
+  expect(listAccounts()).toHaveLength(1);
   f.hash("b".repeat(64));
   const b = await f.login({ label: "Work" });
   expect(await (await f.call("complete", { jobId: b.jobId })).json()).toMatchObject({ activation: "ready", accountId: b.accountId });

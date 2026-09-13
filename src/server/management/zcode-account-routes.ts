@@ -183,7 +183,8 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
           renameSync(accountProfile(job.accountId), accountProfile(id));
         }
         const status = await connectDesktop(job.runtime, job.workspace, id);
-        writeAccount({ ...readAccount(id), subjectHash: job.identity });
+        const saved = readAccount(id);
+        writeAccount({ id: saved.id, label: saved.label, subjectHash: job.identity });
         invalidateAccountRefresh(id);
         if (backup) { rmSync(backup, { recursive: true, force: true }); backup = undefined; removeAccountFiles(job.accountId); }
         job.phase = "finished"; clearGatherRoutedModelsInflight();

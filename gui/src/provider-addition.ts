@@ -3,7 +3,11 @@ export interface ProviderAdditionMetadata {
   adapter?: string;
 }
 
-/** Native ZCode activation is protocol/catalog-only and must not force an entitlement probe. */
-export function forceQuotaRefreshAfterProviderAddition(metadata?: ProviderAdditionMetadata): boolean {
-  return metadata?.adapter !== "zcode";
+/** Native ZCode activation is protocol/catalog-only and must not start any quota read. */
+export function refreshQuotasAfterProviderAddition(
+  metadata: ProviderAdditionMetadata | undefined,
+  refresh: (force: boolean) => unknown,
+): void {
+  if (metadata?.adapter === "zcode") return;
+  refresh(true);
 }
