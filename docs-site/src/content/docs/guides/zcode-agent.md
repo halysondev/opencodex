@@ -109,6 +109,9 @@ ZCode Desktop's original profile. Remove references from defaults, combos, subag
 other providers' routing/reviewer selectors before removing an account; provider and model aliases
 count as references too. Wait for active tasks and
 their native child processes to finish. No task is stopped automatically.
+If Desktop revocation succeeds but saving the provider removal or updating the catalog fails,
+OpenCodex reports a partial removal and refreshes the visible state. Retry **Remove**: the retry is
+idempotent and never reconnects the account or silently switches to another one.
 
 A protocol/registration/catalog failure is displayed as pending, not complete success.
 Use **Retry provider activation** for a saved connection whose catalog is pending. A

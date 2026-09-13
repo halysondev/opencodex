@@ -313,6 +313,11 @@ hidden reconnect drafts whose in-memory job disappeared after restart, while pre
 drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings,
 transient completion failures keep the OAuth job authenticated for retry, and canonical
 global-default aliases remap to the account default before validation.
+Account-list snapshots reuse one Desktop runtime discovery and one persisted-catalog read across all
+saved accounts. Removal checks only route-bearing selector fields (including aliases and provider
+reviewer targets), then revokes the official profile before deleting provider/catalog state. A later
+durability or catalog failure remains visible as a bounded partial-removal state; retry is idempotent
+and cannot reconnect or select another account.
 Native turn admission retains a 32-request process ceiling and a 24-request per-profile ceiling,
 so one stalled profile cannot consume every reservation needed by independent saved accounts.
 Closing saved-account clients remain registered as busy until the direct bootstrap actually exits;

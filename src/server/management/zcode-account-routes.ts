@@ -13,6 +13,7 @@ import { jsonResponse } from "../auth-cors";
 import { readBoundedJsonRequestBody } from "../request-decompress";
 import { activateDesktopProvider, desktopActivation, readDesktopCatalogSlugs } from "./zcode-desktop-activation";
 import type { ManagementContext } from "./context";
+import type { OcxConfig } from "../../types/config";
 
 type Job = { id: string; accountId: string; replaceId?: string; runtime: string; workspace: string;
   phase: "waiting" | "authenticated" | "completing" | "finished" | "failed";
@@ -22,24 +23,50 @@ const pendingFor = (id: string) => [...jobs.values()].some(j => (j.accountId ===
 const safeJob = (job: Job) => ({ jobId: job.id, accountId: job.replaceId ?? job.accountId,
   phase: job.phase, ...(job.url ? { url: job.url } : {}), ...(job.error ? { error: job.error } : {}) });
 const fail = (code: string): never => { throw new Error(code); };
-function selectorUsesNamespace(value: string, namespaces: ReadonlySet<string>): boolean {
+function selectorUsesNamespace(value: string, providerNamespaces: ReadonlySet<string>, modelAliases: ReadonlySet<string>): boolean {
   const normalized = value.trim().toLowerCase();
-  if (namespaces.has(normalized)) return true;
+  if (providerNamespaces.has(normalized) || modelAliases.has(normalized)) return true;
   const slash = normalized.indexOf("/");
-  return slash > 0 && namespaces.has(normalized.slice(0, slash));
+  return slash > 0 && providerNamespaces.has(normalized.slice(0, slash));
 }
-function configReferencesNamespaces(value: unknown, namespaces: ReadonlySet<string>, seen = new Set<object>()): boolean {
-  if (typeof value === "string") return selectorUsesNamespace(value, namespaces);
-  if (value === null || typeof value !== "object" || seen.has(value)) return false;
-  seen.add(value);
-  return Array.isArray(value)
-    ? value.some(item => configReferencesNamespaces(item, namespaces, seen))
-    : Object.values(value).some(item => configReferencesNamespaces(item, namespaces, seen));
+function configReferencesNamespaces(config: OcxConfig, providerNamespaces: ReadonlySet<string>, modelAliases: ReadonlySet<string>): boolean {
+  const uses = (value: unknown) => typeof value === "string"
+    && selectorUsesNamespace(value, providerNamespaces, modelAliases);
+  const usesProvider = (value: unknown) => typeof value === "string"
+    && providerNamespaces.has(value.trim().toLowerCase());
+  const usesAny = (values: readonly unknown[] | undefined) => values?.some(uses) === true;
+  const claude = config.claudeCode;
+  if (usesAny([
+    config.injectionModel, config.shadowCallIntercept?.model,
+    config.agentTaskRecovery?.model, config.tokenGuardian?.codexWarmupModel,
+    config.webSearchSidecar?.model, config.visionSidecar?.model,
+    claude?.model, claude?.smallFastModel, claude?.classifierModel,
+    claude?.webSearchSidecar?.model, claude?.visionSidecar?.model,
+  ])) return true;
+  if (usesProvider(config.defaultProvider) || usesProvider(config.images?.provider)) return true;
+  if ([config.disabledModels, config.subagentModels, config.modelPickerOrder,
+    config.subagentModelFallback, claude?.classifierFallbacks, config.shadowCallIntercept?.sourceModels]
+    .some(usesAny)) return true;
+  if ([claude?.modelMap, claude?.tierModels]
+    .some(record => usesAny(Object.values(record ?? {})))) return true;
+  if (Object.entries(config.subagentModelFallbackByModel ?? {})
+    .some(([model, fallbacks]) => uses(model) || usesAny(fallbacks))) return true;
+  if (Object.entries(config.blockedModelRedirects ?? {})
+    .some(([model, replacement]) => uses(model) || uses(replacement))) return true;
+  if (Object.keys(config.modelPinnedEfforts ?? {}).some(uses)) return true;
+  const desktopProfile = claude?.desktopProfile;
+  if (usesAny(Object.keys(desktopProfile?.assignments ?? {}))
+    || usesAny(Object.values(desktopProfile?.defaults ?? {}))) return true;
+  if ((config.customModels ?? []).some(model => usesProvider(model.provider))) return true;
+  if (Object.values(config.combos ?? {}).some(combo => combo.targets.some(target => usesProvider(target.provider)))) return true;
+  if (Object.values(config.routingProfiles ?? {}).some(profile => profile.candidates.some(candidate => usesProvider(candidate.provider)))) return true;
+  return Object.values(config.providers).some(provider => uses(provider.autoReviewModel)
+    || usesAny(Object.values(provider.autoReviewModelOverrides ?? {})));
 }
 const safeErrors = new Set(["account_invalid", "account_limit", "account_busy", "account_referenced",
   "account_duplicate", "account_identity_mismatch", "account_login_required", "job_invalid", "native_oauth_failed",
   "desktop_missing", "workspace_invalid", "node_missing", "node_incompatible", "sandbox_missing", "sandbox_unavailable",
-  "catalog_update_failed", "provider_registration_failed", "runtime_failed", "models_missing",
+  "account_removal_partial", "catalog_update_failed", "provider_registration_failed", "runtime_failed", "models_missing",
   "platform_unsupported", "profile_missing", "connection_invalid", "busy"]);
 
 const services = { connectDesktop, desktopStatus, disconnectDesktop, runNativeOAuth, resolveDesktopRuntime,
@@ -60,8 +87,19 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
     // jobs, so reconcile before every authenticated account operation without touching active jobs.
     reconcileAccountDrafts(new Set([...jobs.values()].map(job => job.accountId)));
     if (path === "/api/zcode-accounts" && ctx.req.method === "GET") {
-      return jsonResponse({ accounts: listAccounts().map(({ id, label }) => {
-        const status = desktopActivation(ctx, desktopStatus(id), readDesktopCatalogSlugs);
+      const accounts = listAccounts();
+      let sharedRuntimes: string[] | undefined;
+      let catalogSlugs: string[] | undefined;
+      let catalogReadable = true;
+      try { catalogSlugs = readDesktopCatalogSlugs(); } catch { catalogReadable = false; }
+      const readSharedCatalogSlugs = () => {
+        if (!catalogReadable) throw new Error("catalog unavailable");
+        return catalogSlugs ?? [];
+      };
+      return jsonResponse({ accounts: accounts.map(({ id, label }) => {
+        const desktop = desktopStatus(id, sharedRuntimes);
+        sharedRuntimes ??= desktop.runtimes;
+        const status = desktopActivation(ctx, desktop, readSharedCatalogSlugs);
         return { id, label, connected: status.connected, activation: status.activation, providerName: status.providerName,
           busy: accountRuntimeBusy(id) || pendingFor(id) };
       }) });
@@ -189,33 +227,41 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
     }
     if (path === "/api/zcode-accounts/remove") {
       const names = Object.keys(ctx.config.providers).filter(name => ctx.config.providers[name]?.zcodeAccountId === id);
-      const { providers: _providers, ...rest } = ctx.config;
       const remainingProviders = Object.fromEntries(
         Object.entries(ctx.config.providers).filter(([name]) => !names.includes(name)),
       );
-      const namespaces = new Set(names.flatMap(name => {
+      const providerNamespaces = new Set(names.flatMap(name => {
         const provider = ctx.config.providers[name];
         const alias = provider?.alias?.trim();
-        const modelAliases = Object.values(provider?.modelAliases ?? {})
-          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-          .map(value => value.trim());
-        return [name, ...(alias ? [alias] : []), ...modelAliases];
+        return [name, ...(alias ? [alias] : [])];
       }).map(name => name.toLowerCase()));
-      if (configReferencesNamespaces({ ...rest, providers: remainingProviders }, namespaces)) return fail("account_referenced");
+      const modelAliases = new Set(names.flatMap(name => Object.values(ctx.config.providers[name]?.modelAliases ?? {}))
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map(value => value.trim().toLowerCase()));
+      if (configReferencesNamespaces({ ...ctx.config, providers: remainingProviders }, providerNamespaces, modelAliases)) return fail("account_referenced");
       // Revoke first. A failed config/catalog save is explicit and cannot silently use another account.
       await disconnectDesktop(id);
-      withConfigMutationLockSync(() => {
-        const previous = { ...ctx.config.providers };
-        try {
-          for (const name of names) delete ctx.config.providers[name];
-          (ctx.deps.saveConfigPreservingClaudeCode ?? saveConfigPreservingClaudeCode)(ctx.config);
-        } catch (error) { ctx.config.providers = previous; throw error; }
-      });
-      for (const name of names) clearModelCache(name);
-      reconcileLiveStateStores(); clearGatherRoutedModelsInflight();
-      const result = await ctx.convergeCodexCatalog();
+      try {
+        withConfigMutationLockSync(() => {
+          const previous = { ...ctx.config.providers };
+          try {
+            for (const name of names) delete ctx.config.providers[name];
+            (ctx.deps.saveConfigPreservingClaudeCode ?? saveConfigPreservingClaudeCode)(ctx.config);
+          } catch (error) { ctx.config.providers = previous; throw error; }
+        });
+        for (const name of names) clearModelCache(name);
+        reconcileLiveStateStores(); clearGatherRoutedModelsInflight();
+      } catch {
+        // Revocation already persisted. Keep the account visible and require an explicit,
+        // idempotent retry instead of reporting a generic OAuth failure or reconnecting it.
+        return fail("account_removal_partial");
+      }
+      let result: Awaited<ReturnType<typeof ctx.convergeCodexCatalog>>;
+      try { result = await ctx.convergeCodexCatalog(); }
+      catch { return fail("catalog_update_failed"); }
       if (result.status !== "committed") return fail("catalog_update_failed");
-      removeAccountFiles(id); invalidateAccountRefresh(id);
+      try { removeAccountFiles(id); invalidateAccountRefresh(id); }
+      catch { return fail("account_removal_partial"); }
       return jsonResponse({ ok: true });
     }
     return jsonResponse({ error: "not_found" }, 404);

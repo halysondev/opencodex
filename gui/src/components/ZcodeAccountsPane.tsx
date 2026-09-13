@@ -108,7 +108,7 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
       const code = e instanceof Error ? e.message : "native_oauth_failed";
       // Removal revokes and persists provider state before catalog convergence. Its bounded
       // partial error must still invalidate the parent and refresh this account list.
-      if (path === "/remove" && code === "catalog_update_failed") {
+      if (path === "/remove" && ["account_removal_partial", "catalog_update_failed"].includes(code)) {
         onProviderStateMutationRef.current?.();
         try { await refresh(); } catch { /* The mutation callback remains authoritative. */ }
       }

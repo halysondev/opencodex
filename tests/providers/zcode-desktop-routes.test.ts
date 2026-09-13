@@ -301,18 +301,23 @@ function accountFixture() {
   const ctx = context("/api/zcode-accounts/login", {}, "gui-session");
   const connected = new Set<string>();
   let hash = "a".repeat(64), failCatalog = false, active = false;
-  let slugs: string[] = [];
+  let slugs: string[] = [], catalogReads = 0;
   const workspaceValidations: Array<{ path: string; accountId?: string }> = [];
+  const statusRuntimeHints: Array<readonly string[] | undefined> = [];
   const deps = {
     resolveDesktopRuntime: (path: string) => path,
     validateDesktopWorkspace: (path: string, accountId?: string) => { workspaceValidations.push({ path, accountId }); return path; },
     accountRuntimeBusy: () => active,
-    desktopStatus: (accountId?: string) => ({ ...status, sandbox: false, accountId, connected: !!accountId && connected.has(accountId) }),
+    desktopStatus: (accountId?: string, detectedRuntimes?: readonly string[]) => {
+      statusRuntimeHints.push(detectedRuntimes);
+      return { ...status, runtimes: detectedRuntimes ? [...detectedRuntimes] : status.runtimes,
+        sandbox: false, accountId, connected: !!accountId && connected.has(accountId) };
+    },
     connectDesktop: async (_r: string, _w: string, accountId?: string) => {
       connected.add(accountId!); return { ...status, sandbox: false, accountId, connected: true };
     },
     disconnectDesktop: async (id?: string) => { connected.delete(id!); },
-    readDesktopCatalogSlugs: () => slugs,
+    readDesktopCatalogSlugs: () => { catalogReads++; return slugs; },
     runNativeOAuth: async (options: { onEvent: (e: any) => void }) => {
       options.onEvent({ type: "authenticated", subjectHash: hash });
     },
@@ -333,7 +338,8 @@ function accountFixture() {
     await Promise.resolve(); await Promise.resolve();
     return result;
   };
-  return { ctx, deps, call, login, slugs: () => slugs, workspaceValidations: () => workspaceValidations,
+  return { ctx, deps, call, login, slugs: () => slugs, catalogReads: () => catalogReads,
+    statusRuntimeHints: () => statusRuntimeHints, workspaceValidations: () => workspaceValidations,
     hash: (h: string) => { hash = h; },
     failCatalog: (v: boolean) => { failCatalog = v; }, active: (v: boolean) => { active = v; } };
 }
@@ -420,6 +426,24 @@ test("manual accounts require GUI consent; account login enables an independent 
   expect(f.ctx.config.defaultProvider).toBe(originalDefault);
   expect(JSON.stringify(await (await f.call("complete", { jobId: a.jobId })).json())).not.toContain("subjectHash");
 });
+test("account listing shares one host discovery and one catalog read", async () => {
+  const f = accountFixture();
+  const first = await f.login();
+  await f.call("complete", { jobId: first.jobId });
+  f.hash("b".repeat(64));
+  const second = await f.login({ label: "Work" });
+  await f.call("complete", { jobId: second.jobId });
+  const statusCalls = f.statusRuntimeHints().length;
+  const catalogReads = f.catalogReads();
+
+  const request = context("/api/zcode-accounts", {}, "gui-session", "GET");
+  f.ctx.req = request.req; f.ctx.url = request.url;
+  const listed = await (await handleZcodeAccountRoutes(f.ctx, f.deps))!.json();
+
+  expect(listed.accounts).toHaveLength(2);
+  expect(f.statusRuntimeHints().slice(statusCalls)).toEqual([undefined, status.runtimes]);
+  expect(f.catalogReads() - catalogReads).toBe(1);
+});
 test("duplicate identity is rejected and reconnect preserves provider settings and account id", async () => {
   const f = accountFixture(), a = await f.login();
   const ready = await (await f.call("complete", { jobId: a.jobId })).json();
@@ -487,6 +511,19 @@ test("account removal recognizes case-insensitive provider and model aliases in 
   expect(listAccounts()).toEqual([]);
 });
 
+test("account removal ignores alias-shaped prose outside routing selector fields", async () => {
+  const f = accountFixture(), account = await f.login();
+  const ready = await (await f.call("complete", { jobId: account.jobId })).json();
+  f.ctx.config.providers[ready.providerName].modelAliases = { [models[0]!.id]: "fast" };
+  f.ctx.config.providers.reviewer = {
+    adapter: "openai-responses", baseUrl: "https://reviewer.example.invalid/v1", note: "fast",
+  };
+
+  expect(await (await f.call("remove", { accountId: account.accountId })).json()).toEqual({ ok: true });
+  expect(listAccounts()).toEqual([]);
+  expect(f.ctx.config.providers.reviewer?.note).toBe("fast");
+});
+
 test("account removal scans routed selectors in providers that will remain configured", async () => {
   const f = accountFixture(), account = await f.login();
   const ready = await (await f.call("complete", { jobId: account.jobId })).json();
@@ -515,6 +552,42 @@ test("account removal scans routed selectors in providers that will remain confi
   delete f.ctx.config.providers.reviewer.autoReviewModelOverrides;
   expect(await (await f.call("remove", { accountId: account.accountId })).json()).toEqual({ ok: true });
   expect(f.ctx.config.providers.reviewer).toBeDefined();
+});
+
+test("failed provider save after account revocation is explicit and idempotently retryable", async () => {
+  const f = accountFixture(), account = await f.login();
+  const ready = await (await f.call("complete", { jobId: account.jobId })).json();
+  const save = f.ctx.deps.saveConfigPreservingClaudeCode;
+  f.ctx.deps.saveConfigPreservingClaudeCode = () => { throw new Error("private config path and token"); };
+
+  const partial = await (await f.call("remove", { accountId: account.accountId })).json();
+  expect(partial).toEqual({ error: "account_removal_partial" });
+  expect(JSON.stringify(partial)).not.toContain("private config path and token");
+  expect(f.deps.desktopStatus(account.accountId).connected).toBe(false);
+  expect(listAccounts().map(saved => saved.id)).toEqual([account.accountId]);
+  expect(f.ctx.config.providers[ready.providerName]).toBeDefined();
+
+  f.ctx.deps.saveConfigPreservingClaudeCode = save;
+  expect(await (await f.call("remove", { accountId: account.accountId })).json()).toEqual({ ok: true });
+  expect(listAccounts()).toEqual([]);
+  expect(f.ctx.config.providers[ready.providerName]).toBeUndefined();
+});
+
+test("thrown catalog cleanup after account revocation stays explicit and retryable", async () => {
+  const f = accountFixture(), account = await f.login();
+  const ready = await (await f.call("complete", { jobId: account.jobId })).json();
+  f.failCatalog(true);
+
+  expect(await (await f.call("remove", { accountId: account.accountId })).json())
+    .toEqual({ error: "catalog_update_failed" });
+  expect(f.deps.desktopStatus(account.accountId).connected).toBe(false);
+  expect(listAccounts().map(saved => saved.id)).toEqual([account.accountId]);
+  expect(f.ctx.config.providers[ready.providerName]).toBeUndefined();
+
+  f.failCatalog(false);
+  expect(await (await f.call("remove", { accountId: account.accountId })).json()).toEqual({ ok: true });
+  expect(listAccounts()).toEqual([]);
+  expect(f.slugs()).toEqual([]);
 });
 
 test("rename preserves custom model labels and saved accounts survive config reload", async () => {

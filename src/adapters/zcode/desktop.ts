@@ -207,12 +207,12 @@ export function loadDesktopSettings(accountId?: string): ZcodeSettings | undefin
   return settingsFor(connection, accountId);
 }
 
-export function desktopStatus(accountId?: string) {
+export function desktopStatus(accountId?: string, detectedRuntimes?: readonly string[]) {
   let issue: string | undefined;
   try { prerequisites(); desktopProfile(accountId); } catch (e) { issue = e instanceof DesktopSetupError ? e.code : "connection_invalid"; }
   let connection: Connection | undefined;
   try { connection = readConnection(accountId); } catch { issue = "connection_invalid"; }
-  const runtimes = detectDesktopRuntimes();
+  const runtimes = detectedRuntimes ? [...detectedRuntimes] : detectDesktopRuntimes();
   if (connection?.connected) {
     try { resolveDesktopRuntime(connection.runtime); validateDesktopWorkspace(connection.workspace, accountId); }
     catch (e) { issue = e instanceof DesktopSetupError ? e.code : "connection_invalid"; }

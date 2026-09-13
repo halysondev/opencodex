@@ -461,29 +461,31 @@ test("saved account rename and removal refresh parent provider state", async () 
   expect(mutationCalls).toBe(2);
 });
 
-test("partial account removal refreshes parent state after catalog convergence fails", async () => {
-  let partialRemoval = false;
-  const prior = globalThis.fetch;
-  Object.defineProperty(win, "confirm", { configurable: true, value: () => true });
-  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
-    const url = new URL(String(input), "http://localhost");
-    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
-    if (url.pathname.endsWith("/remove")) {
-      partialRemoval = true;
-      return Response.json({ error: "catalog_update_failed" }, { status: 400 });
-    }
-    return Response.json({ accounts: [{ id: "saved", label: "Saved fixture",
-      activation: partialRemoval ? "provider_pending" : "ready",
-      ...(partialRemoval ? {} : { providerName: "zcode-saved" }), busy: false }] });
-  } });
-  await mountPane(false);
-  const section = host.querySelector("h3")!.closest("section")!;
-  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
-  await click(button("Remove account"));
-  await waitUntil(() => mutationCalls === 1 && host.textContent?.includes("catalog_update_failed") === true);
-  expect(partialRemoval).toBe(true);
-  expect(section.textContent).toContain("Account setup incomplete");
-});
+for (const removalError of ["catalog_update_failed", "account_removal_partial"]) {
+  test(`partial account removal refreshes parent state after ${removalError}`, async () => {
+    let partialRemoval = false;
+    const prior = globalThis.fetch;
+    Object.defineProperty(win, "confirm", { configurable: true, value: () => true });
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+      const url = new URL(String(input), "http://localhost");
+      if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+      if (url.pathname.endsWith("/remove")) {
+        partialRemoval = true;
+        return Response.json({ error: removalError }, { status: 400 });
+      }
+      return Response.json({ accounts: [{ id: "saved", label: "Saved fixture",
+        activation: partialRemoval ? "provider_pending" : "ready",
+        ...(partialRemoval ? {} : { providerName: "zcode-saved" }), busy: false }] });
+    } });
+    await mountPane(false);
+    const section = host.querySelector("h3")!.closest("section")!;
+    await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+    await click(button("Remove account"));
+    await waitUntil(() => mutationCalls === 1 && host.textContent?.includes(removalError) === true);
+    expect(partialRemoval).toBe(true);
+    expect(section.textContent).toContain("Account setup incomplete");
+  });
+}
 
 test("ready completion keeps a refresh failure recoverable without repeating OAuth", async () => {
   let completions = 0;
