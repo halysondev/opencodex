@@ -48,9 +48,9 @@ or subscription terms; those remain the vendor's policy.
 5. Review the native file/command execution notice, check the consent box and click
    **Connect Desktop**. OpenCodex constructs the native launcher, verifies the protocol, enables the ZCode provider and updates the Codex catalog;
    no environment variables, API-key entry, token import or separate CLI login is required.
-6. Optionally select a model and click **Test with one request**. This sends one brief prompt
-   through the official ZCode runtime and consumes account quota. Connecting alone checks the
-   local protocol and catalog, **not** account entitlement or inference.
+6. Optionally select a model and click **Verify protocol again**. This repeats the official
+   model-catalog and `workspace/readState` checks without creating a model turn, running native
+   tools or consuming account quota. Only a real task can prove account entitlement and inference.
 7. The provider is now available immediately. Select a ZCode model in your
    calling client. Only configured, enabled built-in Z.AI profiles are exposed by this workflow;
    custom Desktop providers and routes back to OpenCodex are not imported.
@@ -161,8 +161,8 @@ an advanced operator-supplied launcher.
 Managed consent and installation/workspace paths are stored privately under
 `$OPENCODEX_HOME/zcode-desktop/`, separately from provider configuration. Data-plane requests
 cannot choose an executable or override these paths. Status, folder browsing, connecting,
-disconnecting and the optional quota-spending test require the dashboard's authenticated GUI
-session, not a raw API/admin token.
+disconnecting and the optional tool-free protocol recheck require the dashboard's authenticated
+GUI session, not a raw API/admin token.
 
 ## Advanced: operator-supplied isolated launcher
 

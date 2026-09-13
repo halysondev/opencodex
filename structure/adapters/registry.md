@@ -278,6 +278,8 @@ credentials/session state under its private data root. Because the official app 
 config-path option, a one-shot Node preload redirects only its internal `os.homedir()` lookup to a
 turn-scoped private home; the process environment retains the user's real `HOME`, so native host
 tools work without copying unrelated provider secrets into the child.
+The dashboard's optional recheck repeats only model-catalog and `workspace/readState` protocol
+operations; it never creates or sends a model turn, starts a native tool or consumes inference quota.
 
 ## ZCode saved accounts
 
@@ -294,6 +296,8 @@ retains its previous profile. Account providers do not participate in an implici
 Native tools still run on the host by default; optional OS sandboxing is independent of
 profile separation and does not turn the latter into a security boundary. Refresh failures
 cross the adapter boundary only as bounded public codes, never filesystem or account paths.
+Advanced model descriptors reject loopback, private and link-local destinations before the
+official runtime receives them.
 
 ## ZCode vision input adaptation
 

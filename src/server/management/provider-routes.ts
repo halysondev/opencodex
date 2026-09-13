@@ -1684,7 +1684,9 @@ export async function handleProviderRoutes(ctx: ManagementContext): Promise<Resp
     if (prov.adapter === "zcode") {
       try {
         const models = discoverZcodeModels(prov.zcodeAccountId);
-        return jsonResponse({ ok: models.length > 0, models: models.length, latencyMs: 0,
+        if (!models.length) return jsonResponse({ ok: false, models: 0, latencyMs: 0,
+          error: "ZCode local catalog has no available models." });
+        return jsonResponse({ ok: true, models: models.length, latencyMs: 0,
           message: "Local catalog loaded. Account inference is validated only by an explicit agent turn." });
       } catch {
         return jsonResponse({ ok: false, latencyMs: 0,

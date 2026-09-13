@@ -51,6 +51,7 @@ describe("managed ZCode Desktop", () => {
       ...provider(), models: { ...invalid, valid: { name: "Valid" } },
     } } });
     expect(desktopModelCatalog(config).map((model: { modelId: string }) => model.modelId)).toContain("valid");
+    expect(config.model).toEqual({ main: "builtin:zai-coding-plan/valid", lite: "builtin:zai-coding-plan/valid" });
   });
   test("runtime selection requires a Desktop resources layout, not arbitrary commands", () => {
     expect(() => resolveDesktopRuntime("node -e malicious")).toThrow("desktop_missing");

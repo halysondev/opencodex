@@ -1,5 +1,5 @@
 import { accountRoot, accountProfile, readAccount } from "./accounts";
-import { constants, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { constants, existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
@@ -218,6 +218,34 @@ export function desktopStatus(accountId?: string) {
 }
 
 const connecting = new Set<string>();
+
+function normalizeProtocolModels(value: unknown): DesktopModel[] {
+  if (!Array.isArray(value) || !value.length || value.length > 1000) return fail("models_missing");
+  const models = value.filter((m: DesktopModel) => typeof m.id === "string" && typeof m.providerId === "string"
+    && m.providerId.startsWith("builtin:zai") && typeof m.modelId === "string" && !/[\x00-\x20]/.test(m.id)
+    && m.id === `${m.providerId}/${m.modelId}`).map((m: DesktopModel) => ({
+    id: m.id, providerId: m.providerId, modelId: m.modelId, label: String(m.label).slice(0, 240),
+    ...(typeof m.contextWindow === "number" && Number.isFinite(m.contextWindow) && m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
+  }));
+  if (!models.length) return fail("models_missing");
+  return models;
+}
+
+async function verifyProtocol(settings: ZcodeSettings, requiredModel?: string, signal?: AbortSignal): Promise<DesktopModel[]> {
+  const client = new ZcodeClient(settings);
+  const cancel = () => { void client.close(); };
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    if (signal?.aborted) return fail("runtime_failed");
+    const result = await client.request("opencodex/desktopModels", {}, 15_000);
+    const models = normalizeProtocolModels(result.models);
+    if (requiredModel && !models.some(model => model.id === requiredModel)) return fail("models_missing");
+    // Protocol metadata only: never create/send a model turn or permit native tool execution.
+    await client.request("workspace/readState", { workspace: { workspacePath: settings.workspace, workspaceKey: settings.workspace } }, 15_000);
+    return models;
+  } finally { signal?.removeEventListener("abort", cancel); await client.close(); }
+}
+
 export async function connectDesktop(runtime: string, workspace: string, accountId?: string): Promise<ReturnType<typeof desktopStatus>> {
   if (connecting.has(accountId ?? "desktop")) return fail("busy");
   if (accountId && hasZcodeAccountClients(accountId)) return fail("busy");
@@ -226,25 +254,32 @@ export async function connectDesktop(runtime: string, workspace: string, account
     const connection: Connection = { version: 1, connected: true, generation: randomUUID(),
       runtime: resolveDesktopRuntime(runtime), workspace: validateDesktopWorkspace(workspace, accountId), models: [] };
     const settings = settingsFor(connection, accountId);
-    const client = new ZcodeClient(settings);
-    try {
-      const result = await client.request("opencodex/desktopModels", {}, 15_000);
-      if (!Array.isArray(result.models) || !result.models.length || result.models.length > 1000) return fail("models_missing");
-      connection.models = result.models.filter((m: DesktopModel) => typeof m.id === "string" && typeof m.providerId === "string"
-        && m.providerId.startsWith("builtin:zai") && typeof m.modelId === "string" && !/[\x00-\x20]/.test(m.id)
-        && m.id === `${m.providerId}/${m.modelId}`).map((m: DesktopModel) => ({
-          id: m.id, providerId: m.providerId, modelId: m.modelId, label: String(m.label).slice(0, 240),
-          ...(typeof m.contextWindow === "number" && Number.isFinite(m.contextWindow) && m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
-        }));
-      if (!connection.models.length) return fail("models_missing");
-      // Official protocol readiness only. This does not send a prompt or spend inference quota.
-      await client.request("workspace/readState", { workspace: { workspacePath: settings.workspace, workspaceKey: settings.workspace } }, 15_000);
-    } finally { await client.close(); }
+    connection.models = await verifyProtocol(settings);
     if (!accountId) await closeZcodeDesktopClients();
     persist(connection, accountId);
     return desktopStatus(accountId);
   } catch (e) { if (e instanceof DesktopSetupError) throw e; return fail("runtime_failed"); }
   finally { connecting.delete(accountId ?? "desktop"); }
+}
+
+/** Recheck the official protocol without creating a model turn or exposing native tools. */
+export async function verifyDesktopProtocol(requiredModel: string, signal?: AbortSignal, accountId?: string): Promise<void> {
+  const key = accountId ?? "desktop";
+  if (connecting.has(key) || (accountId && hasZcodeAccountClients(accountId))) return fail("busy");
+  connecting.add(key);
+  const generation = randomUUID();
+  try {
+    const connection = readConnection(accountId);
+    if (!connection?.connected) return fail("disconnected");
+    const settings = settingsFor({ ...connection, generation }, accountId);
+    await verifyProtocol(settings, requiredModel, signal);
+  } catch (error) {
+    if (error instanceof DesktopSetupError) throw error;
+    return fail("runtime_failed");
+  } finally {
+    rmSync(join(root(accountId), "home", generation), { recursive: true, force: true });
+    connecting.delete(key);
+  }
 }
 
 export async function disconnectDesktop(accountId?: string): Promise<void> {

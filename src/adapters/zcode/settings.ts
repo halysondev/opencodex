@@ -108,7 +108,7 @@ function readModels(settings: ZcodeSettings): ZcodeModel[] {
       let url: URL;
       try { url = new URL(options.baseURL); } catch { continue; }
       if (url.protocol !== "https:" || url.username || url.password
-        || /^(localhost|127\.|0\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[|.*\.localhost$)/i.test(url.hostname)) continue;
+        || /^(localhost|127\.|0\.|10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[|.*\.localhost$)/i.test(url.hostname)) continue;
     }
     const models = Object.entries(record(provider.models));
     for (const [modelId, raw] of models) {

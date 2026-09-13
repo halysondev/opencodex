@@ -72,7 +72,7 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
     : error === "platform_unsupported" ? t("zcodeDesktop.platformUnsupported")
     : error === "profile_missing" || error === "models_missing" ? t("zcodeDesktop.loginNeeded")
     : error === "workspace_invalid" ? t("zcodeDesktop.workspaceInvalid")
-    : error === "inference_failed" ? t("zcodeDesktop.inferenceFailed")
+    : error === "protocol_failed" ? t("zcodeDesktop.protocolFailed")
     : error === "provider_registration_failed" ? t("zcodeDesktop.providerPending")
     : error === "catalog_update_failed" ? t("zcodeDesktop.catalogPending")
     : error ? t("zcodeDesktop.failed") : "";

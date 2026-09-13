@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDefaultConfig } from "../../src/config";
 import { activateDesktopProvider, desktopActivation } from "../../src/server/management/zcode-desktop-activation";
+import { handleProviderRoutes } from "../../src/server/management/provider-routes";
 let home: string;
 let previousHome: string | undefined;
 beforeEach(() => {
@@ -42,8 +43,11 @@ function context(path: string, body: unknown, principal?: ManagementContext["pri
 }
 function fixture() {
   let calls = 0;
-  const deps = { desktopStatus: () => status, connectDesktop: async () => { calls++; return { ...status, connected: true }; }, disconnectDesktop: async () => { calls++; }, readDesktopCatalogSlugs: () => { try { return JSON.parse(readFileSync(join(home, "catalog.json"), "utf8")); } catch { return []; } } };
-  return { deps, calls: () => calls };
+  const probed: string[] = [];
+  const deps = { desktopStatus: () => status, connectDesktop: async () => { calls++; return { ...status, connected: true }; },
+    disconnectDesktop: async () => { calls++; }, verifyDesktopProtocol: async (model: string) => { probed.push(model); },
+    readDesktopCatalogSlugs: () => { try { return JSON.parse(readFileSync(join(home, "catalog.json"), "utf8")); } catch { return []; } } };
+  return { deps, calls: () => calls, probed: () => probed };
 }
 describe("ZCode Desktop management consent", () => {
   for (const principal of [undefined, "admin-token"] as const) {
@@ -90,6 +94,51 @@ describe("ZCode Desktop management consent", () => {
     const f = fixture(); const response = await handleZcodeDesktopRoutes(context("/api/zcode-desktop/connect", { consent: true, runtime: "x".repeat(14000), workspace: "/project" }, "gui-session"), f.deps);
     expect(response?.status).toBe(400); expect(f.calls()).toBe(0);
   });
+  test("optional verification uses protocol metadata without starting an inference turn", async () => {
+    const f = fixture();
+    f.deps.desktopStatus = () => ({ ...status, connected: true });
+    const response = await handleZcodeDesktopRoutes(context("/api/zcode-desktop/test", {
+      consent: true, model: models[0]!.id,
+    }, "gui-session"), f.deps);
+    expect(await response?.json()).toEqual({ ok: true });
+    expect(f.probed()).toEqual([models[0]!.id]);
+    expect(f.calls()).toBe(0);
+  });
+  test("protocol verification failures stay bounded and never expose runtime details", async () => {
+    const f = fixture();
+    f.deps.desktopStatus = () => ({ ...status, connected: true });
+    f.deps.verifyDesktopProtocol = async () => { throw new Error("private runtime and profile path"); };
+    const response = await handleZcodeDesktopRoutes(context("/api/zcode-desktop/test", {
+      consent: true, model: models[0]!.id,
+    }, "gui-session"), f.deps);
+    expect(response?.status).toBe(400);
+    expect(await response?.json()).toEqual({ error: "protocol_failed" });
+  });
+});
+
+test("generic ZCode provider test reports an empty local catalog as a failure", async () => {
+  const zcodeHome = join(home, "advanced-home");
+  const workspace = join(home, "workspace");
+  mkdirSync(join(zcodeHome, ".zcode/cli"), { recursive: true }); mkdirSync(workspace);
+  writeFileSync(join(zcodeHome, ".zcode/cli/config.json"), JSON.stringify({ provider: {} }));
+  const keys = ["OCX_ZCODE_NATIVE_TOOLS", "OCX_ZCODE_COMMAND", "OCX_ZCODE_HOME", "OCX_ZCODE_WORKSPACE"] as const;
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    process.env.OCX_ZCODE_NATIVE_TOOLS = "1";
+    process.env.OCX_ZCODE_COMMAND = JSON.stringify(["/fixture-launcher"]);
+    process.env.OCX_ZCODE_HOME = zcodeHome;
+    process.env.OCX_ZCODE_WORKSPACE = workspace;
+    const ctx = context("/api/providers/test?name=zcode", {}, "gui-session");
+    ctx.config.providers.zcode = { adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai" };
+    const result = await (await handleProviderRoutes(ctx))?.json();
+    expect(result).toEqual({ ok: false, models: 0, latencyMs: 0, error: "ZCode local catalog has no available models." });
+    expect(result).not.toHaveProperty("message");
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });
 
 test("reconnection preserves custom settings and restart observes actual persisted catalog", async () => {

@@ -85,26 +85,26 @@ test("Desktop connect requires explicit consent and does not automatically spend
   expect(host.textContent).not.toContain("Use this provider");
   expect(requests.some(r => r.path === "/api/providers")).toBe(false);
 });
-test("one-request test is a separate explicit quota-spending action", async () => {
+test("protocol recheck is a separate tool-free action that does not claim quota use", async () => {
   await mountPane(); await click(host.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
   await click(button("Connect Desktop"));
-  expect(host.textContent).toContain("consumes account quota");
-  await click(button("Test with one request"));
+  expect(host.textContent).toContain("without starting a model turn, running native tools, or consuming quota");
+  await click(button("Verify protocol again"));
   expect(requests.find(r => r.path.endsWith("/test"))?.body).toEqual({ model: "builtin:zai/model", consent: true });
-  expect(host.textContent).toContain("ZCode answered successfully.");
+  expect(host.textContent).toContain("ZCode protocol verification passed.");
 });
 
-test("a successful HTTP response with a failed inference shows the actionable error", async () => {
+test("a successful HTTP response with a failed protocol recheck shows the actionable error", async () => {
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://localhost").pathname;
-    if (path.endsWith("/test")) return Response.json({ ok: false, error: "inference_failed" });
+    if (path.endsWith("/test")) return Response.json({ ok: false, error: "protocol_failed" }, { status: 400 });
     return Response.json({ connected: true, activation: "ready", providerName: "zcode", runtimes: ["/installed/ZCode"],
       runtime: "/installed/ZCode", workspace: "/project", models: [{ id: "builtin:zai/model", label: "Model" }] });
   } });
   await mountPane();
-  await click(button("Test with one request"));
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain("did not complete the test");
-  expect(host.textContent).not.toContain("ZCode answered successfully.");
+  await click(button("Verify protocol again"));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("protocol verification did not complete");
+  expect(host.textContent).not.toContain("ZCode protocol verification passed.");
 });
 
 test("incompatible Node preflight shows safe actionable guidance without connecting", async () => {

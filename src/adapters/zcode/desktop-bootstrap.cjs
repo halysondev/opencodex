@@ -25,9 +25,9 @@ function normalizeDesktopConfig(input) {
       models: raw.models && typeof raw.models === "object" && !Array.isArray(raw.models) ? raw.models : {},
     };
   }
-  const first = Object.entries(provider).find(([, p]) => Object.keys(p.models).length);
-  const model = first ? `${first[0]}/${Object.keys(first[1].models)[0]}` : undefined;
-  return { provider, ...(model ? { model: { main: model, lite: model } } : {}) };
+  const config = { provider };
+  const model = desktopModelCatalog(config)[0]?.id;
+  return { ...config, ...(model ? { model: { main: model, lite: model } } : {}) };
 }
 
 function desktopModelCatalog(config) {

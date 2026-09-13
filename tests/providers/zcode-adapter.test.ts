@@ -20,6 +20,7 @@ function fixture(): ZcodeSettings {
       models: { model: { limit: { context: 1000 } } } },
     opencodex: { models: { recursive: {} } },
     alias: { options: { baseURL: "https://127.0.0.1/v1" }, models: { recursive: {} } },
+    linkLocal: { options: { baseURL: "https://169.254.1.2/v1" }, models: { metadata: {} } },
     disabled: { enabled: false, models: { hidden: {} } },
   } }));
   return { command: ["/isolated-launcher"], home, workspace: "/workspace", settingsPath, scope: home };
@@ -164,7 +165,7 @@ describe("ZCode local agent", () => {
     expect(loadZcodeSettings(env)).toMatchObject({ home: settings.home, workspace: settings.workspace });
     expect(() => loadZcodeSettings({ ...env, HOME: settings.home })).toThrow("separate home");
   });
-  test("catalog excludes disabled/recursive entries and preserves canonical model identity", () => {
+  test("catalog excludes disabled, recursive and link-local entries and preserves canonical model identity", () => {
     const models = readZcodeModels(fixture());
     expect(models.map(m => m.id)).toEqual(["test/model"]);
     expect(models[0]?.contextWindow).toBe(1000);
