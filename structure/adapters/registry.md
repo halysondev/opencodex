@@ -310,7 +310,8 @@ wait, it reloads the refreshed generation before dispatch instead of using the e
 waiting on that shared official refresh races only its own abort signal and returns promptly without
 cancelling the refresh for sibling requests. Authenticated account operations also delete valid
 hidden new-account and reconnect drafts whose in-memory job disappeared after restart, while preserving active
-drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings,
+drafts and visible accounts. Active standalone drafts reserve their eventual account-limit slot without becoming
+visible; restart reconciliation releases abandoned reservations. Global Desktop controls are hidden for account-bound provider settings,
 transient completion failures keep the OAuth job authenticated for retry, and canonical
 global-default aliases remap to the account default before validation.
 Provider activation updates config and catalog without invalidating the quota view; entitlement

@@ -36,12 +36,15 @@ export function writeAccount(account: ZcodeAccount): void {
   writeFileSync(temp, JSON.stringify({ ...account, label }), { mode: 0o600, flag: "wx" });
   renameSync(temp, join(dir, "account.json"));
 }
-export function listAccounts(): ZcodeAccount[] {
+function storedAccounts(): ZcodeAccount[] {
   const dir = join(getConfigDir(), "zcode-accounts");
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter(id => ACCOUNT_ID.test(id)).slice(0, 100).flatMap(id => {
-    try { const account = readAccount(id); return account.draftFor || account.pending ? [] : [account]; } catch { return []; }
+    try { return [readAccount(id)]; } catch { return []; }
   });
+}
+export function listAccounts(): ZcodeAccount[] {
+  return storedAccounts().filter(account => !account.draftFor && !account.pending);
 }
 /** Remove hidden OAuth profiles whose owning in-memory job vanished after a process restart. */
 export function reconcileAccountDrafts(activeDraftIds: ReadonlySet<string>): void {
@@ -55,7 +58,9 @@ export function reconcileAccountDrafts(activeDraftIds: ReadonlySet<string>): voi
 }
 export function allocateAccount(label: string, replaceId?: string): ZcodeAccount {
   if (replaceId) readAccount(replaceId);
-  if (!replaceId && listAccounts().length >= 20) throw new Error("account_limit");
+  // A live standalone draft reserves its eventual slot without becoming a visible saved account.
+  // Restart reconciliation removes abandoned reservations before management routes allocate again.
+  if (!replaceId && storedAccounts().filter(account => !account.draftFor).length >= 20) throw new Error("account_limit");
   const account = { id: randomUUID(), label, ...(replaceId ? { draftFor: replaceId } : { pending: true as const }) };
   writeAccount(account);
   mkdirSync(accountProfile(account.id), { recursive: true, mode: 0o700 });

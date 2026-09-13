@@ -122,7 +122,8 @@ for a failed or expired login, cancel the draft and start again. Saved accounts 
 provider bindings persist across OpenCodex restarts; pending OAuth jobs do not. If a
 restart or closed panel leaves an unfinished account, the next authenticated account
 operation removes only that hidden orphaned draft; it never appears as a saved account or
-counts toward the 20-account limit.
+permanently consumes one of the 20 account slots. A live new-account login temporarily
+reserves its eventual slot so concurrent completions cannot exceed the limit.
 
 Native OAuth and Coding Plan credential setup run in the official installed ZCode host.
 The bridge only carries a short-lived authorization URL and safe status codes to the

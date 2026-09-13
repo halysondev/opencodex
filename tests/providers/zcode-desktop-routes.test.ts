@@ -494,6 +494,24 @@ test("reconnect reserves a hidden draft when twenty accounts are already saved",
   expect(await (await f.call("login", { label: "Overflow", runtime: "/runtime", workspace: "/project" })).json())
     .toMatchObject({ error: "account_limit" });
 });
+test("a hidden new-account draft reserves the last account slot only while its job is active", async () => {
+  const f = accountFixture();
+  for (let i = 0; i < 19; i++) {
+    f.hash(i.toString(16).padStart(64, "0"));
+    const account = await f.login({ label: `Account ${i}` });
+    await f.call("complete", { jobId: account.jobId });
+  }
+  expect(listAccounts()).toHaveLength(19);
+
+  f.hash("f".repeat(64));
+  const pending = await f.login({ label: "Pending" });
+  expect(listAccounts()).toHaveLength(19);
+  expect(await (await f.call("login", { label: "Overflow", runtime: "/runtime", workspace: "/project" })).json())
+    .toMatchObject({ error: "account_limit" });
+
+  await f.call("cancel", { jobId: pending.jobId });
+  expect(await f.login({ label: "Replacement" })).not.toHaveProperty("error");
+});
 test("partial catalog activation retries without login; busy and referenced accounts cannot be removed", async () => {
   const f = accountFixture(), a = await f.login();
   f.failCatalog(true);
