@@ -199,6 +199,7 @@ test("host execution is the default; a workspace is not a filesystem boundary", 
 });
 
 test("host bootstrap reads and writes outside workspace without touching the source profile", async () => {
+  if (process.platform !== "linux") return; // Managed Desktop prerequisites currently support Linux only.
   const { ZcodeClient } = await import("../../src/adapters/zcode/client");
   const { fileURLToPath } = await import("node:url");
   const home = join(root, "state"), workspace = join(root, "project");
