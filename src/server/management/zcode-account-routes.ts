@@ -190,6 +190,9 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
     if (path === "/api/zcode-accounts/remove") {
       const names = Object.keys(ctx.config.providers).filter(name => ctx.config.providers[name]?.zcodeAccountId === id);
       const { providers: _providers, ...rest } = ctx.config;
+      const remainingProviders = Object.fromEntries(
+        Object.entries(ctx.config.providers).filter(([name]) => !names.includes(name)),
+      );
       const namespaces = new Set(names.flatMap(name => {
         const provider = ctx.config.providers[name];
         const alias = provider?.alias?.trim();
@@ -198,7 +201,7 @@ export async function handleZcodeAccountRoutes(ctx: ManagementContext, deps = se
           .map(value => value.trim());
         return [name, ...(alias ? [alias] : []), ...modelAliases];
       }).map(name => name.toLowerCase()));
-      if (configReferencesNamespaces(rest, namespaces)) return fail("account_referenced");
+      if (configReferencesNamespaces({ ...rest, providers: remainingProviders }, namespaces)) return fail("account_referenced");
       // Revoke first. A failed config/catalog save is explicit and cannot silently use another account.
       await disconnectDesktop(id);
       withConfigMutationLockSync(() => {

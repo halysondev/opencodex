@@ -18,7 +18,7 @@ const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_
 export interface ZcodeAdapterDeps {
   settings?: () => ZcodeSettings;
   client?: (settings: ZcodeSettings) => Client;
-  refreshAccount?: (id: string) => Promise<void>;
+  refreshAccount?: (id: string) => Promise<boolean | void>;
   timeoutMs?: number;
 }
 
@@ -31,14 +31,14 @@ let reservations = 0;
 const MAX_RESERVATIONS = 32;
 const MAX_RESERVATIONS_PER_SCOPE = 24;
 /** Stop only this caller's wait; the official refresh may be shared by another request. */
-function waitForSharedRefresh(work: Promise<void>, signal?: AbortSignal): Promise<void> {
+function waitForSharedRefresh<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return work;
   if (signal.aborted) { void work.catch(() => {}); return Promise.reject(new Error(CANCELLED_BEFORE_DISPATCH)); }
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(new Error(CANCELLED_BEFORE_DISPATCH));
     signal.addEventListener("abort", onAbort, { once: true });
     work.then(
-      () => { signal.removeEventListener("abort", onAbort); resolve(); },
+      value => { signal.removeEventListener("abort", onAbort); resolve(value); },
       error => { signal.removeEventListener("abort", onAbort); reject(error); },
     );
   });
@@ -202,10 +202,11 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
       const cancelled = () => stop();
       try {
         if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
-        if (provider.zcodeAccountId && !deps.settings) {
+        const refreshSavedAccount = async (): Promise<boolean> => {
+          if (!provider.zcodeAccountId || (deps.settings && !deps.refreshAccount)) return false;
           try {
             const refresh = (deps.refreshAccount ?? refreshAccount)(provider.zcodeAccountId);
-            await waitForSharedRefresh(refresh, incoming.abortSignal);
+            return (await waitForSharedRefresh(refresh, incoming.abortSignal)) === true;
           }
           catch (error) {
             if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
@@ -213,21 +214,36 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
               ? error.message : "account_refresh_failed";
             throw new Error(code);
           }
-        }
+        };
+        await refreshSavedAccount();
         let settings: ZcodeSettings;
         try { settings = (deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))(); }
         catch { throw new Error("ZCode native execution is unavailable. Configure the isolated launcher, home, workspace and explicit opt-in."); }
         if (provider.authMode !== "local") throw new Error("ZCode requires local authentication mode; log in using the isolated ZCode client.");
-        const model = readZcodeModels(settings).find(item => item.id === parsed.modelId);
-        if (!model) throw new Error("ZCode model is unavailable in the isolated settings.");
+        if (!readZcodeModels(settings).some(item => item.id === parsed.modelId)) {
+          throw new Error("ZCode model is unavailable in the isolated settings.");
+        }
         if (parsed.options.toolChoice && parsed.options.toolChoice !== "auto") {
           throw new Error("ZCode owns its tools and does not support client tool_choice constraints.");
         }
         release = await lock(settings.lockKey, incoming.abortSignal);
-        // A queued turn must not resurrect a revoked Desktop connection or old login.
-        if ((deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))().scope !== settings.scope) {
+        // Reject a reconnect/revocation that happened while waiting. Only the refresh owned below
+        // may advance the generation once this turn holds the physical-profile lock.
+        const queued = (deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))();
+        if (queued.lockKey !== settings.lockKey || queued.scope !== settings.scope) {
           throw new Error("ZCode connection or profile changed while this turn was queued.");
         }
+        // The refresh cache can expire while this turn waits behind a long native child. Refresh
+        // again under the stable profile lock, then reload the connection before dispatch.
+        const refreshedAfterQueue = await refreshSavedAccount();
+        const current = (deps.settings ?? (() => loadZcodeSettings(process.env, provider.zcodeAccountId)))();
+        if (current.lockKey !== settings.lockKey
+          || (!refreshedAfterQueue && current.scope !== queued.scope)) {
+          throw new Error("ZCode connection or profile changed while this turn was queued.");
+        }
+        settings = current;
+        const model = readZcodeModels(settings).find(item => item.id === parsed.modelId);
+        if (!model) throw new Error("ZCode model is unavailable in the isolated settings.");
         const scope = createHash("sha256").update(JSON.stringify([
           settings.scope, provider.baseUrl, parsed._reasoningReplayScope?.current?.providerName,
           parsed._cursorIdentityScope, parsed.modelId,

@@ -404,21 +404,26 @@ account scope before OAuth begins. Completion
 checks identity and protocol before registering an account-bound provider and converging the catalog without
 depending on the caller's stale configuration snapshot; any successful activation treats the secondary local account-list refresh as best effort
 independently of a parent callback; transient completion errors keep the job authenticated
-for polling retry, and a partial result stays visible and retryable. No default selection or inference is
+for polling retry. If partial completion succeeds server-side but the local account refresh
+fails, the pane retains the finished job ID and retries idempotent `/complete` directly
+instead of hiding recovery or repeating OAuth. No default selection or inference is
 part of this flow. When these controls run inside an existing provider's Settings tab,
 every successful provider/catalog mutation notifies the Providers owner to reload config and
-refresh model rows; partial activation does not leave the rail stale. Account-bound provider
+refresh model rows; a removal persisted before a catalog convergence failure performs the
+same invalidation on its bounded partial error. Account-bound provider
 settings hide the unrelated global Desktop controls.
 Reconnect retains custom provider settings and rejects a different identity.
 Rename changes only generated labels; removal refuses clients whose direct bootstrap is still exiting and recognizes generated
-provider names plus configured provider/model aliases in routed selectors before deleting an account.
+provider names plus configured provider/model aliases in routed selectors across both top-level routing settings
+and every provider that remains configured before deleting an account.
 In-progress
 OAuth jobs expire and do not survive restart; saved account profiles and bindings do.
 Authenticated account operations also prune valid hidden reconnect drafts whose transient jobs
 disappeared on restart, without touching active drafts or visible accounts. `src/server/management/zcode-desktop-routes.ts`
 serializes connect, activation and disconnect across their complete provider/catalog
 transition; disconnect disables the legacy provider and converges its catalog rows while
-preserving customized settings. Activation readiness filters the Desktop roster through
+preserving customized settings. Persisted `configured` state keeps Disconnect available even
+when a missing prerequisite makes the connection temporarily unusable. Activation readiness filters the Desktop roster through
 the same `selectedModels` and `disabledModels` policy as convergence, so an intentionally
 hidden row is not a false partial failure. Its optional verification action uses protocol metadata
 only and cannot start inference or tools.

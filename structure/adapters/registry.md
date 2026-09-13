@@ -304,7 +304,9 @@ Native tools still run on the host by default; optional OS sandboxing is indepen
 profile separation and does not turn the latter into a security boundary. Refresh failures
 cross the adapter boundary only as bounded public codes, never filesystem or account paths. An
 expired refresh reserves the account before waiting for an active official turn to close, then
-revalidates account/connection state and refreshes immediately before queued dispatch. A caller
+revalidates account/connection state. The adapter checks the official refresh both before joining
+the stable profile queue and again after acquiring it; if the short cache expired during a long
+wait, it reloads the refreshed generation before dispatch instead of using the earlier snapshot. A caller
 waiting on that shared official refresh races only its own abort signal and returns promptly without
 cancelling the refresh for sibling requests. Authenticated account operations also delete valid
 hidden reconnect drafts whose in-memory job disappeared after restart, while preserving active

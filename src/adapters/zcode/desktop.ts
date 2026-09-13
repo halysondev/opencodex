@@ -217,7 +217,8 @@ export function desktopStatus(accountId?: string) {
     try { resolveDesktopRuntime(connection.runtime); validateDesktopWorkspace(connection.workspace, accountId); }
     catch (e) { issue = e instanceof DesktopSetupError ? e.code : "connection_invalid"; }
   }
-  return { ...(accountId ? { accountId } : {}), connected: connection?.connected === true && !issue, issue, runtimes,
+  return { ...(accountId ? { accountId } : {}), configured: connection?.connected === true,
+    connected: connection?.connected === true && !issue, issue, runtimes,
     runtime: connection?.runtime ?? runtimes[0] ?? "", workspace: connection?.workspace ?? defaultDesktopWorkspace(accountId),
     models: connection?.models ?? [], sandbox: desktopSandboxEnabled(), platform: process.platform };
 }

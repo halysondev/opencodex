@@ -487,6 +487,36 @@ test("account removal recognizes case-insensitive provider and model aliases in 
   expect(listAccounts()).toEqual([]);
 });
 
+test("account removal scans routed selectors in providers that will remain configured", async () => {
+  const f = accountFixture(), account = await f.login();
+  const ready = await (await f.call("complete", { jobId: account.jobId })).json();
+  const target = f.ctx.config.providers[ready.providerName];
+  target.alias = "personal";
+  target.modelAliases = { [models[0]!.id]: "personal-glm" };
+  f.ctx.config.providers.reviewer = {
+    adapter: "openai-responses", baseUrl: "https://reviewer.example.invalid/v1",
+  };
+  for (const selector of [
+    `${ready.providerName}/${models[0]!.id}`,
+    `PeRsOnAl/${models[0]!.id}`,
+    "PeRsOnAl-GlM",
+  ]) {
+    f.ctx.config.providers.reviewer.autoReviewModel = selector;
+    expect(await (await f.call("remove", { accountId: account.accountId })).json())
+      .toEqual({ error: "account_referenced" });
+    expect(f.ctx.config.providers[ready.providerName]).toBeDefined();
+  }
+  delete f.ctx.config.providers.reviewer.autoReviewModel;
+  f.ctx.config.providers.reviewer.autoReviewModelOverrides = {
+    [models[1]!.id]: `${ready.providerName}/${models[1]!.id}`,
+  };
+  expect(await (await f.call("remove", { accountId: account.accountId })).json())
+    .toEqual({ error: "account_referenced" });
+  delete f.ctx.config.providers.reviewer.autoReviewModelOverrides;
+  expect(await (await f.call("remove", { accountId: account.accountId })).json()).toEqual({ ok: true });
+  expect(f.ctx.config.providers.reviewer).toBeDefined();
+});
+
 test("rename preserves custom model labels and saved accounts survive config reload", async () => {
   const f = accountFixture(), a = await f.login();
   const ready = await (await f.call("complete", { jobId: a.jobId })).json();

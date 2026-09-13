@@ -4,7 +4,7 @@ import { useT } from "../i18n/shared";
 import type { ProviderAdditionMetadata } from "../provider-addition";
 
 interface Status {
-  connected: boolean; sandbox?: boolean; issue?: string; runtimes: string[]; runtime: string; workspace: string;
+  connected: boolean; configured?: boolean; sandbox?: boolean; issue?: string; runtimes: string[]; runtime: string; workspace: string;
   activation?: string; providerName?: string; error?: string;
   models: Array<{ id: string; label: string }>;
 }
@@ -127,7 +127,7 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onProviderState
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {onBack && <button type="button" className="btn btn-ghost" disabled={busy} onClick={onBack}>{t("zcodeDesktop.back")}</button>}
       {(!status?.connected || changed) && <button type="button" className="btn btn-primary" disabled={busy || !consent || !runtime || !workspace} onClick={() => void perform("connect")}>{t("zcodeDesktop.connect")}</button>}
-      {status?.connected && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void perform("disconnect")}>{t("zcodeDesktop.disconnect")}</button>}
+      {(status?.configured || status?.connected) && <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void perform("disconnect")}>{t("zcodeDesktop.disconnect")}</button>}
       {partial && !changed && <button type="button" className="btn btn-primary" disabled={busy || !consent} onClick={() => void perform("activate")}>{t("zcodeDesktop.retryActivation")}</button>}
     </div>
     {status?.connected && !changed && <>

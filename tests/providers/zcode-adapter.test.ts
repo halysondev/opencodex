@@ -130,6 +130,43 @@ describe("ZCode local agent", () => {
     expect(children).toBe(0);
     expect(events.at(-1)?.type).toBe("error");
   });
+  test("saved accounts refresh again after waiting in the physical-profile queue", async () => {
+    const before = fixture();
+    const after = { ...before, scope: before.scope + ":refreshed" };
+    const first = new FakeClient("hang");
+    const firstController = new AbortController();
+    const firstTurn = run(before, first, request(), firstController.signal, 2_000);
+    await Bun.sleep(5);
+    expect(first.calls.some(call => call.method === "session/send")).toBe(true);
+
+    let refreshCalls = 0;
+    let refreshed = false;
+    let dispatchedScope = "";
+    const second = new FakeClient();
+    const adapter = createZcodeAdapter({ ...provider, zcodeAccountId: crypto.randomUUID() }, {
+      settings: () => refreshed ? after : before,
+      refreshAccount: async () => {
+        refreshCalls++;
+        if (refreshCalls === 2) refreshed = true;
+        return refreshed;
+      },
+      client: settings => { dispatchedScope = settings.scope; return second; },
+      timeoutMs: 2_000,
+    });
+    const events: AdapterEvent[] = [];
+    const secondTurn = adapter.runTurn!(request(), { headers: new Headers(),
+      translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
+    await Bun.sleep(10);
+    expect(refreshCalls).toBe(1);
+    expect(second.calls).toEqual([]);
+
+    firstController.abort();
+    expect((await firstTurn).at(-1)?.type).toBe("incomplete");
+    await secondTurn;
+    expect(refreshCalls).toBe(2);
+    expect(dispatchedScope).toBe(after.scope);
+    expect(events.at(-1)?.type).toBe("done");
+  });
   test("has no direct HTTP inference path or client-tool capability", () => {
     const adapter = createZcodeAdapter(provider);
     expect(adapter.fetchResponse).toBeUndefined();

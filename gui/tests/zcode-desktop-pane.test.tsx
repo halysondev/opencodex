@@ -80,6 +80,13 @@ function button(text: string): HTMLButtonElement {
 async function click(element: HTMLElement) {
   await act(async () => { element.dispatchEvent(new win.MouseEvent("click", { bubbles: true })); });
 }
+async function waitUntil(condition: () => boolean, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for the UI condition");
+    await act(async () => { await Bun.sleep(20); });
+  }
+}
 test("Desktop connect requires explicit consent and does not automatically spend model quota", async () => {
   await mountPane();
   expect(button("Connect Desktop").disabled).toBe(true);
@@ -118,9 +125,12 @@ test("a successful HTTP response with a failed protocol recheck shows the action
 });
 
 test("incompatible Node preflight shows safe actionable guidance without connecting", async () => {
-  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async () => Response.json({
-    connected: false, issue: "node_incompatible", runtimes: [], runtime: "", workspace: "/project", models: [],
-  }) });
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    requests.push({ path });
+    return Response.json({ configured: true, connected: false, issue: "node_incompatible", runtimes: [],
+      runtime: "/installed/ZCode", workspace: "/project", models: [] });
+  } });
   await mountPane();
   const alert = host.querySelector('[role="alert"]')!;
   expect(alert.textContent).toContain("Node.js 24");
@@ -129,6 +139,9 @@ test("incompatible Node preflight shows safe actionable guidance without connect
   expect(alert.textContent).not.toContain("runtime_failed");
   expect(host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
   expect(button("Connect Desktop").disabled).toBe(true);
+  expect(button("Disconnect").disabled).toBe(false);
+  await click(button("Disconnect"));
+  expect(requests.some(request => request.path.endsWith("/disconnect"))).toBe(true);
 });
 
 test("partial activation remains visible and retries without a second protocol connection", async () => {
@@ -279,7 +292,7 @@ test("saved account UI completes official login then shows provider/catalog read
   });
   expect(button("Add account").disabled).toBe(false);
   await act(async () => { button("Add account").click(); });
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  await waitUntil(() => complete === 1 && section.textContent?.includes("Personal fixture") === true);
   expect(complete).toBe(1);
   expect(section.textContent).toContain("Personal fixture");
   expect(section.textContent).toContain("provider enabled · models published");
@@ -315,12 +328,57 @@ test("saved account completion preserves an HTTP-200 partial activation", async 
   });
   await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
   await click(button("Add account"));
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  await waitUntil(() => completed && host.textContent?.includes("Partial fixture") === true);
   expect(host.textContent).toContain("Partial fixture");
   expect(host.textContent).toContain("catalog_update_failed");
   expect(host.textContent).not.toContain("native_oauth_failed");
   expect(closeCalls).toBe(0);
   expect(mutationCalls).toBe(1);
+});
+
+test("partial completion keeps its finished job recoverable when the account refresh fails", async () => {
+  let completions = 0;
+  let failNextRefresh = false;
+  const prior = globalThis.fetch;
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    requests.push({ path: url.pathname, body: options?.body ? JSON.parse(String(options.body)) : undefined });
+    if (url.pathname.endsWith("/login")) return Response.json({ jobId: "recovery-job", accountId: "recovery-account",
+      phase: options?.method === "POST" ? "waiting" : "authenticated" });
+    if (url.pathname.endsWith("/complete")) {
+      completions++;
+      if (completions === 1) {
+        failNextRefresh = true;
+        return Response.json({ activation: "catalog_pending", error: "catalog_update_failed" });
+      }
+      return Response.json({ activation: "ready", providerName: "zcode-recovered" });
+    }
+    if (failNextRefresh) {
+      failNextRefresh = false;
+      return Response.json({ error: "refresh_failed" }, { status: 500 });
+    }
+    return Response.json({ accounts: completions > 1 ? [{ id: "recovery-account", label: "Recovery fixture",
+      activation: "ready", providerName: "zcode-recovered", busy: false }] : [] });
+  } });
+  await mountPane();
+  const section = host.querySelector("h3")!.closest("section")!;
+  const input = section.querySelector('input:not([type="checkbox"])') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")!.set!.call(input, "Recovery fixture");
+    input.dispatchEvent(new win.Event("input", { bubbles: true }));
+  });
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Add account"));
+  await waitUntil(() => completions === 1 && host.textContent?.includes("catalog_update_failed") === true
+    && [...section.querySelectorAll("button")].some(item => item.textContent === "Retry activation"));
+  expect(requests.filter(request => request.path.endsWith("/login") && request.body)).toHaveLength(1);
+  await click(button("Retry activation"));
+  await waitUntil(() => completions === 2 && host.textContent?.includes("Recovery fixture") === true);
+  expect(requests.filter(request => request.path.endsWith("/login") && request.body)).toHaveLength(1);
+  expect(host.textContent).toContain("provider enabled · models published");
+  expect(mutationCalls).toBe(2);
+  expect(additions).toEqual([{ name: "zcode-recovered", adapter: "zcode" }]);
 });
 
 test("saved account activation refreshes the parent only after provider and catalog readiness", async () => {
@@ -403,6 +461,30 @@ test("saved account rename and removal refresh parent provider state", async () 
   expect(mutationCalls).toBe(2);
 });
 
+test("partial account removal refreshes parent state after catalog convergence fails", async () => {
+  let partialRemoval = false;
+  const prior = globalThis.fetch;
+  Object.defineProperty(win, "confirm", { configurable: true, value: () => true });
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    if (url.pathname.endsWith("/remove")) {
+      partialRemoval = true;
+      return Response.json({ error: "catalog_update_failed" }, { status: 400 });
+    }
+    return Response.json({ accounts: [{ id: "saved", label: "Saved fixture",
+      activation: partialRemoval ? "provider_pending" : "ready",
+      ...(partialRemoval ? {} : { providerName: "zcode-saved" }), busy: false }] });
+  } });
+  await mountPane(false);
+  const section = host.querySelector("h3")!.closest("section")!;
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Remove account"));
+  await waitUntil(() => mutationCalls === 1 && host.textContent?.includes("catalog_update_failed") === true);
+  expect(partialRemoval).toBe(true);
+  expect(section.textContent).toContain("Account setup incomplete");
+});
+
 test("transient completion failure retries without OAuth and stays finished after a local refresh failure", async () => {
   let completions = 0;
   let failNextRefresh = false;
@@ -430,10 +512,7 @@ test("transient completion failure retries without OAuth and stays finished afte
   });
   await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
   await click(button("Add account"));
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
-  expect(completions).toBe(1);
-  expect(host.textContent).toContain("busy");
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  await waitUntil(() => completions === 2 && button("Add account").disabled === false);
   expect(completions).toBe(2);
   expect(button("Add account").disabled).toBe(false);
   expect(host.textContent).not.toContain("native_oauth_failed");

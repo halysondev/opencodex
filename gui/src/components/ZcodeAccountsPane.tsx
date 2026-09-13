@@ -36,6 +36,31 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
     const value = await read("");
     setAccounts(value.accounts ?? []);
   }, [read]);
+  const completeJob = useCallback(async (current: Job, stopped: () => boolean = () => false) => {
+    let result: Activation;
+    try {
+      result = await read("/complete", { jobId: current.jobId }) as Activation;
+    } catch (e) {
+      if (!stopped()) {
+        setError(e instanceof Error ? e.message : "native_oauth_failed");
+        setJob({ ...current, phase: "authenticated", url: undefined });
+      }
+      return;
+    }
+    if (stopped()) return;
+    onProviderStateMutationRef.current?.();
+    const ready = result.activation === "ready";
+    setError(ready ? "" : "catalog_update_failed");
+    let refreshFailed = false;
+    try { await refresh(); } catch { refreshFailed = true; }
+    if (stopped()) return;
+    // A partial server completion is idempotent. Retain its finished job id when the account row
+    // could not be refreshed so the user can retry /complete directly without repeating OAuth.
+    setJob({ ...current, phase: !ready && refreshFailed ? "recovery" : "finished", url: undefined });
+    if (ready && result.providerName && onProviderActivatedRef.current) {
+      onProviderActivatedRef.current(result.providerName);
+    }
+  }, [read, refresh]);
   useEffect(() => {
     let stopped = false;
     void read("").then(value => { if (!stopped) setAccounts(value.accounts ?? []); })
@@ -53,32 +78,15 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
         const next: Job = await read("/login?jobId=" + encodeURIComponent(jobId));
         if (stopped) return;
         if (next.phase === "authenticated") {
-          let result: Activation;
-          try {
-            result = await read("/complete", { jobId: next.jobId }) as Activation;
-          } catch (e) {
-            if (!stopped) {
-              setError(e instanceof Error ? e.message : "native_oauth_failed");
-              setJob({ ...next, phase: "authenticated", url: undefined });
-            }
-            return;
-          }
-          if (stopped) return;
-          onProviderStateMutationRef.current?.();
-          setJob({ ...next, phase: "finished", url: undefined });
-          const ready = result.activation === "ready";
-          setError(ready ? "" : "catalog_update_failed");
-          const activation = ready && result.providerName && onProviderActivatedRef.current
-            ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
-          try { await refresh(); } catch { /* Server completion is authoritative; this refresh is local only. */ }
-          if (!stopped && activation) activation.notify(activation.name);
+          await completeJob(next, () => stopped);
         } else { setJob(next); if (next.phase === "failed") { setError(next.error || "native_oauth_failed"); await refresh(); } }
       } catch (e) { if (!stopped) { setError(e instanceof Error ? e.message : "native_oauth_failed"); setJob(j => j ? { ...j, phase: "failed", url: undefined } : null); } }
       finally { pending = false; }
     };
+    void poll();
     const timer = setInterval(() => void poll(), 2000);
     return () => { stopped = true; clearInterval(timer); };
-  }, [jobId, jobPhase, consent, read, refresh]);
+  }, [jobId, jobPhase, consent, read, refresh, completeJob]);
   const action = async (path: string, body: Record<string, unknown>) => {
     if ((!consent && path !== "/cancel") || busy) return;
     setBusy(true); setError("");
@@ -95,10 +103,24 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
         ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
       try { await refresh(); } catch (error) { if (path !== "/activate") throw error; }
       if (activation) activation.notify(activation.name);
-    } catch (e) { setError(e instanceof Error ? e.message : "native_oauth_failed"); }
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "native_oauth_failed";
+      // Removal revokes and persists provider state before catalog convergence. Its bounded
+      // partial error must still invalidate the parent and refresh this account list.
+      if (path === "/remove" && code === "catalog_update_failed") {
+        onProviderStateMutationRef.current?.();
+        try { await refresh(); } catch { /* The mutation callback remains authoritative. */ }
+      }
+      setError(code);
+    }
     finally { setBusy(false); }
   };
-  const loggingIn = !!job && job.phase !== "finished";
+  const retryCompletion = async () => {
+    if (!job || job.phase !== "recovery" || !consent || busy) return;
+    setBusy(true); setError("");
+    try { await completeJob(job); } finally { setBusy(false); }
+  };
+  const loggingIn = !!job && ["waiting", "authenticated"].includes(job.phase);
   return <section style={{ display: "grid", gap: 8 }}>
     <h3>{t("zcodeAccounts.title")}</h3>
     <p className="muted text-label">{t("zcodeAccounts.help")}</p>
@@ -110,10 +132,15 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
     </label>
     <button type="button" className="btn" disabled={!consent || busy || loggingIn || !label.trim() || !runtime || !workspace}
       onClick={() => void action("/login", { label, runtime, workspace })}>{t("zcodeAccounts.add")}</button>
-    {job && job.phase !== "finished" && <div role="status">
+    {job && ["waiting", "authenticated"].includes(job.phase) && <div role="status">
       <p>{t("zcodeAccounts.loginHint")}</p>
       {job.url && <a href={job.url} target="_blank" rel="noopener noreferrer">{t("zcodeAccounts.login")}</a>}
       <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void action("/cancel", { jobId: job.jobId })}>{t("common.cancel")}</button>
+    </div>}
+    {job?.phase === "recovery" && <div role="status">
+      <p>{t("zcodeAccounts.pending")}</p>
+      <button type="button" className="btn btn-primary" disabled={!consent || busy}
+        onClick={() => void retryCompletion()}>{t("zcodeDesktop.retryActivation")}</button>
     </div>}
     {error && <p role="alert">{t("zcodeAccounts.failed")} <code>{error}</code></p>}
     {accounts.some(account => account.activation === "ready") && <p className="muted text-label">{t("zcodeDesktop.restartNotice")}</p>}

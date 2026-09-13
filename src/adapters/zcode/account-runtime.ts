@@ -2,13 +2,13 @@ import { readAccount, accountProfile } from "./accounts";
 import { desktopAccountBusy, desktopStatus, waitForDesktopAccountIdle } from "./desktop";
 import { runNativeOAuth } from "./native-oauth";
 
-const refreshes = new Map<string, Promise<void>>();
+const refreshes = new Map<string, Promise<boolean>>();
 const refreshed = new Map<string, number>();
 export const accountRuntimeBusy = (id: string) => refreshes.has(id) || desktopAccountBusy(id);
 export const invalidateAccountRefresh = (id: string) => refreshed.delete(id);
 /** Refresh belongs to the official host, never a proxy OAuth/API implementation. */
-export async function refreshAccount(id: string): Promise<void> {
-  if ((refreshed.get(id) ?? 0) > Date.now()) return;
+export async function refreshAccount(id: string): Promise<boolean> {
+  if ((refreshed.get(id) ?? 0) > Date.now()) return false;
   const pending = refreshes.get(id); if (pending) return pending;
   const promise = (async () => {
     // Reserving `refreshes` before this await prevents another queued turn from starting a
@@ -30,7 +30,8 @@ export async function refreshAccount(id: string): Promise<void> {
     }
     if (identity !== account.subjectHash) throw new Error("account_identity_mismatch");
     refreshed.set(id, Date.now() + 60_000);
+    return true;
   })();
   refreshes.set(id, promise);
-  try { await promise; } finally { refreshes.delete(id); }
+  try { return await promise; } finally { refreshes.delete(id); }
 }

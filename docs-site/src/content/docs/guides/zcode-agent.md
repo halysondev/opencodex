@@ -60,6 +60,8 @@ For an existing provider, the same panel is in **Settings**. **Disconnect** revo
 connection, disables that provider and removes its models from the converged Codex catalog while
 preserving its customized settings for reconnection. It closes owned app-server children but does
 not log out of Desktop, delete Desktop conversations, or change ZCode Desktop's own configuration.
+A persisted connection still exposes **Disconnect** when a missing or incompatible prerequisite
+makes it temporarily unusable, so the user is never trapped in a stale configured state.
 A saved disconnected state also prevents an older environment-based setup from silently
 reactivating. Reconnect to refresh the model catalog after changing Desktop's model configuration.
 
@@ -103,13 +105,16 @@ clears it.
 and custom settings. A different identity is rejected; use **Add account** for it instead.
 Duplicate saved identities are rejected too. **Rename** updates generated picker labels,
 not customized model names. **Remove** deletes OpenCodex's saved profile and provider, not
-ZCode Desktop's original profile. Remove references from defaults, combos and subagent routes
-before removing an account; provider aliases count as references too. Wait for active tasks and
+ZCode Desktop's original profile. Remove references from defaults, combos, subagent routes and
+other providers' routing/reviewer selectors before removing an account; provider and model aliases
+count as references too. Wait for active tasks and
 their native child processes to finish. No task is stopped automatically.
 
 A protocol/registration/catalog failure is displayed as pending, not complete success.
 Use **Retry provider activation** for a saved connection whose catalog is pending. A
 transient completion error keeps the authenticated job and the open panel retries it;
+if server-side completion is partial and the account-list refresh also fails, the same button
+retries that finished job directly without starting OAuth again;
 for a failed or expired login, cancel the draft and start again. Saved accounts and
 provider bindings persist across OpenCodex restarts; pending OAuth jobs do not. If a
 restart or closed panel leaves an unfinished account, the next authenticated account
@@ -118,9 +123,10 @@ operation removes only that orphaned draft.
 Native OAuth and Coding Plan credential setup run in the official installed ZCode host.
 The bridge only carries a short-lived authorization URL and safe status codes to the
 browser. Profiles stay in the proxy's private configuration directory; they are not
-imported into the browser or pooled. When the short refresh cache expires behind a running
-task, the next task waits for that profile to become idle and then asks the official runtime
-to refresh before dispatch. The same host-access / optional-sandbox policy described below
+imported into the browser or pooled. The bridge checks the short refresh cache before queueing and
+again after the profile becomes idle; if it expires behind a running task, the next task asks the
+official runtime to refresh and reloads the resulting generation before dispatch. The same
+host-access / optional-sandbox policy described below
 applies. Setup is Linux-only and needs a dashboard-session principal, not just an admin API
 token.
 

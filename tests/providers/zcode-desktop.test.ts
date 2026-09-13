@@ -111,6 +111,16 @@ describe("managed ZCode Desktop", () => {
     if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(() => loadDesktopSettings()).toThrow("disconnected");
   });
+  test("status retains configured state when prerequisites make the connection unusable", () => {
+    const directory = join(process.env.OPENCODEX_HOME!, "zcode-desktop");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "connection.json"), JSON.stringify({
+      version: 1, connected: true, generation: crypto.randomUUID(), runtime: "/missing/runtime",
+      workspace: root, models: [],
+    }), { mode: 0o600 });
+    expect(desktopStatus()).toMatchObject({ configured: true, connected: false });
+    expect(desktopStatus().issue).toBeDefined();
+  });
   test("managed model discovery reads only the public cache, not Desktop credentials", () => {
     const result = readZcodeModels({ command: [], home: root, workspace: "/workspace", settingsPath: "/does/not/exist",
       scope: "desktop:test", desktopModels: [{ id: "builtin:zai/model", providerId: "builtin:zai", modelId: "model", label: "Model" }] });
@@ -372,6 +382,39 @@ test("saved account routing and settings are explicit and never fall back to Des
   await disconnectDesktop(a.id);
   expect(desktopRoutingModelIds(a.id)).toEqual([]);
   expect(desktopRoutingModelIds(b.id)).toEqual(["builtin:zai/work-model"]);
+});
+
+test("Desktop connection generations share a stable physical-profile lock", () => {
+  if (process.platform !== "linux") return;
+  const oldPath = process.env.PATH;
+  const oldSandbox = process.env.OCX_ZCODE_SANDBOX;
+  process.env.PATH = "/usr/bin:/bin";
+  process.env.OCX_ZCODE_SANDBOX = "0";
+  try {
+    const account = allocateAccount("Lock fixture");
+    const profile = join(accountProfile(account.id), ".zcode/v2");
+    mkdirSync(profile, { recursive: true });
+    writeFileSync(join(profile, "config.json"), "{}", { mode: 0o600 });
+    const resources = join(root, "lock-app/resources");
+    mkdirSync(join(resources, "glm"), { recursive: true });
+    writeFileSync(join(resources, "app.asar"), "fixture");
+    const runtime = join(resources, "glm/zcode.cjs");
+    writeFileSync(runtime, "");
+    const workspace = join(root, "lock-workspace");
+    mkdirSync(workspace);
+    const connectionPath = join(accountRoot(account.id), "connection.json");
+    const connection = { version: 1, connected: true, generation: crypto.randomUUID(), runtime, workspace,
+      models: [{ id: "builtin:zai/model", providerId: "builtin:zai", modelId: "model", label: "Model" }] };
+    writeFileSync(connectionPath, JSON.stringify(connection), { mode: 0o600 });
+    const before = loadDesktopSettings(account.id)!;
+    writeFileSync(connectionPath, JSON.stringify({ ...connection, generation: crypto.randomUUID() }), { mode: 0o600 });
+    const after = loadDesktopSettings(account.id)!;
+    expect(after.lockKey).toBe(before.lockKey);
+    expect(after.scope).not.toBe(before.scope);
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;
+    if (oldSandbox === undefined) delete process.env.OCX_ZCODE_SANDBOX; else process.env.OCX_ZCODE_SANDBOX = oldSandbox;
+  }
 });
 
 test("ZCode catalog advertises sidecar-backed attachments for legacy and account providers", async () => {
