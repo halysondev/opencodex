@@ -39,8 +39,11 @@ export async function handleZcodeDesktopRoutes(ctx: ManagementContext, deps = se
     }
     if (url.pathname === "/api/zcode-desktop/disconnect" && req.method === "POST") {
       if (activating) return jsonResponse({ error: "busy" }, 409);
-      await deps.disconnectDesktop(); invalidateCodexModelsCache(); clearGatherRoutedModelsInflight();
-      return jsonResponse(await deactivateDesktopProvider(ctx, deps.desktopStatus(), deps.readDesktopCatalogSlugs));
+      activating = true;
+      try {
+        await deps.disconnectDesktop(); invalidateCodexModelsCache(); clearGatherRoutedModelsInflight();
+        return jsonResponse(await deactivateDesktopProvider(ctx, deps.desktopStatus(), deps.readDesktopCatalogSlugs));
+      } finally { activating = false; }
     }
     if (url.pathname === "/api/zcode-desktop/test" && req.method === "POST") {
       if (testing) return jsonResponse({ error: "busy" }, 409);

@@ -297,7 +297,15 @@ closed, never to the legacy Desktop profile or another account. Legacy unbound `
 retains its previous profile. Account providers do not participate in an implicit pool.
 Native tools still run on the host by default; optional OS sandboxing is independent of
 profile separation and does not turn the latter into a security boundary. Refresh failures
-cross the adapter boundary only as bounded public codes, never filesystem or account paths. A caller waiting on the shared official refresh races only its own abort signal and returns promptly without cancelling that refresh for sibling requests. Authenticated account operations also delete valid hidden reconnect drafts whose in-memory job disappeared after restart, while preserving active drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings, transient completion failures keep the OAuth job authenticated for retry, and canonical global-default aliases remap to the account default before validation.
+cross the adapter boundary only as bounded public codes, never filesystem or account paths. An
+expired refresh reserves the account before waiting for an active official turn to close, then
+revalidates account/connection state and refreshes immediately before queued dispatch. A caller
+waiting on that shared official refresh races only its own abort signal and returns promptly without
+cancelling the refresh for sibling requests. Authenticated account operations also delete valid
+hidden reconnect drafts whose in-memory job disappeared after restart, while preserving active
+drafts and visible accounts. Global Desktop controls are hidden for account-bound provider settings,
+transient completion failures keep the OAuth job authenticated for retry, and canonical
+global-default aliases remap to the account default before validation.
 Advanced model descriptors reject loopback, private and link-local destinations before the
 official runtime receives them.
 

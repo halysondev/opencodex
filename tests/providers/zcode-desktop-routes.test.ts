@@ -186,6 +186,26 @@ test("disconnect disables the provider, preserves customization and removes its 
   expect(ctx.config.defaultProvider).toBe(beforeDefault);
 });
 
+test("Desktop disconnect holds the activation transition lock until cleanup finishes", async () => {
+  const f = fixture();
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  f.deps.disconnectDesktop = async () => { entered(); await gate; };
+  const disconnect = handleZcodeDesktopRoutes(
+    context("/api/zcode-desktop/disconnect", {}, "gui-session"), f.deps,
+  );
+  await started;
+  const overlapping = await handleZcodeDesktopRoutes(context("/api/zcode-desktop/connect", {
+    consent: true, runtime: "/installed/ZCode", workspace: "/project",
+  }, "gui-session"), f.deps);
+  expect(overlapping?.status).toBe(409);
+  expect(await overlapping?.json()).toEqual({ error: "busy" });
+  expect(f.calls()).toBe(0);
+  release();
+  expect((await disconnect)?.status).toBe(200);
+});
+
 test("partial disconnect cleanup is explicit and idempotently retryable", async () => {
   const f = fixture(), ctx = context("/api/zcode-desktop/disconnect", {}, "gui-session");
   ctx.config.providers.zcode = { adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai", disabled: false };

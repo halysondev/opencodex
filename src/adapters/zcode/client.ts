@@ -30,7 +30,38 @@ export function zcodeChildEnvironment(settings: ZcodeSettings, source: NodeJS.Pr
   return result;
 }
 const desktopClients = new Set<ZcodeClient>();
+const accountIdleWaiters = new Map<string, Set<() => void>>();
 export const hasZcodeAccountClients = (id: string) => [...desktopClients].some(client => client.accountId === id);
+function notifyAccountIdle(id?: string): void {
+  if (!id || hasZcodeAccountClients(id)) return;
+  const waiters = accountIdleWaiters.get(id);
+  accountIdleWaiters.delete(id);
+  for (const resolve of waiters ?? []) resolve();
+}
+/** Wait for every official app-server child using this saved profile to close. */
+export function waitForZcodeAccountClients(id: string, signal?: AbortSignal): Promise<void> {
+  if (!hasZcodeAccountClients(id)) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise<void>((resolve, reject) => {
+    const waiters = accountIdleWaiters.get(id) ?? new Set<() => void>();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true; signal?.removeEventListener("abort", abort);
+      waiters.delete(finish); if (!waiters.size) accountIdleWaiters.delete(id);
+      resolve();
+    };
+    const abort = () => {
+      if (settled) return;
+      settled = true; waiters.delete(finish); if (!waiters.size) accountIdleWaiters.delete(id);
+      reject(signal?.reason);
+    };
+    waiters.add(finish); accountIdleWaiters.set(id, waiters);
+    signal?.addEventListener("abort", abort, { once: true });
+    // Registration and the second check are synchronous, closing the check/subscribe race.
+    if (!hasZcodeAccountClients(id)) finish();
+  });
+}
 export async function closeZcodeDesktopClients(): Promise<void> {
   await Promise.all([...desktopClients].filter(client => !client.accountId).map(client => client.disconnect()));
 }
@@ -156,5 +187,6 @@ export class ZcodeClient {
     clearTimeout(killTimer);
     this.child.stdout.destroy();
     this.child.stderr.destroy();
+    notifyAccountIdle(this.accountId);
   }
 }

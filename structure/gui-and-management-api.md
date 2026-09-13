@@ -401,8 +401,8 @@ origins record no limiter state, and a valid grant redeems even from a throttled
 activation retry, rename and removal. These routes require a GUI-session principal; mutations
 require explicit consent. The official OAuth job uses a fresh private profile. Canonical aliases of the displayed managed workspace are rebound and validated in the eventual
 account scope before OAuth begins. Completion
-checks identity and protocol before registering an account-bound provider and converging the
-catalog; any successful activation treats the secondary local account-list refresh as best effort
+checks identity and protocol before registering an account-bound provider and converging the catalog without
+depending on the caller's stale configuration snapshot; any successful activation treats the secondary local account-list refresh as best effort
 independently of a parent callback; transient completion errors keep the job authenticated
 for polling retry, and a partial result stays visible and retryable. No default selection or inference is
 part of this flow. Account-bound provider settings hide the unrelated global Desktop controls.
@@ -411,9 +411,10 @@ Rename changes only generated labels; removal refuses busy/referenced accounts. 
 OAuth jobs expire and do not survive restart; saved account profiles and bindings do.
 Authenticated account operations also prune valid hidden reconnect drafts whose transient jobs
 disappeared on restart, without touching active drafts or visible accounts. `src/server/management/zcode-desktop-routes.ts`
-makes disconnect disable the legacy provider and converge its catalog rows while preserving
-customized settings; its optional verification action uses protocol metadata only and cannot
-start inference or tools.
+serializes connect, activation and disconnect across their complete provider/catalog
+transition; disconnect disables the legacy provider and converges its catalog rows while
+preserving customized settings. Its optional verification action uses protocol metadata
+only and cannot start inference or tools.
 See [the ZCode account runtime contract](adapters/registry.md#zcode-saved-accounts).
 
 For ZCode, input-image description is the explicit exception to native-agent helper exclusion;

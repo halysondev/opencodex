@@ -1,6 +1,7 @@
 import ZcodeAccountsPane from "./ZcodeAccountsPane";
 import { useEffect, useState } from "react";
 import { useT } from "../i18n/shared";
+import type { ProviderAdditionMetadata } from "../provider-addition";
 
 interface Status {
   connected: boolean; sandbox?: boolean; issue?: string; runtimes: string[]; runtime: string; workspace: string;
@@ -10,7 +11,7 @@ interface Status {
 interface Folders { current: string; parent: string | null; folders: Array<{ name: string; path: string }> }
 
 export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: parentError }: {
-  apiBase: string; onConnected?: (name: string) => void; onBack?: () => void; error?: string;
+  apiBase: string; onConnected?: (name: string, metadata?: ProviderAdditionMetadata) => void; onBack?: () => void; error?: string;
 }) {
   const t = useT();
   const [status, setStatus] = useState<Status | null>(null);
@@ -22,6 +23,7 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
   const [tested, setTested] = useState(false);
   const [model, setModel] = useState("");
   const [folders, setFolders] = useState<Folders | null>(null);
+  const announceProvider = (name: string) => onConnected?.(name, { adapter: "zcode" });
   const applyStatus = (next: Status) => {
     setStatus(next); setRuntime(next.runtime); setWorkspace(next.workspace);
     setModel(next.models[0]?.id ?? ""); setError(next.error ?? next.issue ?? "");
@@ -51,7 +53,7 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
       }
       else {
         applyStatus(result as Status); setConsent(false);
-        if ((action === "connect" || action === "activate") && result.activation === "ready" && result.providerName) onConnected?.(result.providerName);
+        if ((action === "connect" || action === "activate") && result.activation === "ready" && result.providerName) announceProvider(result.providerName);
       }
     } catch { setError("runtime_failed"); }
     finally { setBusy(false); }
@@ -130,6 +132,6 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
       </label>
       <button type="button" className="btn" disabled={busy || !model} onClick={() => void perform("test")}>{t("zcodeDesktop.test")}</button>
     </>}
-    <ZcodeAccountsPane apiBase={apiBase} runtime={runtime} workspace={workspace} onProviderActivated={onConnected} />
+    <ZcodeAccountsPane apiBase={apiBase} runtime={runtime} workspace={workspace} onProviderActivated={announceProvider} />
   </section>;
 }

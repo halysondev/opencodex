@@ -16,6 +16,7 @@ let host: HTMLElement;
 let root: Root | null = null;
 let originalFetch: typeof globalThis.fetch;
 let closeCalls: number;
+let additions: Array<{ name: string; adapter?: string }>;
 let requests: Array<{ path: string; body?: Record<string, unknown> }>;
 
 beforeEach(() => {
@@ -31,7 +32,7 @@ beforeEach(() => {
   });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-  closeCalls = 0; requests = [];
+  closeCalls = 0; additions = []; requests = [];
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     value: async (input: RequestInfo | URL, options?: RequestInit) => {
@@ -64,7 +65,9 @@ async function mountPane(withConnectionCallback = true) {
   await act(async () => {
     root = createRoot(host);
     root.render(<LanguageProvider><ZcodeDesktopPane apiBase=""
-      onConnected={withConnectionCallback ? () => { closeCalls++; } : undefined} /></LanguageProvider>);
+      onConnected={withConnectionCallback ? (name, metadata) => {
+        closeCalls++; additions.push({ name, adapter: metadata?.adapter });
+      } : undefined} /></LanguageProvider>);
   });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
 }
@@ -85,6 +88,7 @@ test("Desktop connect requires explicit consent and does not automatically spend
   expect(requests.find(r => r.path.endsWith("/connect"))?.body).toEqual({ runtime: "/installed/ZCode", workspace: "/project", consent: true });
   expect(requests.some(r => r.path.endsWith("/test"))).toBe(false);
   expect(closeCalls).toBe(1);
+  expect(additions).toEqual([{ name: "zcode", adapter: "zcode" }]);
   expect(host.textContent).not.toContain("Use this provider");
   expect(requests.some(r => r.path === "/api/providers")).toBe(false);
 });
@@ -252,6 +256,7 @@ test("saved account UI completes official login then shows provider/catalog read
   expect(requests.some(r => r.path.endsWith("/test"))).toBe(false);
   expect(requests.filter(r => r.body).every(r => r.body!.consent === true)).toBe(true);
   expect(closeCalls).toBe(1);
+  expect(additions).toEqual([{ name: "zcode-fixture", adapter: "zcode" }]);
 });
 
 test("saved account completion preserves an HTTP-200 partial activation", async () => {
@@ -310,6 +315,7 @@ test("saved account activation refreshes the parent only after provider and cata
   expect(host.textContent).toContain("catalog_update_failed");
   await click(button("Retry activation"));
   expect(closeCalls).toBe(1);
+  expect(additions).toEqual([{ name: "zcode-saved", adapter: "zcode" }]);
 });
 
 test("ready account activation treats its local refresh as best effort without a parent callback", async () => {

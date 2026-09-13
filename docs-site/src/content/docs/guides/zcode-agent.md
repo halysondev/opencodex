@@ -83,7 +83,9 @@ provider intentionally hide the unrelated global Desktop Connect/Disconnect cont
    page; use a private browser window or switch accounts there when adding a second identity.
 5. Return to the panel. OpenCodex waits for ZCode's own OAuth polling, verifies the local
    protocol, enables a separate provider and publishes its models automatically. It never
-   asks you to copy tokens or API keys. Do not close the panel before this finishes.
+   asks you to copy tokens or API keys. Setup itself does not force an entitlement/quota
+   probe; use the explicit quota refresh or start an authorized task later. Do not close
+   the panel before this finishes.
 6. Select the desired **account name / model** in your client's model picker. Adding an
    account does **not** select it as the default and does not run inference. If an existing
    Codex process still shows the old picker, restart Codex yourself after its tasks finish.
@@ -114,9 +116,11 @@ operation removes only that orphaned draft.
 Native OAuth and Coding Plan credential setup run in the official installed ZCode host.
 The bridge only carries a short-lived authorization URL and safe status codes to the
 browser. Profiles stay in the proxy's private configuration directory; they are not
-imported into the browser or pooled. The same host-access / optional-sandbox policy described
-below applies. Setup is Linux-only and needs a dashboard-session principal, not just an
-admin API token.
+imported into the browser or pooled. When the short refresh cache expires behind a running
+task, the next task waits for that profile to become idle and then asks the official runtime
+to refresh before dispatch. The same host-access / optional-sandbox policy described below
+applies. Setup is Linux-only and needs a dashboard-session principal, not just an admin API
+token.
 
 ### What “connect Desktop” means
 

@@ -1,5 +1,5 @@
 import { readAccount, accountProfile } from "./accounts";
-import { desktopAccountBusy, desktopStatus } from "./desktop";
+import { desktopAccountBusy, desktopStatus, waitForDesktopAccountIdle } from "./desktop";
 import { runNativeOAuth } from "./native-oauth";
 
 const refreshes = new Map<string, Promise<void>>();
@@ -10,12 +10,14 @@ export const invalidateAccountRefresh = (id: string) => refreshed.delete(id);
 export async function refreshAccount(id: string): Promise<void> {
   if ((refreshed.get(id) ?? 0) > Date.now()) return;
   const pending = refreshes.get(id); if (pending) return pending;
-  if (desktopAccountBusy(id)) return; // Do not mutate a profile used by a running turn.
-  const account = readAccount(id);
-  if (!account.subjectHash) throw new Error("account_login_required");
-  const status = desktopStatus(id);
-  if (!status.connected) throw new Error("account_login_required");
   const promise = (async () => {
+    // Reserving `refreshes` before this await prevents another queued turn from starting a
+    // child. An already-running turn keeps the profile immutable until its child closes.
+    await waitForDesktopAccountIdle(id);
+    const account = readAccount(id);
+    if (!account.subjectHash) throw new Error("account_login_required");
+    const status = desktopStatus(id);
+    if (!status.connected) throw new Error("account_login_required");
     let identity: string | undefined;
     let nativeError: string | undefined;
     try { await runNativeOAuth({ runtime: status.runtime, profileHome: accountProfile(id), mode: "refresh",

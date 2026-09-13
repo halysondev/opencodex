@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { getConfigDir } from "../../config/paths";
-import { hasZcodeAccountClients, closeZcodeDesktopClients, ZcodeClient } from "./client";
+import { hasZcodeAccountClients, closeZcodeDesktopClients, waitForZcodeAccountClients, ZcodeClient } from "./client";
 import type { ZcodeSettings } from "./settings";
 import { verifyDesktopSandbox } from "./desktop-sandbox";
 import { resolveDesktopNode } from "./desktop-node";
@@ -220,6 +220,45 @@ export function desktopStatus(accountId?: string) {
 }
 
 const connecting = new Set<string>();
+const connectionIdleWaiters = new Map<string, Set<() => void>>();
+
+function notifyConnectionIdle(key: string): void {
+  if (connecting.has(key)) return;
+  const waiters = connectionIdleWaiters.get(key);
+  connectionIdleWaiters.delete(key);
+  for (const resolve of waiters ?? []) resolve();
+}
+
+function waitForConnectionIdle(key: string, signal?: AbortSignal): Promise<void> {
+  if (!connecting.has(key)) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  return new Promise<void>((resolve, reject) => {
+    const waiters = connectionIdleWaiters.get(key) ?? new Set<() => void>();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true; signal?.removeEventListener("abort", abort);
+      waiters.delete(finish); if (!waiters.size) connectionIdleWaiters.delete(key);
+      resolve();
+    };
+    const abort = () => {
+      if (settled) return;
+      settled = true; waiters.delete(finish); if (!waiters.size) connectionIdleWaiters.delete(key);
+      reject(signal?.reason);
+    };
+    waiters.add(finish); connectionIdleWaiters.set(key, waiters);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (!connecting.has(key)) finish();
+  });
+}
+
+/** Refresh jobs reserve the account first, then use this to wait out an already-running turn. */
+export async function waitForDesktopAccountIdle(id: string, signal?: AbortSignal): Promise<void> {
+  while (desktopAccountBusy(id)) {
+    if (connecting.has(id)) await waitForConnectionIdle(id, signal);
+    else await waitForZcodeAccountClients(id, signal);
+  }
+}
 
 function normalizeProtocolModels(value: unknown): DesktopModel[] {
   if (!Array.isArray(value) || !value.length || value.length > 1000) return fail("models_missing");
@@ -261,7 +300,10 @@ export async function connectDesktop(runtime: string, workspace: string, account
     persist(connection, accountId);
     return desktopStatus(accountId);
   } catch (e) { if (e instanceof DesktopSetupError) throw e; return fail("runtime_failed"); }
-  finally { connecting.delete(accountId ?? "desktop"); }
+  finally {
+    const key = accountId ?? "desktop";
+    connecting.delete(key); notifyConnectionIdle(key);
+  }
 }
 
 /** Recheck the official protocol without creating a model turn or exposing native tools. */
@@ -280,7 +322,7 @@ export async function verifyDesktopProtocol(requiredModel: string, signal?: Abor
     return fail("runtime_failed");
   } finally {
     rmSync(join(root(accountId), "home", generation), { recursive: true, force: true });
-    connecting.delete(key);
+    connecting.delete(key); notifyConnectionIdle(key);
   }
 }
 

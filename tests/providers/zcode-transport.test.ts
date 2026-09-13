@@ -2,12 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { homedir } from "node:os";
-import { ZcodeClient, closeZcodeDesktopClients, type ZcodeSpawn } from "../../src/adapters/zcode/client";
+import { ZcodeClient, closeZcodeDesktopClients, waitForZcodeAccountClients, type ZcodeSpawn } from "../../src/adapters/zcode/client";
+import { accountRuntimeBusy, refreshAccount } from "../../src/adapters/zcode/account-runtime";
 import type { JsonObject, ZcodeSettings } from "../../src/adapters/zcode/settings";
 
 const settings: ZcodeSettings = { command: ["/isolated/launcher", "argument with spaces"], home: "/isolated/home",
   workspace: "/workspace", settingsPath: "/isolated/config.json", scope: "test" };
-function fixture(managed = false, hostExecution = false) {
+function fixture(managed = false, hostExecution = false, accountId?: string) {
   const child = new EventEmitter() as EventEmitter & { stdin: Writable; stdout: PassThrough; stderr: PassThrough; kill: () => boolean };
   const writes: JsonObject[] = [];
   child.stdin = new Writable({ write(chunk, _encoding, callback) { writes.push(JSON.parse(chunk.toString())); callback(); } });
@@ -15,7 +16,7 @@ function fixture(managed = false, hostExecution = false) {
   child.kill = () => { child.stdout.end(); child.stderr.end(); queueMicrotask(() => child.emit("exit", 0)); return true; };
   let invocation: unknown[] = [];
   const spawn = ((...args: unknown[]) => { invocation = args; return child; }) as ZcodeSpawn;
-  const client = new ZcodeClient(managed ? { ...settings, desktopModels: [], hostExecution } : settings, spawn);
+  const client = new ZcodeClient(managed ? { ...settings, desktopModels: [], hostExecution, accountId } : settings, spawn);
   return { child, client, writes, invocation: () => invocation };
 }
 const tick = () => new Promise(resolve => setTimeout(resolve, 5));
@@ -31,6 +32,30 @@ describe("ZCode NDJSON transport", () => {
     expect(advancedFailures).toBe(0);
     await expect(managed.client.request("session/create", {})).rejects.toThrow("disconnected");
     await advanced.client.close();
+  });
+  test("saved-account idle wait completes only after its active child closes", async () => {
+    const id = crypto.randomUUID();
+    const active = fixture(true, false, id);
+    let idle = false;
+    const waiting = waitForZcodeAccountClients(id).then(() => { idle = true; });
+    await tick(); expect(idle).toBe(false);
+    await active.client.close(); await waiting;
+    expect(idle).toBe(true);
+  });
+  test("an expired saved-account refresh reserves the queue and waits out an active turn", async () => {
+    const id = crypto.randomUUID();
+    const active = fixture(true, false, id);
+    let settled = false;
+    const refreshing = refreshAccount(id).finally(() => { settled = true; });
+    void refreshing.catch(() => {});
+    // The missing fixture account would reject immediately if busy accounts were still skipped.
+    await tick();
+    expect(settled).toBe(false);
+    expect(accountRuntimeBusy(id)).toBe(true);
+    await active.client.close();
+    await expect(refreshing).rejects.toBeInstanceOf(Error);
+    expect(settled).toBe(true);
+    expect(accountRuntimeBusy(id)).toBe(false);
   });
   test("uses argv without shell and does not inherit provider secrets", async () => {
     const f = fixture(); const invocation = f.invocation();

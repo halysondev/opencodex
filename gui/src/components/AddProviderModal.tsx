@@ -26,6 +26,7 @@ import {
   addProviderModalReducer,
   createInitialAddProviderState,
 } from "./add-provider-modal-reducer";
+import type { ProviderAdditionMetadata } from "../provider-addition";
 
 export type ProviderConfig = ProviderPayload;
 
@@ -39,7 +40,7 @@ export default function AddProviderModal({
   apiBase: string;
   existingNames: string[];
   onClose: () => void;
-  onAdded: (name: string) => void;
+  onAdded: (name: string, metadata?: ProviderAdditionMetadata) => void;
   initialTier?: "accounts" | "free" | "paid";
   initialCustom?: boolean;
   accountRows?: AccountLoginRow[];
