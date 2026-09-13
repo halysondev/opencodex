@@ -113,8 +113,8 @@ their native child processes to finish. No task is stopped automatically.
 A protocol/registration/catalog failure is displayed as pending, not complete success.
 Use **Retry provider activation** for a saved connection whose catalog is pending. A
 transient completion error keeps the authenticated job and the open panel retries it;
-if server-side completion is partial and the account-list refresh also fails, the same button
-retries that finished job directly without starting OAuth again;
+if the account-list refresh fails after server-side completion (including after provider/catalog
+readiness), the same button retries that finished job directly without starting OAuth again;
 for a failed or expired login, cancel the draft and start again. Saved accounts and
 provider bindings persist across OpenCodex restarts; pending OAuth jobs do not. If a
 restart or closed panel leaves an unfinished account, the next authenticated account
