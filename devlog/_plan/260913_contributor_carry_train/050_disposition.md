@@ -23,7 +23,7 @@ and the trailer that preserved the author credit.
 | #4381, #4388, #4460 | luvs01, luvs01, AgenticLab-SH | B |
 | #4447 | Veritas-7 | S |
 | #4077 | laerad777 | X |
-| #3663 | y2ambition-ai | H |
+| #3663 | y2ambition-ai | H — no carry needed; already on dev as a33b51eb via #4360 |
 
 #4171 (rrmlima) closes against lane R #4455 carry as a duplicate, with both
 authors named in that landing.
