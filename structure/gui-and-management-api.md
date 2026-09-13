@@ -405,10 +405,13 @@ checks identity and protocol before registering an account-bound provider and co
 depending on the caller's stale configuration snapshot; any successful activation treats the secondary local account-list refresh as best effort
 independently of a parent callback; transient completion errors keep the job authenticated
 for polling retry, and a partial result stays visible and retryable. No default selection or inference is
-part of this flow. Account-bound provider settings hide the unrelated global Desktop controls.
+part of this flow. When these controls run inside an existing provider's Settings tab,
+every successful provider/catalog mutation notifies the Providers owner to reload config and
+refresh model rows; partial activation does not leave the rail stale. Account-bound provider
+settings hide the unrelated global Desktop controls.
 Reconnect retains custom provider settings and rejects a different identity.
 Rename changes only generated labels; removal refuses clients whose direct bootstrap is still exiting and recognizes generated
-provider names plus configured aliases in routed selectors before deleting an account.
+provider names plus configured provider/model aliases in routed selectors before deleting an account.
 In-progress
 OAuth jobs expire and do not survive restart; saved account profiles and bindings do.
 Authenticated account operations also prune valid hidden reconnect drafts whose transient jobs

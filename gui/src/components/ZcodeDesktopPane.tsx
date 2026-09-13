@@ -10,8 +10,12 @@ interface Status {
 }
 interface Folders { current: string; parent: string | null; folders: Array<{ name: string; path: string }> }
 
-export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: parentError }: {
-  apiBase: string; onConnected?: (name: string, metadata?: ProviderAdditionMetadata) => void; onBack?: () => void; error?: string;
+export default function ZcodeDesktopPane({ apiBase, onConnected, onProviderStateMutation, onBack, error: parentError }: {
+  apiBase: string;
+  onConnected?: (name: string, metadata?: ProviderAdditionMetadata) => void;
+  onProviderStateMutation?: () => void;
+  onBack?: () => void;
+  error?: string;
 }) {
   const t = useT();
   const [status, setStatus] = useState<Status | null>(null);
@@ -53,6 +57,7 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
       }
       else {
         applyStatus(result as Status); setConsent(false);
+        if (action === "connect" || action === "activate" || action === "disconnect") onProviderStateMutation?.();
         if ((action === "connect" || action === "activate") && result.activation === "ready" && result.providerName) announceProvider(result.providerName);
       }
     } catch { setError("runtime_failed"); }
@@ -132,6 +137,7 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
       </label>
       <button type="button" className="btn" disabled={busy || !model} onClick={() => void perform("test")}>{t("zcodeDesktop.test")}</button>
     </>}
-    <ZcodeAccountsPane apiBase={apiBase} runtime={runtime} workspace={workspace} onProviderActivated={announceProvider} />
+    <ZcodeAccountsPane apiBase={apiBase} runtime={runtime} workspace={workspace}
+      onProviderActivated={announceProvider} onProviderStateMutation={onProviderStateMutation} />
   </section>;
 }

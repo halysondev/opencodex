@@ -227,7 +227,10 @@ export OCX_ZCODE_WORKSPACE=/workspace
 Keep the proxy's own `HOME`, `CODEX_HOME`, `OPENCODEX_HOME`, XDG directories and listening port
 separate from your main installation too.
 
-Add **ZCode (local agent)** through Providers, or add this provider to the isolated config:
+The dashboard's **Add Provider → ZCode Desktop** preset is the managed Linux Desktop flow; it
+does not register an operator-supplied advanced launcher. For this advanced setup, add the
+provider object to OpenCodex's `config.json` (for example through the dashboard JSON editor) and
+then restart or reload the proxy:
 
 ```json
 {

@@ -16,6 +16,7 @@ let host: HTMLElement;
 let root: Root | null = null;
 let originalFetch: typeof globalThis.fetch;
 let closeCalls: number;
+let mutationCalls: number;
 let additions: Array<{ name: string; adapter?: string }>;
 let requests: Array<{ path: string; body?: Record<string, unknown> }>;
 
@@ -32,7 +33,7 @@ beforeEach(() => {
   });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-  closeCalls = 0; additions = []; requests = [];
+  closeCalls = 0; mutationCalls = 0; additions = []; requests = [];
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
     value: async (input: RequestInfo | URL, options?: RequestInit) => {
@@ -65,6 +66,7 @@ async function mountPane(withConnectionCallback = true) {
   await act(async () => {
     root = createRoot(host);
     root.render(<LanguageProvider><ZcodeDesktopPane apiBase=""
+      onProviderStateMutation={() => { mutationCalls++; }}
       onConnected={withConnectionCallback ? (name, metadata) => {
         closeCalls++; additions.push({ name, adapter: metadata?.adapter });
       } : undefined} /></LanguageProvider>);
@@ -88,6 +90,7 @@ test("Desktop connect requires explicit consent and does not automatically spend
   expect(requests.find(r => r.path.endsWith("/connect"))?.body).toEqual({ runtime: "/installed/ZCode", workspace: "/project", consent: true });
   expect(requests.some(r => r.path.endsWith("/test"))).toBe(false);
   expect(closeCalls).toBe(1);
+  expect(mutationCalls).toBe(1);
   expect(additions).toEqual([{ name: "zcode", adapter: "zcode" }]);
   expect(host.textContent).not.toContain("Use this provider");
   expect(requests.some(r => r.path === "/api/providers")).toBe(false);
@@ -147,6 +150,19 @@ test("partial activation remains visible and retries without a second protocol c
   expect(host.textContent).toContain("No processes will be restarted automatically");
 });
 
+test("Desktop disconnect refreshes parent provider state", async () => {
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path === "/api/zcode-accounts") return Response.json({ accounts: [] });
+    return Response.json({ connected: !path.endsWith("/disconnect"), activation: path.endsWith("/disconnect") ? "disconnected" : "ready",
+      providerName: "zcode", runtimes: ["/installed/ZCode"], runtime: "/installed/ZCode", workspace: "/project",
+      models: [{ id: "builtin:zai/model", label: "Model" }] });
+  } });
+  await mountPane(false);
+  await click(button("Disconnect"));
+  expect(mutationCalls).toBe(1);
+});
+
 test("admin-token setup refusal shows browser-session guidance, not success", async () => {
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (_input: RequestInfo | URL, options?: RequestInit) =>
     options?.method === "POST" ? Response.json({ error: "dashboard_required" }, { status: 403 }) :
@@ -203,6 +219,21 @@ test("account-bound provider settings do not expose controls for the global Desk
   expect(requests.some(request => request.path.startsWith("/api/zcode-desktop"))).toBe(false);
 });
 
+test("existing provider settings refresh parent provider state after Desktop mutation", async () => {
+  const { createRoot } = await import("react-dom/client");
+  await act(async () => {
+    root = createRoot(host);
+    root.render(<LanguageProvider><ProviderSettings apiBase="" item={{
+      name: "zcode", adapter: "zcode", authMode: "local", baseUrl: "https://zcode.z.ai",
+    } satisfies WorkspaceItem} onProviderStateMutation={() => { mutationCalls++; }} /></LanguageProvider>);
+  });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  const pane = host.querySelector<HTMLElement>('[aria-label="ZCode Desktop"]')!;
+  await click(pane.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Connect Desktop"));
+  expect(mutationCalls).toBe(1);
+});
+
 test("saved accounts offer separate manual login and never start OAuth without consent", async () => {
   await mountPane();
   expect(host.textContent).toContain("Saved ZCode accounts");
@@ -256,6 +287,7 @@ test("saved account UI completes official login then shows provider/catalog read
   expect(requests.some(r => r.path.endsWith("/test"))).toBe(false);
   expect(requests.filter(r => r.body).every(r => r.body!.consent === true)).toBe(true);
   expect(closeCalls).toBe(1);
+  expect(mutationCalls).toBe(1);
   expect(additions).toEqual([{ name: "zcode-fixture", adapter: "zcode" }]);
 });
 
@@ -288,6 +320,7 @@ test("saved account completion preserves an HTTP-200 partial activation", async 
   expect(host.textContent).toContain("catalog_update_failed");
   expect(host.textContent).not.toContain("native_oauth_failed");
   expect(closeCalls).toBe(0);
+  expect(mutationCalls).toBe(1);
 });
 
 test("saved account activation refreshes the parent only after provider and catalog readiness", async () => {
@@ -315,6 +348,7 @@ test("saved account activation refreshes the parent only after provider and cata
   expect(host.textContent).toContain("catalog_update_failed");
   await click(button("Retry activation"));
   expect(closeCalls).toBe(1);
+  expect(mutationCalls).toBe(2);
   expect(additions).toEqual([{ name: "zcode-saved", adapter: "zcode" }]);
 });
 
@@ -342,6 +376,31 @@ test("ready account activation treats its local refresh as best effort without a
   expect(host.textContent).not.toContain("native_oauth_failed");
   expect(host.textContent).not.toContain("refresh_failed");
   expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(mutationCalls).toBe(1);
+});
+
+test("saved account rename and removal refresh parent provider state", async () => {
+  let removed = false;
+  const prior = globalThis.fetch;
+  Object.defineProperty(win, "prompt", { configurable: true, value: () => "Renamed fixture" });
+  Object.defineProperty(win, "confirm", { configurable: true, value: () => true });
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    if (url.pathname.endsWith("/rename")) return Response.json({ activation: "ready", providerName: "zcode-saved" });
+    if (url.pathname.endsWith("/remove")) { removed = true; return Response.json({ ok: true }); }
+    return Response.json({ accounts: removed ? [] : [{ id: "saved", label: "Saved fixture",
+      activation: "ready", providerName: "zcode-saved", busy: false }] });
+  } });
+  await mountPane(false);
+  const section = host.querySelector("h3")!.closest("section")!;
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click([...section.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === "Rename")!);
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  expect(mutationCalls).toBe(1);
+  await click(button("Remove account"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  expect(mutationCalls).toBe(2);
 });
 
 test("transient completion failure retries without OAuth and stays finished after a local refresh failure", async () => {
@@ -380,4 +439,5 @@ test("transient completion failure retries without OAuth and stays finished afte
   expect(host.textContent).not.toContain("native_oauth_failed");
   expect(host.textContent).not.toContain("refresh_failed");
   expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(mutationCalls).toBe(1);
 });

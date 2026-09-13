@@ -4,8 +4,12 @@ import { useT } from "../i18n/shared";
 type Account = { id: string; label: string; activation: string; busy: boolean; providerName?: string };
 type Job = { jobId: string; accountId: string; phase: string; url?: string; error?: string };
 type Activation = { activation?: string; providerName?: string };
-export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProviderActivated }: {
-  apiBase: string; runtime: string; workspace: string; onProviderActivated?: (name: string) => void;
+export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProviderActivated, onProviderStateMutation }: {
+  apiBase: string;
+  runtime: string;
+  workspace: string;
+  onProviderActivated?: (name: string) => void;
+  onProviderStateMutation?: () => void;
 }) {
   const t = useT();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -17,7 +21,9 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const onProviderActivatedRef = useRef(onProviderActivated);
+  const onProviderStateMutationRef = useRef(onProviderStateMutation);
   useEffect(() => { onProviderActivatedRef.current = onProviderActivated; }, [onProviderActivated]);
+  useEffect(() => { onProviderStateMutationRef.current = onProviderStateMutation; }, [onProviderStateMutation]);
   const read = useCallback(async (path: string, body?: Record<string, unknown>) => {
     const response = await fetch(apiBase + "/api/zcode-accounts" + path, body ? {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, consent: true }),
@@ -58,6 +64,7 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
             return;
           }
           if (stopped) return;
+          onProviderStateMutationRef.current?.();
           setJob({ ...next, phase: "finished", url: undefined });
           const ready = result.activation === "ready";
           setError(ready ? "" : "catalog_update_failed");
@@ -80,6 +87,9 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
       if (path === "/login") setJob(result);
       else if (path === "/cancel") setJob(null);
       else if (result.activation && result.activation !== "ready") setError("catalog_update_failed");
+      if (path === "/activate" || path === "/rename" || path === "/remove") {
+        onProviderStateMutationRef.current?.();
+      }
       const ready = path === "/activate" && result.activation === "ready";
       const activation = ready && result.providerName && onProviderActivatedRef.current
         ? { name: result.providerName, notify: onProviderActivatedRef.current } : undefined;
