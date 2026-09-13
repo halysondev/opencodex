@@ -415,6 +415,8 @@ serializes connect, activation and disconnect across their complete provider/cat
 transition; disconnect disables the legacy provider and converges its catalog rows while
 preserving customized settings. Its optional verification action uses protocol metadata
 only and cannot start inference or tools.
+Owner-fenced `store:false` continuation, fresh tool-free compaction sessions and serialized
+native-frame admission follow [the ZCode runtime contract](adapters/registry.md#zcode-saved-accounts).
 See [the ZCode account runtime contract](adapters/registry.md#zcode-saved-accounts).
 
 For ZCode, input-image description is the explicit exception to native-agent helper exclusion;

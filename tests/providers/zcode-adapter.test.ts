@@ -30,10 +30,14 @@ class FakeClient {
   onFailure: (error: Error) => void = () => {};
   calls: Array<{ method: string; params: JsonObject }> = [];
   closed = false;
-  constructor(private outcome: "ok" | "failed" | "hang" | "session-noise" | "answerless" = "ok") {}
+  private nativeTools = true;
+  constructor(private outcome: "ok" | "failed" | "hang" | "session-noise" | "answerless" | "tool-during-compaction" = "ok") {}
   async request(method: string, params: JsonObject): Promise<JsonObject> {
     this.calls.push({ method, params });
-    if (method === "session/create") return { session: { sessionId: "sess_test-1" } };
+    if (method === "session/create") {
+      this.nativeTools = !(Array.isArray(params.toolAllowlist) && params.toolAllowlist.length === 0);
+      return { session: { sessionId: "sess_test-1" } };
+    }
     if (method === "session/send") {
       if (this.outcome === "session-noise") {
         queueMicrotask(() => {
@@ -49,8 +53,10 @@ class FakeClient {
       queueMicrotask(() => {
         if (this.outcome === "hang") return;
         this.event("model.streaming", { kind: "reasoning_delta", delta: "Thinking" });
-        this.event("tool.updated", { kind: "started", toolCallId: "tool-1" });
-        this.event("tool.updated", { kind: "result", toolCallId: "tool-1" });
+        if (this.nativeTools || this.outcome === "tool-during-compaction") {
+          this.event("tool.updated", { kind: "started", toolCallId: "tool-1" });
+          this.event("tool.updated", { kind: "result", toolCallId: "tool-1" });
+        }
         if (this.outcome === "failed") return this.event("turn.failed", { error: { message: "secret" } });
         if (this.outcome === "answerless") return this.event("turn.completed", {});
         this.event("model.streaming", { kind: "text_delta", delta: "Hello" });
@@ -209,6 +215,40 @@ describe("ZCode local agent", () => {
     expect(JSON.stringify(events)).not.toContain("never-log-this");
     expect(client.closed).toBe(true);
     expect(client.calls.map(c => c.method)).toEqual(["session/create", "session/subscribe", "session/send", "session/stop"]);
+  });
+  test("compaction uses a fresh tool-disabled session and does not replace the main continuation", async () => {
+    const settings = fixture();
+    const parsed = request();
+    parsed._compactionRequest = true;
+    parsed._providerContinuation = { zcode: { sessionId: "sess_existing", scope: settings.scope } };
+    const client = new FakeClient();
+    const events = await run(settings, client, parsed);
+    expect(events.at(-1)?.type).toBe("done");
+    const done = events.find((event): event is Extract<AdapterEvent, { type: "done" }> => event.type === "done");
+    expect(done?.providerState).toBeUndefined();
+    expect(events.some(event => event.type === "text_delta" && event.text.includes("without native tools"))).toBe(true);
+    expect(client.calls.some(call => call.method === "session/resume")).toBe(false);
+    const created = client.calls.find(call => call.method === "session/create")?.params;
+    expect(created?.toolAllowlist).toEqual([]);
+    expect(created?.toolDenylist).toBeUndefined();
+  });
+  test("compaction fails closed if the official runtime emits a native tool event", async () => {
+    const parsed = request(); parsed._compactionRequest = true;
+    const events = await run(fixture(), new FakeClient("tool-during-compaction"), parsed);
+    expect(events.at(-1)).toMatchObject({ type: "incomplete", retryable: false });
+    expect(JSON.stringify(events)).toContain("compaction attempted native tool execution");
+    expect(events.some(event => event.type === "done")).toBe(false);
+  });
+  test("rejects an oversized serialized send frame before starting the native client", async () => {
+    const parsed = request();
+    parsed.context.messages = [{ role: "user", content: "\0".repeat(175_000), timestamp: 0 }];
+    const client = new FakeClient();
+    const events = await run(fixture(), client, parsed, undefined, 2_000);
+    expect(events.at(-1)).toMatchObject({
+      type: "error", message: "ZCode input exceeds the native bridge serialization limit.", retryable: false,
+    });
+    expect(client.calls).toHaveLength(0);
+    expect(client.closed).toBe(false);
   });
   test("answerless completion is reported as an interrupted accepted turn", async () => {
     const events = await run(fixture(), new FakeClient("answerless"));

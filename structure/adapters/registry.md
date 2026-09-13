@@ -308,6 +308,12 @@ transient completion failures keep the OAuth job authenticated for retry, and ca
 global-default aliases remap to the account default before validation.
 Native turn admission retains a 32-request process ceiling and a 24-request per-profile ceiling,
 so one stalled profile cannot consume every reservation needed by independent saved accounts.
+Headerless `previous_response_id` chains persist owner-fenced ZCode state even with `store:false`;
+the non-secret local account slot identifies the owner, while the connection/profile generation in
+the adapter scope rejects stale sessions after reconnect. Internal Codex compaction always starts a
+fresh official session with an empty tool allowlist, publishes no replacement ZCode session, and
+fails closed on an unexpected tool event. `session/send` is sized after JSON serialization before
+the native client starts, matching the managed bootstrap's one-MiB NDJSON limit.
 Advanced model descriptors reject loopback, private and link-local destinations before the
 official runtime receives them.
 

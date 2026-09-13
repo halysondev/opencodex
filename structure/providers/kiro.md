@@ -132,3 +132,7 @@ request on a request path. The marker carries a count and no URL, because a remo
 image URL can carry a signed token.
 
 Translated audio/file admission follows the [final-adapter input contract](../adapters/registry.md#untranslated-input-media); native raw passthrough remains separate.
+
+The shared `src/responses/provider-continuation.ts` owner validator also admits process-local
+`local:` identities for ZCode's credential-free route binding. Kiro retains its existing OAuth/key
+owner derivation; the added identity kind does not broaden Kiro continuation matching.

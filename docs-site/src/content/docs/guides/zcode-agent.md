@@ -251,11 +251,16 @@ rewritten. **Test connection** checks the local catalog only, not account entitl
   requests are still denied, and user-input requests are cancelled rather than answered
   automatically; continue those workflows in the ZCode client itself.
 - Each turn owns a child process. A profile has one active turn at a time because ZCode writes
-  model selection to shared settings; at most 32 active/queued bridge calls are admitted.
-- `previous_response_id` uses OpenCodex's owner-fenced private continuation state. Client thread
-  identity also supports process-local continuity. A different model/profile or an uncorrelated
-  request gets a separate session. If a saved session cannot resume, the bridge reports failure
-  rather than silently replaying work in a new session.
+  model selection to shared settings; at most 24 active/queued calls are admitted per profile and
+  32 across the process, so one stalled account cannot consume every reservation.
+- `previous_response_id` uses OpenCodex's owner-fenced private continuation state, including when
+  Codex sends `store: false`. Client thread identity also supports process-local continuity. A
+  different model/profile or an uncorrelated request gets a separate session. If a saved session
+  cannot resume, the bridge reports failure rather than silently replaying work in a new session.
+- Codex compaction runs in a fresh official session with an empty native-tool allowlist and cannot
+  replace the main continuation. Any unexpected tool event fails the compaction closed. Before a
+  turn starts, OpenCodex also checks the fully serialized `session/send` line against the Desktop
+  bridge limit, so escaped control characters cannot turn an accepted request into a later crash.
 - The default turn deadline is five minutes. Cancellation/deadline closes the owned child.
   The launcher is responsible for terminating descendants. `Task`, `TaskOutput` and `TaskStop`
   are denied; work cannot keep an owned sandbox running after its turn ends.

@@ -8,6 +8,8 @@ import { zcodeThoughtLevel } from "./reasoning";
 
 type Client = Pick<ZcodeClient, "request" | "close" | "onEvent" | "onFailure">;
 const MAX_ZCODE_INPUT_CHARS = 200_000;
+const MAX_ZCODE_PROTOCOL_LINE_CHARS = 1024 * 1024;
+const MAX_ZCODE_SESSION_ID = `sess_${"x".repeat(80)}`;
 const HISTORY_TRUNCATED = "[Earlier OpenCodex conversation history truncated to fit the ZCode bridge.]";
 const CANCELLED_BEFORE_DISPATCH = "ZCode request cancelled before dispatch.";
 const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_identity_mismatch", "native_oauth_failed"]);
@@ -159,6 +161,21 @@ function textInput(parsed: OcxParsedRequest, resumed: boolean): string {
   return prompt;
 }
 
+/** The managed bootstrap rejects oversized NDJSON before parsing; fail before any native dispatch. */
+function assertSessionSendFits(content: string, modelParams: JsonObject): void {
+  let length = Infinity;
+  try {
+    length = JSON.stringify({
+      id: Number.MAX_SAFE_INTEGER,
+      method: "session/send",
+      params: { sessionId: MAX_ZCODE_SESSION_ID, content, ...modelParams },
+    }).length;
+  } catch { /* normalized below without exposing model/profile material */ }
+  if (length > MAX_ZCODE_PROTOCOL_LINE_CHARS) {
+    throw new Error("ZCode input exceeds the native bridge serialization limit.");
+  }
+}
+
 export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapterDeps = {}): ProviderAdapter {
   return {
     name: "zcode",
@@ -209,23 +226,28 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
           settings.scope, provider.baseUrl, parsed._reasoningReplayScope?.current?.providerName,
           parsed._cursorIdentityScope, parsed.modelId,
         ])).digest("hex");
-        sessionKey = parsed._clientThreadId && !parsed._cursorIsolateConversation
+        const compaction = parsed._compactionRequest === true;
+        sessionKey = !compaction && parsed._clientThreadId && !parsed._cursorIsolateConversation
           ? createHash("sha256").update(scope + parsed._clientThreadId).digest("hex") : undefined;
-        const previous = record(parsed._providerContinuation?.zcode);
+        const previous = compaction ? {} : record(parsed._providerContinuation?.zcode);
         sessionId = previous.scope === scope && typeof previous.sessionId === "string"
           && /^sess_[a-zA-Z0-9-]{1,80}$/.test(previous.sessionId) ? previous.sessionId
           : sessionKey ? sessions.get(sessionKey) : undefined;
         const content = textInput(parsed, Boolean(sessionId));
-        client = (deps.client ?? (s => new ZcodeClient(s)))(settings);
-        const active = client;
         // The Desktop bootstrap resolves credentials inside the official runtime (and the optional
         // sandbox when enabled). The parent only sends
         // public model identity; it never receives Desktop API keys or synthesizes vendor auth.
-        const modelParams = settings.desktopModels
+        const modelParams: JsonObject = settings.desktopModels
           ? { _zcodeModel: { providerId: model.providerId, modelId: model.modelId } }
           : { runtimeModel: model.runtimeModel };
+        assertSessionSendFits(content, modelParams);
+        client = (deps.client ?? (s => new ZcodeClient(s)))(settings);
+        const active = client;
         const thoughtLevel = zcodeThoughtLevel(model.modelId, parsed.options.reasoning);
         const thoughtParams = thoughtLevel ? { thoughtLevel } : {};
+        const toolParams: JsonObject = compaction
+          ? { mcpServers: [], toolAllowlist: [] }
+          : { mcpServers: [], toolDenylist: ["Task", "TaskOutput", "TaskStop"] };
         const controller = Promise.withResolvers<void>();
         // Attach a handler immediately: failures can happen during session materialization.
         void controller.promise.catch(() => {});
@@ -249,6 +271,11 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
               emit({ type: "thinking_delta", thinking: payload.delta });
             }
           } else if (params.type === "tool.updated") {
+            if (compaction) {
+              controller.reject(new Error("ZCode compaction attempted native tool execution."));
+              void active.close();
+              return;
+            }
             // Informational only: no tool_call_* event can cause a client to repeat native work.
             if (payload.kind === "started" || payload.kind === "result") emit({ type: "text_delta",
               text: payload.kind === "started" ? "\n[ZCode: native tool started]\n" : "\n[ZCode: native tool finished]\n",
@@ -265,12 +292,12 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
           }
         };
         if (sessionId) {
-          await active.request("session/resume", { sessionId, ...modelParams, ...thoughtParams });
+          await active.request("session/resume", { sessionId, ...modelParams, ...thoughtParams, ...toolParams });
         } else {
           const result = await active.request("session/create", {
             workspace: { workspacePath: settings.workspace, workspaceKey: settings.workspace },
             mode: settings.nativePermissionMode ?? "edit", ...modelParams, ...thoughtParams, titleGenerationEnabled: false,
-            mcpServers: [], toolDenylist: ["Task", "TaskOutput", "TaskStop"],
+            ...toolParams,
           });
           const id = record(result.session).sessionId;
           if (typeof id !== "string" || !/^sess_[a-zA-Z0-9-]{1,80}$/.test(id)) throw new Error("ZCode returned an invalid session identity.");
@@ -280,9 +307,11 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
         // Commit visible output before dispatch, so streaming combo routing cannot replay an
         // accepted task that already changed files. Post-send failure is non-retryable incomplete.
-        emit({ type: "text_delta", text: settings.hostExecution
-          ? "[ZCode: running native tools with host-user access]\n"
-          : "[ZCode: running native tools in the configured launcher]\n", phase: "commentary" });
+        emit({ type: "text_delta", text: compaction
+          ? "[ZCode: summarizing without native tools]\n"
+          : settings.hostExecution
+            ? "[ZCode: running native tools with host-user access]\n"
+            : "[ZCode: running native tools in the configured launcher]\n", phase: "commentary" });
         sent = true;
         await active.request("session/send", { sessionId, content, ...modelParams });
         await controller.promise;
@@ -290,7 +319,8 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
           if (sessions.size >= 128) sessions.delete(sessions.keys().next().value!);
           sessions.set(sessionKey, sessionId);
         }
-        emit({ type: "done", endTurn: true, providerState: { zcode: { sessionId, scope } } });
+        emit({ type: "done", endTurn: true,
+          ...(compaction ? {} : { providerState: { zcode: { sessionId, scope } } }) });
       } catch (error) {
         if (sessionKey) sessions.delete(sessionKey);
         const message = error instanceof Error ? error.message : "ZCode bridge failed.";
