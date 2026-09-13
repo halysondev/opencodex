@@ -130,6 +130,6 @@ export default function ZcodeDesktopPane({ apiBase, onConnected, onBack, error: 
       </label>
       <button type="button" className="btn" disabled={busy || !model} onClick={() => void perform("test")}>{t("zcodeDesktop.test")}</button>
     </>}
-    <ZcodeAccountsPane apiBase={apiBase} runtime={runtime} workspace={workspace} />
+    <ZcodeAccountsPane apiBase={apiBase} runtime={runtime} workspace={workspace} onProviderActivated={onConnected} />
   </section>;
 }

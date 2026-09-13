@@ -215,7 +215,7 @@ test("saved account UI completes official login then shows provider/catalog read
     if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
     requests.push({ path: url.pathname, body: options?.body ? JSON.parse(String(options.body)) : undefined });
     if (url.pathname.endsWith("/login")) return Response.json({jobId:"fixture-job",accountId:"fixture-account",phase:options?.method === "POST" ? "waiting" : "authenticated"});
-    if (url.pathname.endsWith("/complete")) { complete++; return Response.json({activation:"ready"}); }
+    if (url.pathname.endsWith("/complete")) { complete++; return Response.json({activation:"ready",providerName:"zcode-fixture"}); }
     return Response.json({accounts:complete ? [{id:"fixture-account",label:"Personal fixture",activation:"ready",providerName:"zcode-fixture",busy:false}] : []});
   } });
   await mountPane();
@@ -235,6 +235,7 @@ test("saved account UI completes official login then shows provider/catalog read
   expect(section.textContent).toContain("No processes will be restarted automatically");
   expect(requests.some(r => r.path.endsWith("/test"))).toBe(false);
   expect(requests.filter(r => r.body).every(r => r.body!.consent === true)).toBe(true);
+  expect(closeCalls).toBe(1);
 });
 
 test("saved account completion preserves an HTTP-200 partial activation", async () => {
@@ -265,4 +266,29 @@ test("saved account completion preserves an HTTP-200 partial activation", async 
   expect(host.textContent).toContain("Partial fixture");
   expect(host.textContent).toContain("catalog_update_failed");
   expect(host.textContent).not.toContain("native_oauth_failed");
+  expect(closeCalls).toBe(0);
+});
+
+test("saved account activation refreshes the parent only after provider and catalog readiness", async () => {
+  let activation = "catalog_pending";
+  let attempts = 0;
+  const prior = globalThis.fetch;
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    if (url.pathname.endsWith("/activate")) {
+      attempts++;
+      activation = attempts === 1 ? "catalog_pending" : "ready";
+      return Response.json({ activation, providerName: "zcode-saved", ...(activation === "ready" ? {} : { error: "catalog_update_failed" }) });
+    }
+    return Response.json({ accounts: [{ id: "saved", label: "Saved fixture", activation, providerName: "zcode-saved", busy: false }] });
+  } });
+  await mountPane();
+  const section = host.querySelector("h3")!.closest("section")!;
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Retry activation"));
+  expect(closeCalls).toBe(0);
+  expect(host.textContent).toContain("catalog_update_failed");
+  await click(button("Retry activation"));
+  expect(closeCalls).toBe(1);
 });
