@@ -57,11 +57,12 @@ afterEach(async () => {
   await win.happyDOM?.close?.();
 });
 
-async function mountPane() {
+async function mountPane(withConnectionCallback = true) {
   const { createRoot } = await import("react-dom/client");
   await act(async () => {
     root = createRoot(host);
-    root.render(<LanguageProvider><ZcodeDesktopPane apiBase="" onConnected={() => { closeCalls++; }} /></LanguageProvider>);
+    root.render(<LanguageProvider><ZcodeDesktopPane apiBase=""
+      onConnected={withConnectionCallback ? () => { closeCalls++; } : undefined} /></LanguageProvider>);
   });
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
 }
@@ -294,4 +295,64 @@ test("saved account activation refreshes the parent only after provider and cata
   expect(host.textContent).toContain("catalog_update_failed");
   await click(button("Retry activation"));
   expect(closeCalls).toBe(1);
+});
+
+test("ready account activation treats its local refresh as best effort without a parent callback", async () => {
+  let failNextRefresh = false;
+  let activations = 0;
+  const prior = globalThis.fetch;
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    if (url.pathname.endsWith("/activate")) {
+      activations++;
+      failNextRefresh = true;
+      return Response.json({ activation: "ready", providerName: "zcode-saved" });
+    }
+    if (failNextRefresh) return Response.json({ error: "refresh_failed" }, { status: 500 });
+    return Response.json({ accounts: [{ id: "saved", label: "Saved fixture", activation: "catalog_pending",
+      providerName: "zcode-saved", busy: false }] });
+  } });
+  await mountPane(false);
+  const section = host.querySelector("h3")!.closest("section")!;
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Retry activation"));
+  expect(activations).toBe(1);
+  expect(host.textContent).not.toContain("native_oauth_failed");
+  expect(host.textContent).not.toContain("refresh_failed");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+test("ready account completion stays finished when its local refresh fails without a parent callback", async () => {
+  let completions = 0;
+  let failNextRefresh = false;
+  const prior = globalThis.fetch;
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost");
+    if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    if (url.pathname.endsWith("/login")) return Response.json({ jobId: "fixture-job", accountId: "fixture-account",
+      phase: options?.method === "POST" ? "waiting" : "authenticated" });
+    if (url.pathname.endsWith("/complete")) {
+      completions++;
+      failNextRefresh = true;
+      return Response.json({ activation: "ready", providerName: "zcode-saved" });
+    }
+    if (failNextRefresh) return Response.json({ error: "refresh_failed" }, { status: 500 });
+    return Response.json({ accounts: [] });
+  } });
+  await mountPane(false);
+  const section = host.querySelector("h3")!.closest("section")!;
+  const input = section.querySelector('input:not([type="checkbox"])') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value")!.set!.call(input, "No callback fixture");
+    input.dispatchEvent(new win.Event("input", { bubbles: true }));
+  });
+  await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+  await click(button("Add account"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  expect(completions).toBe(1);
+  expect(button("Add account").disabled).toBe(false);
+  expect(host.textContent).not.toContain("native_oauth_failed");
+  expect(host.textContent).not.toContain("refresh_failed");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
 });
