@@ -485,23 +485,25 @@ test("partial account removal refreshes parent state after catalog convergence f
   expect(section.textContent).toContain("Account setup incomplete");
 });
 
-test("transient completion failure retries without OAuth and stays finished after a local refresh failure", async () => {
+test("ready completion keeps a refresh failure recoverable without repeating OAuth", async () => {
   let completions = 0;
   let failNextRefresh = false;
   const prior = globalThis.fetch;
   Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: RequestInfo | URL, options?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     if (!url.pathname.startsWith("/api/zcode-accounts")) return prior(input, options);
+    requests.push({ path: url.pathname, body: options?.body ? JSON.parse(String(options.body)) : undefined });
     if (url.pathname.endsWith("/login")) return Response.json({ jobId: "fixture-job", accountId: "fixture-account",
       phase: options?.method === "POST" ? "waiting" : "authenticated" });
     if (url.pathname.endsWith("/complete")) {
       completions++;
       if (completions === 1) return Response.json({ error: "busy" }, { status: 400 });
-      failNextRefresh = true;
+      failNextRefresh = completions === 2;
       return Response.json({ activation: "ready", providerName: "zcode-saved" });
     }
-    if (failNextRefresh) return Response.json({ error: "refresh_failed" }, { status: 500 });
-    return Response.json({ accounts: [] });
+    if (failNextRefresh) { failNextRefresh = false; return Response.json({ error: "refresh_failed" }, { status: 500 }); }
+    return Response.json({ accounts: completions > 2 ? [{ id: "fixture-account", label: "No callback fixture",
+      activation: "ready", providerName: "zcode-saved", busy: false }] : [] });
   } });
   await mountPane(false);
   const section = host.querySelector("h3")!.closest("section")!;
@@ -512,11 +514,15 @@ test("transient completion failure retries without OAuth and stays finished afte
   });
   await click(section.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
   await click(button("Add account"));
-  await waitUntil(() => completions === 2 && button("Add account").disabled === false);
+  await waitUntil(() => completions === 2 && host.textContent?.includes("account_refresh_failed") === true
+    && [...section.querySelectorAll("button")].some(item => item.textContent === "Retry activation"));
   expect(completions).toBe(2);
   expect(button("Add account").disabled).toBe(false);
-  expect(host.textContent).not.toContain("native_oauth_failed");
-  expect(host.textContent).not.toContain("refresh_failed");
+  expect(host.querySelector('[role="alert"] code')?.textContent).toBe("account_refresh_failed");
+  expect(requests.filter(request => request.path.endsWith("/login") && request.body)).toHaveLength(1);
+  await click(button("Retry activation"));
+  await waitUntil(() => completions === 3 && host.textContent?.includes("No callback fixture") === true);
   expect(host.querySelector('[role="alert"]')).toBeNull();
-  expect(mutationCalls).toBe(1);
+  expect(requests.filter(request => request.path.endsWith("/login") && request.body)).toHaveLength(1);
+  expect(mutationCalls).toBe(2);
 });

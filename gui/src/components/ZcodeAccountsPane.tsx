@@ -50,13 +50,14 @@ export default function ZcodeAccountsPane({ apiBase, runtime, workspace, onProvi
     if (stopped()) return;
     onProviderStateMutationRef.current?.();
     const ready = result.activation === "ready";
-    setError(ready ? "" : "catalog_update_failed");
     let refreshFailed = false;
     try { await refresh(); } catch { refreshFailed = true; }
     if (stopped()) return;
-    // A partial server completion is idempotent. Retain its finished job id when the account row
-    // could not be refreshed so the user can retry /complete directly without repeating OAuth.
-    setJob({ ...current, phase: !ready && refreshFailed ? "recovery" : "finished", url: undefined });
+    setError(!ready ? "catalog_update_failed" : refreshFailed ? "account_refresh_failed" : "");
+    // Server completion is idempotent. Retain its finished job id whenever the account row could
+    // not be refreshed so the user can retry /complete directly without repeating OAuth. This
+    // also covers a ready provider whose new account row is not visible in existing Settings.
+    setJob({ ...current, phase: refreshFailed ? "recovery" : "finished", url: undefined });
     if (ready && result.providerName && onProviderActivatedRef.current) {
       onProviderActivatedRef.current(result.providerName);
     }
