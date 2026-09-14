@@ -86,7 +86,8 @@ describe("ZCode local agent", () => {
     const settings = { ...fixture(), hostExecution: true, nativePermissionMode: "yolo" as const,
       desktopModels: [{ id: "test/model", providerId: "test", modelId: "model", label: "Model" }] };
     const client = new FakeClient();
-    expect((await run(settings, client)).at(-1)?.type).toBe("done");
+    const hostEvents = await run(settings, client);
+    expect(hostEvents.at(-1)?.type).toBe("done");
     for (const call of client.calls.filter(c => ["session/create", "session/send"].includes(c.method))) {
       expect(call.params._zcodeModel).toEqual({ providerId: "test", modelId: "model" });
       expect(call.params.runtimeModel).toBeUndefined();
@@ -100,12 +101,11 @@ describe("ZCode local agent", () => {
     expect(String(client.calls.find(call => call.method === "session/send")?.params.content))
       .toMatch(/^\[OpenCodex bridge capability:.*\[OpenCodex bridge reminder:/s);
     const advancedClient = new FakeClient();
-    expect((await run(fixture(), advancedClient)).find(event => event.type === "text_delta"
-      && event.phase === "commentary")?.text).toContain("configured launcher");
+    const advancedEvents = await run(fixture(), advancedClient);
+    expect(advancedEvents.some(event => event.type === "text_delta" && event.phase === "commentary")).toBe(false);
     expect(String(advancedClient.calls.find(call => call.method === "session/send")?.params.content))
       .not.toContain("managed host-execution setting");
-    expect((await run(settings, new FakeClient())).find(event => event.type === "text_delta"
-      && event.phase === "commentary")?.text).toContain("host-user access");
+    expect(hostEvents.some(event => event.type === "text_delta" && event.phase === "commentary")).toBe(false);
   });
   test("maps Codex effort labels to the official GLM-5.3 thought levels", async () => {
     const settings = { ...fixture(), desktopModels: [{
@@ -273,11 +273,12 @@ describe("ZCode local agent", () => {
       expect(() => readZcodeModels(settings)).toThrow("unavailable, invalid");
     }
   });
-  test("native execution streams progress without asking the client to execute tools", async () => {
+  test("native execution keeps official tool progress internal", async () => {
     const settings = fixture(); const client = new FakeClient();
     const events = await run(settings, client);
     expect(events.some(e => e.type.startsWith("tool_call"))).toBe(false);
     expect(events.filter(e => e.type === "text_delta" && e.text === "Hello")).toHaveLength(1);
+    expect(events.some(e => e.type === "text_delta" && e.phase === "commentary")).toBe(false);
     expect(events.at(-1)?.type).toBe("done");
     expect(JSON.stringify(events)).not.toContain("never-log-this");
     expect(client.closed).toBe(true);
@@ -293,7 +294,7 @@ describe("ZCode local agent", () => {
     expect(events.at(-1)?.type).toBe("done");
     const done = events.find((event): event is Extract<AdapterEvent, { type: "done" }> => event.type === "done");
     expect(done?.providerState).toBeUndefined();
-    expect(events.some(event => event.type === "text_delta" && event.text.includes("without native tools"))).toBe(true);
+    expect(events.some(event => event.type === "text_delta" && event.phase === "commentary")).toBe(false);
     expect(client.calls.some(call => call.method === "session/resume")).toBe(false);
     const created = client.calls.find(call => call.method === "session/create")?.params;
     expect(created?.toolAllowlist).toEqual([]);

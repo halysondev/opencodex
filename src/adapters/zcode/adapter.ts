@@ -292,16 +292,13 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
             } else if ((payload.kind === "reasoning_delta" || payload.kind === "reasoning_start") && typeof payload.delta === "string") {
               emit({ type: "thinking_delta", thinking: payload.delta });
             }
-          } else if (params.type === "tool.updated") {
-            if (compaction) {
-              controller.reject(new Error("ZCode compaction attempted native tool execution."));
-              void active.close();
-              return;
-            }
-            // Informational only: no tool_call_* event can cause a client to repeat native work.
-            if (payload.kind === "started" || payload.kind === "result") emit({ type: "text_delta",
-              text: payload.kind === "started" ? "\n[ZCode: native tool started]\n" : "\n[ZCode: native tool finished]\n",
-              phase: "commentary" });
+          } else if (params.type === "tool.updated" && compaction) {
+            // Native tool execution would violate the compaction contract. Ordinary turns keep
+            // these official-runtime lifecycle events internal: projecting them as assistant text
+            // pollutes the client transcript and causes the synthetic status to be replayed later.
+            controller.reject(new Error("ZCode compaction attempted native tool execution."));
+            void active.close();
+            return;
           } else if (params.type === "turn.completed") {
             if (!textSeen && typeof payload.response === "string" && payload.response.length > 0) {
               textSeen = true;
@@ -327,13 +324,9 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         }
         await active.request("session/subscribe", { sessionId, deliveryKind: "desktop-continuous" });
         if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
-        // Commit visible output before dispatch, so streaming combo routing cannot replay an
-        // accepted task that already changed files. Post-send failure is non-retryable incomplete.
-        emit({ type: "text_delta", text: compaction
-          ? "[ZCode: summarizing without native tools]\n"
-          : settings.hostExecution
-            ? "[ZCode: running native tools with host-user access]\n"
-            : "[ZCode: running native tools in the configured launcher]\n", phase: "commentary" });
+        // From this point the official runtime has accepted a session and the task is about to be
+        // dispatched. Keep post-send failures non-retryable without projecting bridge internals as
+        // assistant output; lifecycle/tool progress remains owned by ZCode.
         sent = true;
         await active.request("session/send", { sessionId, content, ...modelParams });
         await controller.promise;
