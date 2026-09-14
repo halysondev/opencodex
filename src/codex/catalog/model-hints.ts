@@ -313,7 +313,7 @@ export function applyProviderConfigHints(
   const discoveredWindow = typeof model.contextWindow === "number" && model.contextWindow > 0
     ? model.contextWindow
     : undefined;
-  const projectedLimits = clampObservedModelLimits(staticPolicy.model, {
+  const projectedLimits = clampObservedModelLimits({ ...staticPolicy.model, contextWindow: configuredCap }, {
     ...(discoveredWindow !== undefined ? { contextWindow: discoveredWindow } : {}),
     ...(typeof model.maxInputTokens === "number" && model.maxInputTokens > 0 ? { maxInputTokens: model.maxInputTokens } : {}),
   });

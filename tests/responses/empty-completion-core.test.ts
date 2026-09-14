@@ -301,6 +301,29 @@ describe("empty-completion core integration", () => {
     expect(runTurnCalls).toBe(1);
   });
 
+  test("cancelling a streaming response aborts its active runTurn transport", async () => {
+    let incomingSignal: AbortSignal | undefined;
+    let transportSettled = false;
+    customRunTurn = async (_parsed, incoming, _emit) => {
+      incomingSignal = incoming.abortSignal;
+      await new Promise<void>(resolve => {
+        incoming.abortSignal?.addEventListener("abort", resolve, { once: true });
+      });
+      transportSettled = true;
+    };
+
+    const response = await handleResponses(
+      request(true),
+      config("test-run-turn", { emptyCompletionRetry: false }),
+      { model: "", provider: "" },
+    );
+    await response.body!.cancel("client interrupted");
+    await Promise.resolve();
+
+    expect(incomingSignal?.aborted).toBe(true);
+    expect(transportSettled).toBe(true);
+  });
+
   for (const stream of [true, false]) {
     test(`runTurn ${stream ? "streaming" : "non-streaming"} retries on a fresh queue`, async () => {
       attemptEvents = [

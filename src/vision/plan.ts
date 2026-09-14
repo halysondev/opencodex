@@ -109,7 +109,7 @@ function messagesHaveImage(parsed: OcxParsedRequest): boolean {
  */
 export function requiresVisionPreprocessing(
   config: Pick<OcxConfig, "providers"> & { customModels?: OcxConfig["customModels"] },
-  provider: Pick<OcxProviderConfig, "noVisionModels" | "modelInputModalities" | "modelCapabilities">,
+  provider: Pick<OcxProviderConfig, "adapter" | "noVisionModels" | "modelInputModalities" | "modelCapabilities">,
   modelId: string,
   providerName?: string,
 ): boolean {
