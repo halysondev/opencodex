@@ -83,6 +83,11 @@ function context(provider: OcxProviderConfig): QuotaContext {
 export function zcodeQuotaIdentity(provider: OcxProviderConfig): string {
   try { return context(provider).identity; } catch { return "unavailable"; }
 }
+export async function refreshZcodeQuotaIdentity(provider: OcxProviderConfig): Promise<void> {
+  if (provider.adapter === "zcode" && provider.authMode === "local" && provider.disabled !== true
+    && provider.zcodeAccountId) await refreshAccount(provider.zcodeAccountId);
+}
+
 
 function command(c: QuotaContext): string[] {
   const args = ["--unshare-all", "--share-net", "--die-with-parent", "--new-session", "--ro-bind", "/usr", "/usr"];
@@ -143,7 +148,7 @@ async function probe(c: QuotaContext): Promise<ZcodeQuotaSnapshot | null> {
 const inflight = new Map<string, Promise<ZcodeQuotaSnapshot | null>>();
 export async function readZcodeQuota(provider: OcxProviderConfig, deps: { context?: typeof context; probe?: typeof probe } = {}): Promise<({ identity: string } & ZcodeQuotaSnapshot) | null> {
   let c: QuotaContext;
-  try { if (provider.zcodeAccountId && !deps.context) await refreshAccount(provider.zcodeAccountId); c = (deps.context ?? context)(provider); } catch { return null; }
+  try { if (!deps.context) await refreshZcodeQuotaIdentity(provider); c = (deps.context ?? context)(provider); } catch { return null; }
   // Coalesce per profile, without letting the first account starve every other account.
   let pending = inflight.get(c.identity);
   if (!pending) {

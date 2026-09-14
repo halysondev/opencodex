@@ -15,9 +15,15 @@ function forceHostBashInput(event) {
 }
 
 module.exports = { forceHostBashInput };
+function parseHookInput(chunks, size) {
+  return JSON.parse(Buffer.concat(chunks, size).toString("utf8"));
+}
+
+module.exports.parseHookInput = parseHookInput;
+
 
 if (require.main === module) {
-  let input = "";
+  const chunks = [];
   let size = 0;
   process.stdin.on("data", chunk => {
     size += chunk.length;
@@ -25,11 +31,11 @@ if (require.main === module) {
       process.stderr.write("OpenCodex host-tool policy input exceeded its safe limit.\n");
       process.exit(1);
     }
-    input += chunk.toString("utf8");
+    chunks.push(chunk);
   });
   process.stdin.on("end", () => {
     try {
-      process.stdout.write(JSON.stringify(forceHostBashInput(JSON.parse(input))) + "\n");
+      process.stdout.write(JSON.stringify(forceHostBashInput(parseHookInput(chunks, size))) + "\n");
     } catch {
       process.stderr.write("OpenCodex host-tool policy input was invalid.\n");
       process.exitCode = 1;

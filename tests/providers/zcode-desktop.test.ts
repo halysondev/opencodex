@@ -13,7 +13,7 @@ import { resolveDesktopNode } from "../../src/adapters/zcode/desktop-node";
 
 const require = createRequire(import.meta.url);
 const { normalizeDesktopConfig, desktopModelCatalog, managedSubagentState } = require("../../src/adapters/zcode/desktop-bootstrap.cjs");
-const { forceHostBashInput } = require("../../src/adapters/zcode/desktop-host-tool-hook.cjs");
+const { forceHostBashInput, parseHookInput } = require("../../src/adapters/zcode/desktop-host-tool-hook.cjs");
 const { materializeSession, subjectHash } = require("../../src/adapters/zcode/oauth-bootstrap.cjs");
 let root: string;
 let previousHome: string | undefined;
@@ -110,6 +110,21 @@ describe("managed ZCode Desktop", () => {
     expect(() => forceHostBashInput({
       hook_event_name: "PreToolUse", tool_name: "Read", tool_input: original,
     })).toThrow("invalid hook input");
+  });
+  test("preserves UTF-8 when hook input chunks split a code point", () => {
+    const encoded = Buffer.from(JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "cat /tmp/revisión.txt" },
+    }));
+    const codePoint = encoded.indexOf(Buffer.from("ó"));
+    expect(codePoint).toBeGreaterThan(0);
+    const event = parseHookInput([
+      encoded.subarray(0, codePoint + 1),
+      encoded.subarray(codePoint + 1),
+    ], encoded.length);
+    expect(forceHostBashInput(event).hookSpecificOutput.updatedInput.command)
+      .toBe("cat /tmp/revisión.txt");
   });
   test("runtime selection requires a Desktop resources layout, not arbitrary commands", () => {
     expect(() => resolveDesktopRuntime("node -e malicious")).toThrow("desktop_missing");
