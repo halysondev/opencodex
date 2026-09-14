@@ -48,6 +48,34 @@ describe("managed ZCode Desktop", () => {
     expect(JSON.stringify(catalog)).not.toContain("fixture-private-value");
     expect(JSON.stringify(catalog)).not.toContain("apiKey");
   });
+  test("routes built-in child agents to Flash max without changing the parent model", () => {
+    const config = normalizeDesktopConfig({ provider: { "builtin:zai-coding-plan": {
+      ...provider(),
+      models: {
+        "GLM-5.3": { name: "GLM 5.3" },
+        "GLM-5.3-Flash": { name: "GLM 5.3 Flash" },
+      },
+    } } });
+    expect(config.model).toEqual({
+      main: "builtin:zai-coding-plan/GLM-5.3",
+      lite: "builtin:zai-coding-plan/GLM-5.3",
+    });
+    expect(config.subagents).toEqual({
+      builtInModelOverrides: {
+        "general-purpose": "builtin:zai-coding-plan/GLM-5.3-Flash",
+        Explore: "builtin:zai-coding-plan/GLM-5.3-Flash",
+      },
+      builtInThoughtLevelOverrides: { "general-purpose": "max", Explore: "max" },
+    });
+  });
+  test("inherits the parent model when Desktop does not expose Flash", () => {
+    const config = normalizeDesktopConfig({ provider: { "builtin:zai-coding-plan": provider() } });
+    expect(config.model).toEqual({
+      main: "builtin:zai-coding-plan/model",
+      lite: "builtin:zai-coding-plan/model",
+    });
+    expect(config.subagents).toBeUndefined();
+  });
   test("filters invalid model entries before applying the public catalog cap", () => {
     const invalid = Object.fromEntries(Array.from({ length: 210 }, (_, i) => [`invalid ${i}`, {}]));
     const config = normalizeDesktopConfig({ provider: { "builtin:zai-coding-plan": {

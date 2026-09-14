@@ -57,6 +57,12 @@ or subscription terms; those remain the vendor's policy.
    calling client. Only configured, enabled built-in Z.AI profiles are exposed by this workflow;
    custom Desktop providers and routes back to OpenCodex are not imported.
 
+Managed connections also configure ZCode's two built-in child-agent profiles through its
+official runtime settings. When the connected account exposes `GLM-5.3-Flash`, both
+`general-purpose` and `Explore` children use that model at `max` effort; the parent keeps the
+model selected in Codex. Accounts without Flash retain ZCode's normal parent-model inheritance.
+This does not create child turns by itself or turn the accounts into a pool.
+
 For an existing provider, the same panel is in **Settings**. **Disconnect** revokes the managed
 connection, disables that provider and removes its models from the converged Codex catalog while
 preserving its customized settings for reconnection. It closes owned app-server children but does

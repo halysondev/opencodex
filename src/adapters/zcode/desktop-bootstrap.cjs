@@ -44,10 +44,19 @@ function normalizeDesktopConfig(input, options = {}) {
     };
   }
   const config = { provider };
-  const model = desktopModelCatalog(config)[0]?.id;
+  const catalog = desktopModelCatalog(config);
+  const model = catalog[0]?.id;
+  const flash = catalog.find(item => item.modelId === "GLM-5.3-Flash")?.id;
   return {
     ...config,
     ...(model ? { model: { main: model, lite: model } } : {}),
+    // ZCode removed call-level Agent model selection in favor of official runtime settings.
+    // Keep the caller-selected parent model, but route both built-in child profiles to Flash/max
+    // when Desktop exposes it. If this account lacks Flash, ZCode inherits the parent as usual.
+    ...(flash ? { subagents: {
+      builtInModelOverrides: { "general-purpose": flash, Explore: flash },
+      builtInThoughtLevelOverrides: { "general-purpose": "max", Explore: "max" },
+    } } : {}),
     // This is an official ZCode user-config hook, not a vendor-runtime patch. Managed host
     // consent makes Bash deterministic even when the model omits the per-call flag. The
     // optional outer Bubblewrap path never installs it and remains a hard confinement layer.
