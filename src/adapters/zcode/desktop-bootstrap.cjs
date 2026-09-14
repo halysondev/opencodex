@@ -3,6 +3,7 @@
 // turn-scoped; it never reaches management responses, logs or the Desktop source profile.
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
+const path = require("node:path");
 
 function hostExecutionHooks() {
   return {
@@ -44,24 +45,35 @@ function normalizeDesktopConfig(input, options = {}) {
     };
   }
   const config = { provider };
-  const catalog = desktopModelCatalog(config);
-  const model = catalog[0]?.id;
-  const flash = catalog.find(item => item.modelId === "GLM-5.3-Flash")?.id;
+  const model = desktopModelCatalog(config)[0]?.id;
   return {
     ...config,
     ...(model ? { model: { main: model, lite: model } } : {}),
-    // ZCode removed call-level Agent model selection in favor of official runtime settings.
-    // Keep the caller-selected parent model, but route both built-in child profiles to Flash/max
-    // when Desktop exposes it. If this account lacks Flash, ZCode inherits the parent as usual.
-    ...(flash ? { subagents: {
-      builtInModelOverrides: { "general-purpose": flash, Explore: flash },
-      builtInThoughtLevelOverrides: { "general-purpose": "max", Explore: "max" },
-    } } : {}),
     // This is an official ZCode user-config hook, not a vendor-runtime patch. Managed host
     // consent makes Bash deterministic even when the model omits the per-call flag. The
     // optional outer Bubblewrap path never installs it and remains a hard confinement layer.
     ...(options.hostExecution ? { hooks: hostExecutionHooks() } : {}),
   };
+}
+
+function managedSubagentState(config) {
+  // ZCode intentionally removed call-level Agent model selection. Its official Settings screen
+  // persists built-in profile overrides in <storage>/v2/agents-state.json, not config.json.
+  const flash = desktopModelCatalog(config).find(item => item.modelId === "GLM-5.3-Flash")?.id;
+  if (!flash) return;
+  return {
+    builtInModelOverrides: { "general-purpose": flash, Explore: flash },
+    builtInThoughtLevelOverrides: { "general-purpose": "max", Explore: "max" },
+  };
+}
+
+function writeManagedSubagentState(storageRoot, state) {
+  if (!state) return;
+  const directory = path.join(storageRoot, "v2");
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporary = path.join(directory, `.agents-state-${process.pid}-${Date.now()}.tmp`);
+  fs.writeFileSync(temporary, JSON.stringify(state), { mode: 0o600, flag: "wx" });
+  fs.renameSync(temporary, path.join(directory, "agents-state.json"));
 }
 
 function desktopModelCatalog(config) {
@@ -72,7 +84,7 @@ function desktopModelCatalog(config) {
       ...(Number.isFinite(m.limit?.context) && m.limit.context > 0 ? { contextWindow: m.limit.context } : {}),
     })));
 }
-module.exports = { normalizeDesktopConfig, desktopModelCatalog };
+module.exports = { normalizeDesktopConfig, desktopModelCatalog, managedSubagentState, writeManagedSubagentState };
 if (require.main === module) {
   let temporaryHome;
   let child;
@@ -103,27 +115,30 @@ if (require.main === module) {
     const args = process.argv.slice(2);
     host = args[0] === "--host";
     if (host ? args.length !== 6 || args[5] !== "app-server" : args.length !== 1 || args[0] !== "app-server") throw new Error("unsupported command");
-    const path = host ? args[2] : "/desktop/config.json";
-    if (fs.statSync(path).size > 4 * 1024 * 1024) throw new Error("oversized");
-    const input = JSON.parse(fs.readFileSync(path, "utf8"));
+    const configPath = host ? args[2] : "/desktop/config.json";
+    if (fs.statSync(configPath).size > 4 * 1024 * 1024) throw new Error("oversized");
+    const input = JSON.parse(fs.readFileSync(configPath, "utf8"));
     const config = normalizeDesktopConfig(input, { hostExecution: host });
+    const subagentState = managedSubagentState(config);
     let env = process.env;
     let settingsPath = `${env.HOME}/.zcode/cli/config.json`;
+    let storageRoot = path.join(env.HOME, ".zcode");
     if (host) {
       // ZCode reads user config from os.homedir() and exposes no config-path CLI flag. Patch
       // that lookup only in the official runtime process; process.env.HOME stays real for
       // the native tools it starts. This is state separation, not filesystem confinement.
-      const paths = require("node:path");
       const stateHome = args[4];
-      if (!paths.isAbsolute(stateHome) || stateHome.includes("\0")) throw new Error("invalid state home");
-      const stableDb = paths.join(stateHome, ".zcode/cli/db");
-      temporaryHome = fs.mkdtempSync(paths.join(stateHome, "turn-"));
-      fs.mkdirSync(paths.join(temporaryHome, ".zcode/cli"), { recursive: true, mode: 0o700 });
-      fs.symlinkSync(stableDb, paths.join(temporaryHome, ".zcode/cli/db"), "dir");
-      settingsPath = paths.join(temporaryHome, ".zcode/cli/config.json");
-      config.storage = { dir: paths.join(stateHome, ".zcode") };
+      if (!path.isAbsolute(stateHome) || stateHome.includes("\0")) throw new Error("invalid state home");
+      const stableDb = path.join(stateHome, ".zcode/cli/db");
+      temporaryHome = fs.mkdtempSync(path.join(stateHome, "turn-"));
+      fs.mkdirSync(path.join(temporaryHome, ".zcode/cli"), { recursive: true, mode: 0o700 });
+      fs.symlinkSync(stableDb, path.join(temporaryHome, ".zcode/cli/db"), "dir");
+      settingsPath = path.join(temporaryHome, ".zcode/cli/config.json");
+      storageRoot = path.join(stateHome, ".zcode");
+      config.storage = { dir: storageRoot };
       env = { ...process.env, ZCODE_DATA_BASE_DIR: stateHome, OCX_ZCODE_RUNTIME_HOME: temporaryHome };
     }
+    writeManagedSubagentState(storageRoot, subagentState);
     fs.writeFileSync(settingsPath, JSON.stringify(config), { mode: 0o600, flag: "wx" });
     const childArgs = host
       ? ["--require", require.resolve("./desktop-host-preload.cjs"), args[1], "app-server"]

@@ -12,7 +12,7 @@ import { parseNativeOAuthEvent, nativeOAuthCommand } from "../../src/adapters/zc
 import { resolveDesktopNode } from "../../src/adapters/zcode/desktop-node";
 
 const require = createRequire(import.meta.url);
-const { normalizeDesktopConfig, desktopModelCatalog } = require("../../src/adapters/zcode/desktop-bootstrap.cjs");
+const { normalizeDesktopConfig, desktopModelCatalog, managedSubagentState } = require("../../src/adapters/zcode/desktop-bootstrap.cjs");
 const { forceHostBashInput } = require("../../src/adapters/zcode/desktop-host-tool-hook.cjs");
 const { materializeSession, subjectHash } = require("../../src/adapters/zcode/oauth-bootstrap.cjs");
 let root: string;
@@ -60,7 +60,8 @@ describe("managed ZCode Desktop", () => {
       main: "builtin:zai-coding-plan/GLM-5.3",
       lite: "builtin:zai-coding-plan/GLM-5.3",
     });
-    expect(config.subagents).toEqual({
+    expect(config.subagents).toBeUndefined();
+    expect(managedSubagentState(config)).toEqual({
       builtInModelOverrides: {
         "general-purpose": "builtin:zai-coding-plan/GLM-5.3-Flash",
         Explore: "builtin:zai-coding-plan/GLM-5.3-Flash",
@@ -74,7 +75,7 @@ describe("managed ZCode Desktop", () => {
       main: "builtin:zai-coding-plan/model",
       lite: "builtin:zai-coding-plan/model",
     });
-    expect(config.subagents).toBeUndefined();
+    expect(managedSubagentState(config)).toBeUndefined();
   });
   test("filters invalid model entries before applying the public catalog cap", () => {
     const invalid = Object.fromEntries(Array.from({ length: 210 }, (_, i) => [`invalid ${i}`, {}]));
@@ -305,7 +306,12 @@ test("host bootstrap reads and writes outside workspace without touching the sou
   const external = join(root, "outside-report.txt");
   writeFileSync(external, "report fixture");
   const config = join(root, "desktop-config.json");
-  const original = JSON.stringify({ provider: { "builtin:zai-coding-plan": provider() } });
+  const original = JSON.stringify({ provider: { "builtin:zai-coding-plan": {
+    ...provider(), models: {
+      "GLM-5.3": { name: "GLM 5.3" },
+      "GLM-5.3-Flash": { name: "GLM 5.3 Flash" },
+    },
+  } } });
   writeFileSync(config, original);
   const runtime = join(root, "official-runtime-fixture.cjs");
   writeFileSync(runtime, `
@@ -320,13 +326,14 @@ test("host bootstrap reads and writes outside workspace without touching the sou
       fs.writeFileSync(external,value);
       const runtimeHome=os.homedir();
       const settings=JSON.parse(fs.readFileSync(path.join(runtimeHome,".zcode/cli/config.json"),"utf8"));
+      const agentState=JSON.parse(fs.readFileSync(path.join(settings.storage.dir,"v2/agents-state.json"),"utf8"));
       const nativeHome=spawnSync(process.execPath,["-e","process.stdout.write(require('node:os').homedir())"],
         {encoding:"utf8",env:process.env}).stdout;
       process.stdout.write(JSON.stringify({id:r.id,result:{read:value,written:true,cwd:process.cwd(),
         hostHome:process.env.HOME,runtimeHome,nativeHome,dataBase:process.env.ZCODE_DATA_BASE_DIR,
         runtimeMarker:Object.hasOwn(process.env,"OCX_ZCODE_RUNTIME_HOME"),args:process.argv.slice(2),
         providerIds:Object.keys(settings.provider),mainModel:settings.model.main,
-        storageDir:settings.storage.dir}})+"\\n");
+        subagents:settings.subagents,agentState,storageDir:settings.storage.dir}})+"\\n");
     });
   `);
   const settings = { command: [resolveDesktopNode(), fileURLToPath(new URL("../../src/adapters/zcode/desktop-bootstrap.cjs", import.meta.url)),
@@ -337,13 +344,15 @@ test("host bootstrap reads and writes outside workspace without touching the sou
     const client = new ZcodeClient(settings);
     try {
       const models = await client.request("opencodex/desktopModels", {}, 3000);
-      expect(models.models).toHaveLength(1);
+      expect(models.models).toHaveLength(2);
       const state = await client.request("workspace/readState", {}, 3000);
       const runtimeArgs = state.args as string[];
       expect(state).toMatchObject({ read: "report fixture", written: true, cwd: workspace,
         hostHome: homedir(), nativeHome: homedir(), dataBase: home, runtimeMarker: false,
-        providerIds: ["builtin:zai-coding-plan"], mainModel: "builtin:zai-coding-plan/model",
-        storageDir: join(home, ".zcode") });
+        providerIds: ["builtin:zai-coding-plan"], mainModel: "builtin:zai-coding-plan/GLM-5.3",
+        storageDir: join(home, ".zcode"),
+        agentState: managedSubagentState(normalizeDesktopConfig(JSON.parse(original))) });
+      expect(state.subagents).toBeUndefined();
       expect(runtimeArgs).toEqual(["app-server"]);
       expect(state.runtimeHome).toStartWith(join(home, "turn-"));
       expect(state.runtimeHome).not.toBe(homedir());
