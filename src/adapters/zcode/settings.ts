@@ -14,6 +14,8 @@ export interface ZcodeSettings {
   command: string[];
   home: string;
   workspace: string;
+  /** Managed host launcher argv slot carrying the per-turn working directory. */
+  hostWorkspaceArgumentIndex?: number;
   settingsPath: string;
   /** Stable physical-profile identity used only for process serialization. */
   lockKey: string;

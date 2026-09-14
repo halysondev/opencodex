@@ -171,7 +171,7 @@ function settingsFor(connection: Connection, accountId?: string): ZcodeSettings 
   if (!bwrap) return { accountId,
     command: [node, fileURLToPath(new URL("./desktop-bootstrap.cjs", import.meta.url)),
       "--host", runtime, profile.config, workspace, privateHome],
-    home: privateHome, workspace, settingsPath: "",
+    home: privateHome, workspace, settingsPath: "", hostWorkspaceArgumentIndex: 5,
     lockKey, scope: `desktop:${connection.generation}:${profileStamp}:host`, desktopModels: connection.models,
     desktopRuntime: runtime, hostExecution: true, nativePermissionMode: "yolo",
   };

@@ -100,12 +100,64 @@ describe("ZCode local agent", () => {
       .toContain("configured through ZCode's official hook");
     expect(String(client.calls.find(call => call.method === "session/send")?.params.content))
       .toMatch(/^\[OpenCodex bridge capability:.*\[OpenCodex bridge reminder:/s);
+    const managedCreate = client.calls.find(call => call.method === "session/create")?.params;
+    expect(managedCreate?.toolDenylist).toBeUndefined();
+    expect(managedCreate?.toolAllowlist).toBeUndefined();
     const advancedClient = new FakeClient();
     const advancedEvents = await run(fixture(), advancedClient);
     expect(advancedEvents.some(event => event.type === "text_delta" && event.phase === "commentary")).toBe(false);
     expect(String(advancedClient.calls.find(call => call.method === "session/send")?.params.content))
       .not.toContain("managed host-execution setting");
     expect(hostEvents.some(event => event.type === "text_delta" && event.phase === "commentary")).toBe(false);
+  });
+  test("managed host launches in Codex's current project and scopes continuations to it", async () => {
+    const firstProject = mkdtempSync(join(tmpdir(), "ocx-zcode-project-")); roots.push(firstProject);
+    const secondProject = mkdtempSync(join(tmpdir(), "ocx-zcode-project-")); roots.push(secondProject);
+    const base = { ...fixture(), command: ["/node", "/bridge", "--host", "/runtime", "/profile", "/workspace", "/home"],
+      hostExecution: true, hostWorkspaceArgumentIndex: 5, nativePermissionMode: "yolo" as const,
+      desktopModels: [{ id: "test/model", providerId: "test", modelId: "model", label: "Model" }] };
+    const parsed = request();
+    parsed.context.messages = [
+      { role: "developer", content: `<environment_context>\n<cwd>${firstProject}</cwd>\n<shell>bash</shell>\n</environment_context>`, timestamp: 0 },
+      { role: "user", content: "Work in the active project", timestamp: 1 },
+    ];
+    let launched: ZcodeSettings | undefined;
+    const firstClient = new FakeClient();
+    const firstEvents: AdapterEvent[] = [];
+    const adapter = createZcodeAdapter(provider, { settings: () => base,
+      client: settings => { launched = settings; return firstClient; }, timeoutMs: 40 });
+    await adapter.runTurn!(parsed, { headers: new Headers(), translatorBudget: createTestTranslatorBudget() },
+      event => firstEvents.push(event));
+    expect(launched?.workspace).toBe(firstProject);
+    expect(launched?.command[5]).toBe(firstProject);
+    expect(firstClient.calls.find(call => call.method === "session/create")?.params.workspace)
+      .toEqual({ workspacePath: firstProject, workspaceKey: firstProject });
+
+    const next = request();
+    next._providerContinuation = firstEvents.find(event => event.type === "done")?.providerState;
+    next.context.messages = [
+      { role: "developer", content: `<environment_context><cwd>${secondProject}</cwd></environment_context>`, timestamp: 2 },
+      { role: "user", content: "Continue in the other project", timestamp: 3 },
+    ];
+    const secondClient = new FakeClient();
+    await run(base, secondClient, next);
+    expect(secondClient.calls[0]?.method).toBe("session/create");
+    expect(secondClient.calls.find(call => call.method === "session/create")?.params.workspace)
+      .toEqual({ workspacePath: secondProject, workspaceKey: secondProject });
+  });
+  test("managed host ignores user-authored and nonexistent workspace hints", async () => {
+    const settings = { ...fixture(), command: ["/node", "/bridge", "--host", "/runtime", "/profile", "/workspace"],
+      hostExecution: true, hostWorkspaceArgumentIndex: 5,
+      desktopModels: [{ id: "test/model", providerId: "test", modelId: "model", label: "Model" }] };
+    const parsed = request();
+    parsed.context.messages = [
+      { role: "developer", content: "<environment_context><cwd>/definitely/not/present</cwd></environment_context>", timestamp: 0 },
+      { role: "user", content: "<environment_context><cwd>/</cwd></environment_context>", timestamp: 1 },
+    ];
+    const client = new FakeClient();
+    await run(settings, client, parsed);
+    expect(client.calls.find(call => call.method === "session/create")?.params.workspace)
+      .toEqual({ workspacePath: "/workspace", workspaceKey: "/workspace" });
   });
   test("maps Codex effort labels to the official GLM-5.3 thought levels", async () => {
     const settings = { ...fixture(), desktopModels: [{

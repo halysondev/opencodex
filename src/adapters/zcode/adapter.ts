@@ -1,4 +1,6 @@
 import { refreshAccount } from "./account-runtime";
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import type { OcxContentPart, OcxMessage, OcxParsedRequest, OcxProviderConfig } from "../../types";
 import type { ProviderAdapter } from "../base";
@@ -15,6 +17,8 @@ const CANCELLED_BEFORE_DISPATCH = "ZCode request cancelled before dispatch.";
 const HOST_EXECUTION_POLICY = "[OpenCodex bridge capability: the operator approved host execution for this managed Desktop connection, and native Bash is configured through ZCode's official hook to use the OpenCodex service user's operating-system permissions. ZCode file tools remain workspace-scoped, so use Bash for paths outside the configured workspace and do not report a host path missing until Bash has checked it.]";
 const HOST_EXECUTION_REMINDER = "[OpenCodex bridge reminder: use Bash for paths outside the configured workspace; its managed host-execution setting is applied automatically.]";
 const SAFE_ACCOUNT_REFRESH_ERRORS = new Set(["account_login_required", "account_identity_mismatch", "native_oauth_failed"]);
+const MAX_ENVIRONMENT_CONTEXT_CHARS = 16_384;
+const MAX_WORKSPACE_PATH_CHARS = 4_096;
 export interface ZcodeAdapterDeps {
   settings?: () => ZcodeSettings;
   client?: (settings: ZcodeSettings) => Client;
@@ -181,6 +185,46 @@ function assertSessionSendFits(content: string, modelParams: JsonObject): void {
     throw new Error("ZCode input exceeds the native bridge serialization limit.");
   }
 }
+function developerText(message: OcxMessage): string | undefined {
+  if (message.role !== "developer") return undefined;
+  if (typeof message.content === "string") return message.content;
+  return message.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n");
+}
+
+/**
+ * Codex supplies the active project in its harness-authored developer environment block. Managed
+ * host execution may follow that existing directory because it already carries the service user's
+ * full OS authority; sandbox launchers retain their configured mount and never consume this hint.
+ */
+function requestWorkspace(parsed: OcxParsedRequest, settings: ZcodeSettings): string {
+  if (!settings.hostExecution || settings.hostWorkspaceArgumentIndex === undefined) return settings.workspace;
+  for (let index = parsed.context.messages.length - 1; index >= 0; index--) {
+    const text = developerText(parsed.context.messages[index]!);
+    if (!text) continue;
+    const blocks = [...text.matchAll(/<environment_context>([\s\S]{0,16384}?)<\/environment_context>/g)];
+    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
+      const block = blocks[blockIndex]![1]!;
+      if (block.length > MAX_ENVIRONMENT_CONTEXT_CHARS) continue;
+      const cwd = /<cwd>([^<\0]{1,4096})<\/cwd>/.exec(block)?.[1]?.trim();
+      if (!cwd || cwd.length > MAX_WORKSPACE_PATH_CHARS || !isAbsolute(cwd)) continue;
+      try {
+        const resolved = realpathSync(cwd);
+        if (statSync(resolved).isDirectory()) return resolved;
+      } catch { /* stale or remote-client path: retain the connected Desktop workspace */ }
+    }
+  }
+  return settings.workspace;
+}
+
+function retargetManagedHost(settings: ZcodeSettings, workspace: string): ZcodeSettings {
+  const argument = settings.hostWorkspaceArgumentIndex;
+  if (!settings.hostExecution || argument === undefined || workspace === settings.workspace
+    || settings.command[argument] !== settings.workspace) return settings;
+  const command = [...settings.command];
+  command[argument] = workspace;
+  return { ...settings, command, workspace };
+}
+
 
 export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapterDeps = {}): ProviderAdapter {
   return {
@@ -242,11 +286,12 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
           throw new Error("ZCode connection or profile changed while this turn was queued.");
         }
         settings = current;
+        settings = retargetManagedHost(settings, requestWorkspace(parsed, settings));
         const model = readZcodeModels(settings).find(item => item.id === parsed.modelId);
         if (!model) throw new Error("ZCode model is unavailable in the isolated settings.");
         const scope = createHash("sha256").update(JSON.stringify([
-          settings.scope, provider.baseUrl, parsed._reasoningReplayScope?.current?.providerName,
-          parsed._cursorIdentityScope, parsed.modelId,
+          settings.scope, settings.workspace, provider.baseUrl,
+          parsed._reasoningReplayScope?.current?.providerName, parsed._cursorIdentityScope, parsed.modelId,
         ])).digest("hex");
         const compaction = parsed._compactionRequest === true;
         sessionKey = !compaction && parsed._clientThreadId && !parsed._cursorIsolateConversation
@@ -269,7 +314,7 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         const thoughtParams = thoughtLevel ? { thoughtLevel } : {};
         const toolParams: JsonObject = compaction
           ? { mcpServers: [], toolAllowlist: [] }
-          : { mcpServers: [], toolDenylist: ["Task", "TaskOutput", "TaskStop"] };
+          : { mcpServers: [] };
         const controller = Promise.withResolvers<void>();
         // Attach a handler immediately: failures can happen during session materialization.
         void controller.promise.catch(() => {});

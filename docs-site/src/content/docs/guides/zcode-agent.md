@@ -43,9 +43,10 @@ or subscription terms; those remain the vendor's policy.
 3. Click **Detect again** if needed. OpenCodex finds running Desktop installations and standard
    installation folders. For portable/extracted installations, the advanced folder field lets
    you select the application directory; it never accepts a shell command.
-4. Choose a **workspace folder** with the folder browser. It is the initial working directory,
-   not a filesystem boundary in the default host mode; choose a narrower project folder when
-   convenient, even though native Bash can still reach other files owned by the proxy user.
+4. Choose a **workspace folder** with the folder browser. It is the fallback working directory,
+   not a filesystem boundary in the default host mode. For Codex requests, the managed launcher
+   follows the latest existing local `<cwd>` from Codex's developer environment context; remote
+   or stale paths fall back to this selection.
 5. Review the native file/command execution notice, check the consent box and click
    **Connect Desktop**. OpenCodex constructs the native launcher, verifies the protocol, enables the ZCode provider and updates the Codex catalog;
    no environment variables, API-key entry, token import or separate CLI login is required.
@@ -144,17 +145,18 @@ open in Desktop. The original **Integrations → ZCode** configuration export re
 
 By default, the managed runtime runs **without an OpenCodex OS sandbox**, with the
 permissions of the proxy's operating-system user. It can read and modify files outside the
-selected working directory, including sensitive files accessible to that user. Absolute
-paths retain their host meaning. The selected workspace is a starting directory, not a
-filesystem boundary. This default also applies to previously connected installations after
+active working directory, including sensitive files accessible to that user. Absolute paths
+retain their host meaning. Codex requests start in their existing local project directory when
+the harness supplies one; otherwise they start in the workspace selected during connection.
+Neither path is a filesystem boundary. This default also applies to previously connected installations after
 upgrading. Managed connections start ZCode in its non-interactive `yolo` permission mode so
 native commands do not stop for an approval prompt that the OpenCodex protocol cannot display.
 Because the official Bash tool otherwise creates its own sandbox, the disposable private ZCode
 configuration also installs an official `PreToolUse` process hook for Bash. The hook preserves the
 requested command and sets ZCode's supported `dangerouslyDisableSandbox=true` input
 deterministically, even when a model omits it. OpenCodex does not patch the Desktop runtime or send
-the request to a different API. Native file tools remain limited to the selected workspace, so a
-bridge-owned reminder directs work on other absolute paths through Bash. This disables ZCode's
+the request to a different API. Native file tools remain limited to the active working directory,
+so a bridge-owned reminder directs work on other absolute paths through Bash. This disables ZCode's
 per-command sandbox; it does not elevate privileges or bypass the operating system or an outer
 harness sandbox.
 
@@ -290,9 +292,9 @@ or discovery APIs.
   replace the main continuation. Any unexpected tool event fails the compaction closed. Before a
   turn starts, OpenCodex also checks the fully serialized `session/send` line against the Desktop
   bridge limit, so escaped control characters cannot turn an accepted request into a later crash.
-- The default turn deadline is five minutes. Cancellation/deadline closes the owned child.
-  The launcher is responsible for terminating descendants. `Task`, `TaskOutput` and `TaskStop`
-  are denied; work cannot keep an owned sandbox running after its turn ends.
+- The default turn deadline is five minutes. Cancellation/deadline closes the owned child, and
+  the launcher is responsible for terminating descendants. Ordinary turns retain ZCode's official
+  native subagent tools; compaction sessions remain tool-disabled.
 - Once a task is sent, failures become non-retryable `zcode_agent_interrupted` incomplete
   responses. Automatic empty-completion replay is disabled for this adapter. Do not manually
   retry a failed mutation without checking the workspace first.
