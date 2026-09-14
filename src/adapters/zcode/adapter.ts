@@ -321,7 +321,12 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
         stop = () => { controller.reject(new Error("ZCode turn cancelled or timed out.")); void active.close(); };
         incoming.abortSignal?.addEventListener("abort", cancelled, { once: true });
         if (incoming.abortSignal?.aborted) throw new Error(CANCELLED_BEFORE_DISPATCH);
-        timer = setTimeout(stop, deps.timeoutMs ?? 300_000);
+        const inactivityTimeoutMs = deps.timeoutMs ?? 300_000;
+        const armInactivityTimeout = () => {
+          clearTimeout(timer);
+          timer = setTimeout(stop, inactivityTimeoutMs);
+        };
+        armInactivityTimeout();
         heartbeat = setInterval(() => emit({ type: "heartbeat" }), 5_000);
         active.onFailure = error => controller.reject(error);
         let textSeen = false;
@@ -329,6 +334,7 @@ export function createZcodeAdapter(provider: OcxProviderConfig, deps: ZcodeAdapt
           const params = record(message.params);
           if (message.method !== "session/event") return;
           if (typeof params.sessionId !== "string" || params.sessionId !== sessionId) return;
+          armInactivityTimeout();
           const payload = record(params.payload);
           if (params.type === "model.streaming") {
             if ((payload.kind === "text_delta" || payload.kind === "text_start") && typeof payload.delta === "string") {

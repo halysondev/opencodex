@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, jest, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,7 @@ class FakeClient {
   onFailure: (error: Error) => void = () => {};
   calls: Array<{ method: string; params: JsonObject }> = [];
   closed = false;
+  readonly sent = Promise.withResolvers<void>();
   private nativeTools = true;
   constructor(private outcome: "ok" | "failed" | "hang" | "session-noise" | "answerless" | "tool-during-compaction" = "ok") {}
   async request(method: string, params: JsonObject): Promise<JsonObject> {
@@ -39,6 +40,7 @@ class FakeClient {
       return { session: { sessionId: "sess_test-1" } };
     }
     if (method === "session/send") {
+      this.sent.resolve();
       if (this.outcome === "session-noise") {
         queueMicrotask(() => {
           this.onEvent({ method: "session/event", params: { type: "turn.completed", payload: { response: "wrong session" } } });
@@ -448,6 +450,23 @@ describe("ZCode local agent", () => {
     const client = new FakeClient("hang"); const events = await run(fixture(), client);
     expect(events.at(-1)?.type).toBe("incomplete"); expect(client.closed).toBe(true);
     expect(client.calls.filter(c => c.method === "session/send")).toHaveLength(1);
+  });
+  test("session activity extends the inactivity deadline for long native turns", async () => {
+    jest.useFakeTimers();
+    try {
+      const client = new FakeClient("hang");
+      const pending = run(fixture(), client, request(), undefined, 40);
+      await client.sent.promise;
+      jest.advanceTimersByTime(25);
+      client.event("model.streaming", { kind: "reasoning_delta", delta: "Still working" });
+      jest.advanceTimersByTime(25);
+      client.event("model.streaming", { kind: "text_delta", delta: "Hello" });
+      client.event("turn.completed", { response: "Hello" });
+      expect((await pending).at(-1)?.type).toBe("done");
+      expect(client.closed).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
   test("a running cancellation closes only its child and never resends", async () => {
     const controller = new AbortController(); const client = new FakeClient("hang");
