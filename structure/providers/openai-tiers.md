@@ -451,3 +451,14 @@ openai-apikey/gpt-5.6-sol           # OpenAI API key
 openai-apikey/daybreak-blue-latest  # API Daybreak alias; separate approval/provisioning
 openai-apikey/gpt-5.6-sol-pro       # API Pro virtual model
 ```
+
+## Opt-in Desktop side-chat cache
+
+`src/codex/side-chat-cache.ts` owns bounded parent-prefix fingerprints and reuse decisions;
+`src/codex/exec-cache-reference.ts` normalizes the explicitly supported execution references.
+`experimentalCodexSideChatCache` is disabled by default and admitted only for the canonical
+OpenAI forward provider. Credential/account/model/settings/tool compatibility and explicit
+fork metadata remain required. Unknown shapes, continuations, compaction, incomplete
+responses and incompatible prefixes do not gain reuse eligibility. No cross-account cache
+sharing or guaranteed upstream hit rate is claimed. The setting is operator-controlled;
+this change does not enable it in an existing installation.

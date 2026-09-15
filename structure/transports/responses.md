@@ -471,6 +471,11 @@ mapping cyber-policy codes to HTTP 400. The same file holds the shared usage sha
 deserialize them as required fields.
 
 
+What must not happen is a ladder that charges and then returns through a path that neither confirms
+nor releases. That is not a lost send; it is a send the request never made, spending an allowance a
+later recovery in the same request then cannot have. `tests/lib/execution-budget-permits.test.ts`
+pins both ladder shapes against exactly that.
+
 Active-turn admission owns workflow admission, so both remain held until a streaming body finishes or
 is cancelled.
 
@@ -479,3 +484,14 @@ replacement-decoded; other malformed-body usage, quota, reset evidence and class
 status-only fallback. Rebuilt failures remain non-replayable and cyber-policy failures carry neither
 `Retry-After` nor quota-reset metadata. The [Responses failover contract](responses-failover.md)
 owns the bounded recovery and replay decisions.
+
+## Side-chat cache completion ownership
+
+For the opt-in canonical forward route, `src/adapters/openai-responses/passthrough.ts`
+prepares and attaches the side-chat decision after normal request normalization.
+`passthrough-dispatch.ts` publishes accepted first-completion snapshots and records bounded
+diagnostics. `passthrough-delivery.ts` requests completion-before-terminal ordering only
+when that request carries side-chat metadata. The existing first-terminal, cancellation,
+inspection and replay guards are preserved; facade files do not own the cache implementation.
+`src/usage/side-chat-cache.ts` describes bounded numeric/reason metadata for existing request
+and attempt logs; it does not log prompts, credentials or raw account identifiers.
