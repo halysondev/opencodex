@@ -11,6 +11,9 @@ import CodexSet from "./pages/CodexSet";
 import Integrations from "./pages/Integrations";
 import Startup from "./pages/Startup";
 import RemoteWorkspace from "./pages/RemoteWorkspace";
+import { Skills } from "./pages/Skills";
+import { Security } from "./pages/Security";
+import { Credentials } from "./pages/Credentials";
 import ErrorBoundary from "./components/ErrorBoundary";
 import QuotaSummaryBar from "./components/quota-summary-bar/QuotaSummaryBar";
 import { SidebarGithubRow } from "./components/sidebar-github-row";
@@ -37,6 +40,9 @@ const PAGE_TKEY: Record<Page, TKey> = {
   providers: "nav.providers",
   models: "nav.models",
   subagents: "nav.subagents",
+  skills: "nav.skills",
+  security: "nav.security",
+  credentials: "nav.credentials",
   logs: "nav.logs",
   usage: "nav.usage",
   storage: "nav.storage",
@@ -519,6 +525,9 @@ export default function App() {
                 {page === "remote" && <RemoteWorkspace apiBase={sharedBase} hubOrigin={targets.shared.serverOrigin} />}
                 {page === "codex-set" && <CodexSet apiBase={sharedBase} />}
                 {page === "integrations" && <Integrations apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
+                {page === "skills" && <Skills apiBase={sharedBase} />}
+                {page === "security" && <Security apiBase={sharedBase} />}
+                {page === "credentials" && <Credentials apiBase={sharedBase} />}
               </>
             )}
           </ErrorBoundary>

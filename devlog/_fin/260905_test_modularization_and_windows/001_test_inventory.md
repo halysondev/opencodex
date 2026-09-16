@@ -403,9 +403,25 @@ Sum of the table: **1061**. Zero leftover.
 
 `ollama-native-parser.test.ts`, `ollama-native-reasoning-wire.test.ts`, `ollama-native-structured-output.test.ts`, `ollama-native-v4.test.ts`, `ollama-native.test.ts`, `ollama-show-enrichment-v7.test.ts`, `ollama-show-enrichment.test.ts`, `ollama-show-ignore-abort.test.ts`
 
+#### `tests/skills/` (8)
+
+`skill-adapters.test.ts`, `skill-api-routes.test.ts`, `skill-hasher.test.ts`, `skill-lifecycle-e2e.test.ts`, `skill-policy-approval.test.ts`, `skill-risk.test.ts`, `skill-scanner.test.ts`, `skill-validator.test.ts`
+
 #### `tests/providers/github-copilot/` (5)
 
 `github-copilot-account-origin.test.ts`, `github-copilot-oauth.test.ts`, `github-copilot-sse-rewrite.test.ts`, `github-copilot-stream-contract.test.ts`, `github-copilot-wire-defaults.test.ts`
+
+#### `tests/credentials/` (4)
+
+`credential-api-routes.test.ts`, `credential-e2e-lease.test.ts`, `credential-integration.test.ts`, `credential-unit.test.ts`
+
+#### `tests/security/` (4)
+
+`security-api-routes.test.ts`, `security-e2e-campaign.test.ts`, `security-integration.test.ts`, `security-unit.test.ts`
+
+#### `tests/social/` (4)
+
+`social-api-routes.test.ts`, `social-e2e-publishing.test.ts`, `social-integration.test.ts`, `social-unit.test.ts`
 
 #### `tests/videos/` (3)
 

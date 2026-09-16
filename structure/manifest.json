@@ -521,6 +521,33 @@
       "documents": [
         "tests/"
       ]
+    },
+    {
+      "path": "skill-control.md",
+      "tier": 5,
+      "title": "Skill Control Plane",
+      "scope": "Universal Agent Skill registry, scanning, policy, deployment, and remote-node distribution.",
+      "documents": [
+        "src/skills/"
+      ]
+    },
+    {
+      "path": "security-control.md",
+      "tier": 5,
+      "title": "Security Control Plane",
+      "scope": "Authorized security-agent control plane: scoped tokens, RBAC, policy, and memory.",
+      "documents": [
+        "src/security/"
+      ]
+    },
+    {
+      "path": "credential-runtime.md",
+      "tier": 5,
+      "title": "Credential Runtime",
+      "scope": "Provider access control plane: credential validation, quarantine, leasing, and revocation.",
+      "documents": [
+        "src/credentials/"
+      ]
     }
   ],
   "contracts": {

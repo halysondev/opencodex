@@ -312,6 +312,13 @@ describe("membership oracle", () => {
       // Placed under routing/ by its author (#3523, restored by #3530): it exercises the oauth
       // routing quorum, not the Anthropic adapter, so the anthropic- seed is wrong for it.
       "anthropic-quorum-cache.test.ts",
+      // Credential vault control-plane tests own the credential- seed; this file guards the
+      // credential-handling lib helper, so it stays in lib on purpose.
+      "credential-redirect-guard.test.ts",
+      // Skill control-plane tests own the skill- seed; skill-ocx asserts the skill:surface map
+      // the ci-workflows gate regenerates, and skill-cli-strict exercises cli/skill option parsing.
+      "skill-ocx.test.ts",
+      "skill-cli-strict.test.ts",
     ]);
     const mismatches: string[] = [];
     let resolved = 0;
