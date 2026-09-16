@@ -528,6 +528,9 @@
       "title": "Skill Control Plane",
       "scope": "Universal Agent Skill registry, scanning, policy, deployment, and remote-node distribution.",
       "documents": [
+        "gui/src/pages/Skills.tsx",
+        "src/cli/skill.ts",
+        "src/server/management/skill-routes.ts",
         "src/skills/"
       ]
     },
@@ -537,6 +540,9 @@
       "title": "Security Control Plane",
       "scope": "Authorized security-agent control plane: scoped tokens, RBAC, policy, and memory.",
       "documents": [
+        "gui/src/pages/Security.tsx",
+        "src/cli/security.ts",
+        "src/server/management/security-routes.ts",
         "src/security/"
       ]
     },
@@ -546,6 +552,9 @@
       "title": "Credential Runtime",
       "scope": "Provider access control plane: credential validation, quarantine, leasing, and revocation.",
       "documents": [
+        "gui/src/pages/Credentials.tsx",
+        "src/cli/credentials.ts",
+        "src/server/management/credential-routes.ts",
         "src/credentials/"
       ]
     },
@@ -555,6 +564,9 @@
       "title": "Social Publishing Control Plane",
       "scope": "External OpenPost instance integration, cross-platform publication orchestration, rendition planning, approval gates, and durable scheduling.",
       "documents": [
+        "gui/src/pages/Social.tsx",
+        "src/cli/social.ts",
+        "src/server/management/social-routes.ts",
         "src/social/"
       ]
     }

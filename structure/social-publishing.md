@@ -48,6 +48,28 @@ Under `$OPENCODEX_HOME` (`~/.opencodex`):
 - `social.sqlite`: instances, accounts, publications, assets, renditions, policy evaluations, approvals, delivery jobs, analytics snapshots, and audit events.
 - Optional `PAO_SOCIAL_DB_PATH` overrides the database path for isolated test runs.
 
-Management API prefix: `/api/social/*`.
-CLI command: `ocx social` (alias `openpost`).
+Environment:
+- `SOCIAL_PUBLISHING_ENABLED`: feature flag, default off.
+- `OPENPOST_BASE_URL`: OpenPost instance URL. Default `http://localhost:8080` is loopback-only; a remote instance must use `https://`.
+- `OPENPOST_API_TOKEN`: OpenPost API token. It is never persisted in `social.sqlite`; only `secret_ref` is stored.
+- `OPENPOST_TRANSPORT`: selects the HTTP or MCP transport.
+- `PAO_SOCIAL_DB_PATH`: optional database path override.
 
+Key files:
+- Server management API routes: `src/server/management/social-routes.ts`
+- CLI command: `src/cli/social.ts` (`ocx social`, alias `openpost`)
+- GUI page: `gui/src/pages/Social.tsx` (`#social`)
+
+Management API prefix: `/api/social/*`.
+
+
+## 5. Legal and Licensing Boundary — OpenPost Integration
+
+Upstream project: OpenPost (`https://github.com/getopenpost/openpost`), licensed AGPL-3.0-only. The integration boundary is a network service boundary (HTTP API / MCP).
+
+Engineering policy:
+
+1. No code merging: OpenPost source code is not copied, vendored, or compiled into Pao-hubPro core repositories.
+2. Network protocol boundary: all interactions between Pao-hubPro and OpenPost occur across a network protocol boundary via standard HTTP REST requests and Model Context Protocol (MCP) tool executions.
+3. Deployment separation: OpenPost is deployed as an independent container or service process. Pao-hubPro acts solely as a client orchestrator.
+4. Secret isolation: social media provider credentials (OAuth tokens, refresh tokens, client secrets) are stored exclusively in OpenPost's persistent storage and are never exposed or synchronized to Pao-hubPro databases or agent context.
