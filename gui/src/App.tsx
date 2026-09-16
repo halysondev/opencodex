@@ -14,6 +14,7 @@ import RemoteWorkspace from "./pages/RemoteWorkspace";
 import { Skills } from "./pages/Skills";
 import { Security } from "./pages/Security";
 import { Credentials } from "./pages/Credentials";
+import { Social } from "./pages/Social";
 import ErrorBoundary from "./components/ErrorBoundary";
 import QuotaSummaryBar from "./components/quota-summary-bar/QuotaSummaryBar";
 import { SidebarGithubRow } from "./components/sidebar-github-row";
@@ -43,6 +44,7 @@ const PAGE_TKEY: Record<Page, TKey> = {
   skills: "nav.skills",
   security: "nav.security",
   credentials: "nav.credentials",
+  social: "nav.social",
   logs: "nav.logs",
   usage: "nav.usage",
   storage: "nav.storage",
@@ -528,6 +530,7 @@ export default function App() {
                 {page === "skills" && <Skills apiBase={sharedBase} />}
                 {page === "security" && <Security apiBase={sharedBase} />}
                 {page === "credentials" && <Credentials apiBase={sharedBase} />}
+                {page === "social" && <Social apiBase={sharedBase} />}
               </>
             )}
           </ErrorBoundary>

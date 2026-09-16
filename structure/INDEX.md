@@ -81,6 +81,7 @@ The dashboard, the management API, and third-party client config ownership.
 | [`skill-control.md`](skill-control.md) | Universal Agent Skill registry, scanning, policy, deployment, and remote-node distribution. |
 | [`security-control.md`](security-control.md) | Authorized security-agent control plane: scoped tokens, RBAC, policy, and memory. |
 | [`credential-runtime.md`](credential-runtime.md) | Provider access control plane: credential validation, quarantine, leasing, and revocation. |
+| [`social-publishing.md`](social-publishing.md) | External OpenPost instance integration, cross-platform publication orchestration, rendition planning, approval gates, and durable scheduling. |
 
 ### Tier 6 — Operations and process
 
@@ -152,6 +153,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/service/` | [`runtime.md`](runtime.md) |
 | `src/sidecar/` | [`ops/service-and-sidecars.md`](ops/service-and-sidecars.md) |
 | `src/skills/` | [`skill-control.md`](skill-control.md) |
+| `src/social/` | [`social-publishing.md`](social-publishing.md) |
 | `src/stall-timeout.ts` | [`runtime.md`](runtime.md) |
 | `src/storage/` | [`runtime.md`](runtime.md) |
 | `src/tray/` | [`runtime.md`](runtime.md) |
