@@ -10,7 +10,7 @@ const writerContracts: Record<string, string[]> = {
   ],
   "src/server/management/config-routes.ts": [
     "streamMode", "codexAutoStart", "appOwnedMemoryBudgetMb", "codexAccountNamespaces",
-    "codexAccountPickerEnabled", "oauthOpenBrowser",
+    "codexAccountPickerEnabled", "oauthOpenBrowser", "dictation",
   ],
   "src/server/management/combo-routes.ts": ["combos"],
   "src/server/management/routing-profile-routes.ts": ["routingProfiles"],
