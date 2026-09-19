@@ -24,6 +24,7 @@ import { SendBudgetExhaustedError, markResponseNonReplayable } from "../../lib/u
 import {
   GENERIC_OAUTH_MAX_FAILOVERS_PER_REQUEST,
   hasEligibleGenericOAuthFailoverTarget,
+  genericOAuthMaxFailovers,
   isGenericOAuthFailoverEnabled,
   isGenericOAuthFailoverStatus,
   rotateGenericOAuthAccountOnError,
@@ -244,7 +245,7 @@ export async function executeResponsesRunTurn(
       if (
         !isGenericOAuthFailoverStatus(status, route.providerName)
         || !transportState.genericFailoverAccountId
-        || transportState.genericFailovers >= GENERIC_OAUTH_MAX_FAILOVERS_PER_REQUEST
+        || transportState.genericFailovers >= genericOAuthMaxFailovers(route.providerName)
         || !isGenericOAuthFailoverEnabled(config, route.providerName)
       ) return false;
       // Intersection with the request's shared budget: the roster bound above answers "may this
@@ -272,6 +273,7 @@ export async function executeResponsesRunTurn(
         null,
         Date.now(),
         route.modelId,
+        error.message,
       );
       if (!nextAccountId) {
         hop.permit?.release();

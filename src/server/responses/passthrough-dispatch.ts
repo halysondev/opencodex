@@ -139,6 +139,7 @@ import { resolveCopilotApiBaseUrl } from "../../oauth/github-copilot";
 import {
   GENERIC_OAUTH_MAX_FAILOVERS_PER_REQUEST,
   hasEligibleGenericOAuthFailoverTarget,
+  genericOAuthMaxFailovers,
   isGenericOAuthFailoverEnabled,
   isGenericOAuthFailoverStatus,
   rotateGenericOAuthAccountOnError,
@@ -1319,8 +1320,8 @@ export async function preparePassthroughExchange(
       // replay; rotating accounts on it would re-send an inference that may already
       // have run and would cool down an account that refused nothing.
       && !isNonReplayableResponse(upstreamResponse)
-     && transportState.genericFailoverAccountId
-      && transportState.genericFailovers < GENERIC_OAUTH_MAX_FAILOVERS_PER_REQUEST
+      && transportState.genericFailoverAccountId
+      && transportState.genericFailovers < genericOAuthMaxFailovers(route.providerName)
       && isGenericOAuthFailoverEnabled(config, route.providerName)
     ) {
       // The roster cap above is one half of the bound; the request's shared budget is the
@@ -1332,12 +1333,22 @@ export async function preparePassthroughExchange(
         true,
       );
       if (hop.allowed) {
+        let errorDetails: string | undefined;
+        if (upstreamResponse.status === 403 || upstreamResponse.status === 401) {
+          try {
+            const cloned = upstreamResponse.clone();
+            errorDetails = await cloned.text().catch(() => undefined);
+          } catch {
+            // ignore
+          }
+        }
         const nextAccountId = rotateGenericOAuthAccountOnError(
           config, route.providerName, transportState.genericFailoverAccountId,
           upstreamResponse.status,
           upstreamResponse.headers.get("retry-after"),
           Date.now(),
           route.modelId,
+          errorDetails,
         );
         let snapshot: OAuthAccessSnapshot | undefined;
         if (nextAccountId) {
