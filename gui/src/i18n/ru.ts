@@ -3222,4 +3222,7 @@ export const ru: Record<TKey, string> = {
   "quotaSummary.critical": "Использовано более 90%",
   "quotaSummary.credits": "Кредиты",
   "quotaSummary.refreshFailed": "Последнее обновление не удалось; показаны предыдущие данные",
+  "integrations.tab.factoryDroid": "Factory Droid",
+  "integrations.semantics.factoryDroid": "Управляет активными моделями OpenCodex в файле settings.json клиента Factory Droid. Синхронизация обновляет только записи OpenCodex, отключение удаляет их, а отмена восстанавливает предыдущий файл.",
+  "api.clientConfig.clientFactoryDroid": "Factory Droid",
 };
