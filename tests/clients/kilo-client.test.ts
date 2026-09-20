@@ -19,6 +19,7 @@ import { PARSE_FAILED, parseConfig } from "../../src/integrations/config-io";
 import { INTEGRATION_CLIENTS } from "../../src/integrations/registry";
 import { createIntegrationStateStore, type IntegrationStateStore } from "../../src/integrations/store";
 import { readIntegrationState } from "../../src/integrations/state";
+import { previewIntegration } from "../../src/integrations/mutation-plan";
 import { applyIntegration, disableIntegration, restoreIntegration } from "../../src/integrations/writer";
 import type { OcxConfig } from "../../src/types";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
@@ -275,5 +276,43 @@ describe("kilo JSONC apply/disable/restore", () => {
     const released = readIntegrationState(write);
     expect(released.state).toBe("absent");
     expect(released.configPath).toBe(newcomer);
+  });
+
+  test("restore and its preview stay bound to the journaled file when a higher-priority candidate appears", () => {
+    const spec = INTEGRATION_CLIENTS.kilo;
+    const dir = spec.detectDir({}, home);
+    mkdirSync(dir, { recursive: true });
+    const ownedPath = join(dir, "config.json");
+    writeFileSync(ownedPath, "{}\n");
+
+    const write = {
+      clientId: "kilo" as const,
+      models: context().models,
+      config: LOOPBACK,
+      port: 10100,
+      env: {} as NodeJS.ProcessEnv,
+      home,
+      store,
+    };
+    expect(applyIntegration(write).ok).toBe(true);
+
+    const newcomer = join(dir, "kilo.jsonc");
+    const newcomerText = '{ "model": "keep" }\n';
+    writeFileSync(newcomer, newcomerText);
+
+    expect(disableIntegration(write).ok).toBe(true);
+    const disableOp = store.listOperations("kilo")[0]!;
+
+    // Fresh priority discovery now picks the newcomer; the journaled disable
+    // op names config.json, still one of Kilo's own candidates here, so both
+    // restore paths act on the journaled file instead of refusing.
+    const preview = previewIntegration(write, { operation: "restore", opId: disableOp.opId });
+    expect(preview.refusalReason).toBeUndefined();
+    expect(preview.canApply).toBe(true);
+
+    const restored = restoreIntegration({ ...write, opId: disableOp.opId });
+    expect(restored.ok).toBe(true);
+    expect(readFileSync(ownedPath, "utf8")).toContain(OPENCODE_PROVIDER_ID);
+    expect(readFileSync(newcomer, "utf8")).toBe(newcomerText);
   });
 });

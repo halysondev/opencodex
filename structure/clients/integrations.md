@@ -367,8 +367,9 @@ Because that resolution depends on which candidates EXIST, a candidate created a
 apply can win discovery while the owned file still holds the block. The registry's
 opt-in `bindsDriftedRecord` seam covers exactly that case: while the recorded path is
 still one of Kilo's own candidates under the current env and home, reads and mutations
-stay bound to the recorded file (status reports it, disable removes the block from it)
-and priority discovery resumes only once the record is dropped. A record from a
+stay bound to the recorded file (status reports it, disable removes the block from it,
+and both restore paths act on the journaled file instead of refusing) and priority
+discovery resumes only once the record is dropped. A record from a
 different home never binds, preserving the audit contract that a record for one home
 cannot authorize a write to another.
 

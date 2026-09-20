@@ -194,7 +194,16 @@ export function declaredIntegrationTarget(args: {
 }): IntegrationTarget | null {
   const { clientId, configPath, resolvedConfigPath } = args;
   if (configPath === resolvedConfigPath) return configFileTarget(clientId, configPath, null);
-  const declared = INTEGRATION_CLIENTS[clientId].currentStore;
+  const spec = INTEGRATION_CLIENTS[clientId];
+  /*
+   * A client whose path resolves by first-EXISTING candidate (Kilo) may accept
+   * its own journaled candidate while priority discovery has moved on; the
+   * undo still targets the journaled file, never the newcomer.
+   */
+  if (spec.bindsDriftedRecord?.(configPath, args.env, args.home) === true) {
+    return configFileTarget(clientId, configPath, null);
+  }
+  const declared = spec.currentStore;
   if (!declared) return null;
   try {
     if (declared.path(args.env, args.home) !== configPath) return null;

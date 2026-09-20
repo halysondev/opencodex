@@ -573,7 +573,8 @@ export function observeRestore(
    * An undo acts on the path the operation was journaled against. A row recorded for one home must
    * never be allowed to rewrite a file in another — but a client may legally have written more than
    * one file, so the test is whether this client still names that location, not whether it is the
-   * config file. The answer also carries the document shape those bytes are in.
+   * config file. A journaled candidate of a first-EXISTING resolver (Kilo) still counts even after
+   * priority discovery has moved on. The answer also carries the document shape those bytes are in.
    */
   const rowTarget = declaredIntegrationTarget({
     clientId, configPath, resolvedConfigPath: resolved.configPath, env: input.env, home: input.home,

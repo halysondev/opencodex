@@ -609,14 +609,17 @@ export function restoreIntegration(input: IntegrationRestoreInput): WriteOutcome
   const clientId = entry.clientId;
   const resolvedPath = input.resolvedPaths?.configPath
     ?? INTEGRATION_CLIENTS[clientId].configPath(input.env, input.home);
+
   const configPath = entry.configPath;
   /*
    * Restore acts on the path the operation was journaled against. Resolving a
    * different path here would let an operation recorded for one home delete a
    * file in another — but a client may legally have written more than one file,
    * so the question is whether this client still names that location, not
-   * whether it is the config file. The answer also carries the contribution
-   * shape those bytes are in, which is what the state below is measured against.
+   * whether it is the config file. A journaled candidate of a first-EXISTING
+   * resolver (Kilo) still counts even after priority discovery has moved on.
+   * The answer also carries the contribution shape those bytes are in, which
+   * is what the state below is measured against.
    */
   const rowTarget = declaredIntegrationTarget({
     clientId, configPath, resolvedConfigPath: resolvedPath, env: input.env, home: input.home,
