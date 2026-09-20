@@ -18,6 +18,7 @@ import type { KiloGeneratedConfig } from "../../src/clients/config-export/kilo";
 import { PARSE_FAILED, parseConfig } from "../../src/integrations/config-io";
 import { INTEGRATION_CLIENTS } from "../../src/integrations/registry";
 import { createIntegrationStateStore, type IntegrationStateStore } from "../../src/integrations/store";
+import { readIntegrationState } from "../../src/integrations/state";
 import { applyIntegration, disableIntegration, restoreIntegration } from "../../src/integrations/writer";
 import type { OcxConfig } from "../../src/types";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
@@ -198,5 +199,72 @@ describe("kilo JSONC apply/disable/restore", () => {
 
     const restored = restoreIntegration({ ...write, opId: store.listOperations("kilo")[0]!.opId });
     expect(restored.ok).toBe(true);
+  });
+
+  test("an unterminated block comment is PARSE_FAILED, and apply refuses without touching the file", () => {
+    const spec = INTEGRATION_CLIENTS.kilo;
+    mkdirSync(spec.detectDir({}, home), { recursive: true });
+    const configPath = spec.configPath({}, home);
+    const poisoned = '{\n  "model": "keep",\n  /* never closed\n';
+    writeFileSync(configPath, poisoned);
+
+    // Stripping an unterminated block comment would delete the malformed tail;
+    // the stripper throws instead so the rewrite gate sees a parse failure.
+    expect(parseConfig(poisoned, "json", { jsonc: true })).toBe(PARSE_FAILED);
+
+    const applied = applyIntegration({
+      clientId: "kilo", models: context().models, config: LOOPBACK,
+      port: 10100, env: {} as NodeJS.ProcessEnv, home, store,
+    });
+    expect(applied.ok).toBe(false);
+    expect(readFileSync(configPath, "utf8")).toBe(poisoned);
+  });
+
+  test("lifecycle stays bound to the owned file when a higher-priority candidate appears", () => {
+    /*
+     * Resolution picks the first EXISTING candidate, so apply can own
+     * config.json while a later-created kilo.jsonc wins discovery. The
+     * ownership record then binds reads and mutations to config.json while
+     * it still exists: status reports it, disable removes OUR block from it,
+     * and the newcomer is never touched. Only after the record is dropped
+     * does priority discovery pick kilo.jsonc up again.
+     */
+    const spec = INTEGRATION_CLIENTS.kilo;
+    const dir = spec.detectDir({}, home);
+    mkdirSync(dir, { recursive: true });
+    const ownedPath = join(dir, "config.json");
+    writeFileSync(ownedPath, "{}\n");
+
+    const write = {
+      clientId: "kilo" as const,
+      models: context().models,
+      config: LOOPBACK,
+      port: 10100,
+      env: {} as NodeJS.ProcessEnv,
+      home,
+      store,
+    };
+    expect(applyIntegration(write).ok).toBe(true);
+    const owned = readFileSync(ownedPath, "utf8");
+    expect(owned).toContain(OPENCODE_PROVIDER_ID);
+
+    const newcomer = join(dir, "kilo.jsonc");
+    const newcomerText = '{ "model": "keep" }\n';
+    writeFileSync(newcomer, newcomerText);
+
+    const bound = readIntegrationState(write);
+    expect(bound.state).toBe("current");
+    expect(bound.configPath).toBe(ownedPath);
+
+    const disabled = disableIntegration(write);
+    expect(disabled.ok).toBe(true);
+    const afterDisable = JSON.parse(readFileSync(ownedPath, "utf8")) as { provider?: Record<string, unknown> };
+    expect(afterDisable.provider?.[OPENCODE_PROVIDER_ID]).toBeUndefined();
+    expect(readFileSync(newcomer, "utf8")).toBe(newcomerText);
+
+    // Record dropped: discovery is priority again, pointing at the newcomer.
+    const released = readIntegrationState(write);
+    expect(released.state).toBe("absent");
+    expect(released.configPath).toBe(newcomer);
   });
 });

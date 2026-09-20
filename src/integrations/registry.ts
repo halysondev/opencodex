@@ -50,6 +50,7 @@ import {
   type ConfigFormat,
   kiloConfigPath,
   kiloHomeDir,
+  KILO_CONFIG_CANDIDATES,
   type ExportClientId,
 } from "../clients/config-export";
 
@@ -117,6 +118,19 @@ export interface IntegrationClientSpec {
    * catalog. `resolveIntegrationPaths` still throws for callers that mutate.
    */
   unresolvedPathHint?: (env?: NodeJS.ProcessEnv, home?: string) => string;
+  /**
+   * Recognize a resolution drift that is still THIS client's own file, for a
+   * client whose config path depends on mutable world state rather than only
+   * env and home.
+   *
+   * Kilo resolves to the first EXISTING candidate, so a candidate created
+   * after apply moves resolution while the owned file still holds our block.
+   * While this predicate accepts the recorded path, reads and mutations stay
+   * bound to it instead of silently re-homing onto the newcomer. A client
+   * without this hook never binds: a record from another home stays a refusal
+   * ("a record for one home cannot authorize a write to another").
+   */
+  bindsDriftedRecord?: (recordPath: string, env?: NodeJS.ProcessEnv, home?: string) => boolean;
 }
 
 /**
@@ -351,6 +365,8 @@ export const INTEGRATION_CLIENTS: Record<IntegrationClientId, IntegrationClientS
     id: "kilo",
     configPath: (env = process.env, home = homedir()) => kiloConfigPath(env, home),
     detectDir: (env = process.env, home = homedir()) => kiloHomeDir(env, home),
+    bindsDriftedRecord: (recordPath, env = process.env, home = homedir()) =>
+      KILO_CONFIG_CANDIDATES.some(name => recordPath === join(kiloHomeDir(env, home), name)),
   },
 };
 

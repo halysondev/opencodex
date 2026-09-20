@@ -2002,7 +2002,7 @@ export const ja: Record<TKey, string> = {
   "integrations.semantics.raycast": "Raycast の providers.yaml に OpenCodex のプロバイダーエントリを追加し、ルーティングされたすべてのモデルを Raycast AI のモデル選択に表示します。Raycast Pro が必要です。",
   "integrations.semantics.omo": "omo の models.json にある providers.opencodex のみを管理します。場所は ~/.omo/agent で、OMO_CODING_AGENT_DIR・SENPI_CODING_AGENT_DIR・PI_CODING_AGENT_DIR のいずれかが設定されている場合はそちらが優先されます。他のプロバイダーは変更しません。新しいセッションから適用されます。",
   "integrations.semantics.cline": "Cline CLI の providers.json と models.json の OpenCodex 項目を管理します。変更・同期前に Cline を終了し、完了後に再起動してください。元に戻すと両方の元ファイルが復元されます。既定のプロバイダーは変わりません。Cline で OpenCodex を選択してください。",
-  "integrations.semantics.kilo": "Kilo のグローバル設定（~/.config/kilo 配下で最初に存在する kilo.jsonc、kilo.json、opencode.jsonc、opencode.json、config.json）の provider.opencodex のみを管理します。他のキーは変更しません。適用時にファイル全体を書き直すため、コメントと末尾カンマは保持されません。Kilo で opencodex/<モデル> を選択してください。",
+  "integrations.semantics.kilo": "Kilo のグローバル設定（~/.config/kilo 配下で最初に存在する kilo.jsonc、kilo.json、opencode.jsonc、opencode.json、config.json。XDG_CONFIG_HOME はこのディレクトリを移動し、いずれも存在しなければ kilo.jsonc が作成されます）の provider.opencodex のみを管理します。他のキーは変更しません。適用時にファイル全体を書き直すため、コメントと末尾カンマは保持されません。Kilo で opencodex/<モデル> を選択してください。",
   "integrations.raycast.proRequired": "Custom Providers は Raycast Pro の機能です。ファイルは書き込まれますが、Pro サブスクリプションが有効になるまで Raycast はこれを無視します。",
   "integrations.raycast.planUnknown": "Raycast Pro が有効かどうか確認できませんでした。Custom Providers には Raycast Pro が必要です。",
   "integrations.raycast.revealConfig": "Raycast → 設定 → AI を開き、「Reveal Providers Config」を一度クリックして providers フォルダを作成してください。",

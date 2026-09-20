@@ -1,8 +1,8 @@
 /**
  * JSONC parse used by OpenCode's launcher and Kilo's managed writer.
  *
- * Strict JSON.parse runs first and untouched — the tolerant path is only
- * attempted when that throws, keeping well-formed configs away from the stripper.
+ * Comments and trailing commas are stripped by escape-aware passes that are
+ * identity on valid strict JSON, so no strict-parse probe is ever needed.
  */
 
 /**
@@ -45,6 +45,12 @@ function stripJsonComments(text: string): string {
     if (ch === "/" && next === "*") { inBlock = true; i++; continue; }
     out += ch;
   }
+  /*
+   * An unterminated block comment means the remainder of the document was
+   * comment text. Returning it stripped would let a trailing `/*` delete an
+   * arbitrary malformed tail, so the caller sees a parse failure instead.
+   */
+  if (inBlock) throw new SyntaxError("Unterminated block comment");
   return out;
 }
 
@@ -76,21 +82,20 @@ function stripTrailingCommas(text: string): string {
 }
 
 /**
- * Return JSON that `JSON.parse` will accept. Strict text is returned untouched;
- * comments and trailing commas are stripped only when the strict parse throws.
+ * Return JSON that `JSON.parse` will accept. Comments and trailing commas are
+ * stripped unconditionally: never probed with a strict `JSON.parse` first,
+ * because materializing a deeply nested document before the rewrite guard's
+ * depth ceiling would bypass that guard's resource contract. The passes are
+ * identity on valid strict JSON — `//`, `/*`, and a comma before `}` or `]`
+ * can only appear inside strings there, which the strippers never touch.
  */
 export function canonicalizeJsonc(text: string): string {
-  try {
-    JSON.parse(text);
-    return text;
-  } catch {
-    return stripTrailingCommas(stripJsonComments(text));
-  }
+  return stripTrailingCommas(stripJsonComments(text));
 }
 
 /**
- * JSON with optional comments and trailing commas. Strict JSON.parse runs first
- * and untouched — the tolerant path is only attempted when that throws.
+ * JSON with optional comments and trailing commas. Same stripping rules as
+ * `canonicalizeJsonc`; throws on text that is still not JSON afterwards.
  */
 export function parseJsonc(text: string): unknown {
   return JSON.parse(canonicalizeJsonc(text));

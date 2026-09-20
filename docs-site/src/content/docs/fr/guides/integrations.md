@@ -23,7 +23,7 @@ puis peut le retirer. Seize clients fonctionnent ainsi, chacun avec son propre c
 | Raycast | `~/.config/raycast/ai/providers.yaml` | YAML | immédiatement à l'enregistrement — Raycast surveille le fichier | aucun — bouclage uniquement |
 | omo | `~/.omo/agent/models.json` | JSON | nouvelles sessions | espace réservé de bouclage |
 | Cline CLI | `~/.cline/data/settings/providers.json` + `models.json` | JSON | après arrêt et redémarrage | bouclage uniquement |
-| Kilo | premier fichier existant parmi `kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json` ou `config.json` sous `~/.config/kilo` | JSONC | nouvelles sessions | `OPENCODEX_KILO_API_KEY` |
+| Kilo | premier fichier existant parmi `kilo.jsonc`, `kilo.json`, `opencode.jsonc`, `opencode.json` ou `config.json` sous `~/.config/kilo` (`XDG_CONFIG_HOME` déplace ce répertoire ; `kilo.jsonc` est créé si aucun n'existe) | JSONC | nouvelles sessions | `OPENCODEX_KILO_API_KEY` |
 
 La prise en charge gérée de DSH exige au minimum **DSH 0.1.0-rc.6**. OpenCodex ne possède que le fragment
 `llm-pi-ai.providers.opencodex` : **Appliquer** et **Actualiser** remplacent ce fragment, **Désactiver** ne
@@ -301,7 +301,7 @@ ocx integration client restore --op <operation-id>
 
 ## Kilo
 
-Kilo n’écrit que `provider.opencodex` dans le premier fichier global existant sous `~/.config/kilo`. Les autres clés restent inchangées. Appliquer réécrit tout le fichier ; commentaires et virgules finales ne sont pas conservés. Sélectionnez `opencodex/<modèle>` dans Kilo.
+Kilo n’écrit que `provider.opencodex` dans le premier fichier global existant sous `~/.config/kilo` (`XDG_CONFIG_HOME` déplace ce répertoire ; `kilo.jsonc` est créé si aucun candidat n’existe). Les autres clés restent inchangées. Appliquer réécrit tout le fichier ; commentaires et virgules finales ne sont pas conservés. Sélectionnez `opencodex/<modèle>` dans Kilo.
 
 ```bash
 ocx integration client enable --client kilo

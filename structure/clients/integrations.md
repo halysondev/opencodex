@@ -363,6 +363,15 @@ commas; serialize rewrites the whole file as pretty JSON, so comments in other k
 not preserved. Kilo is not on the implicit owned-catalog fan-out. Remote admission uses
 the same `{env:OPENCODEX_KILO_API_KEY}` / `x-opencodex-api-key` rule as OpenCode.
 
+Because that resolution depends on which candidates EXIST, a candidate created after
+apply can win discovery while the owned file still holds the block. The registry's
+opt-in `bindsDriftedRecord` seam covers exactly that case: while the recorded path is
+still one of Kilo's own candidates under the current env and home, reads and mutations
+stay bound to the recorded file (status reports it, disable removes the block from it)
+and priority discovery resumes only once the record is dropped. A record from a
+different home never binds, preserving the audit contract that a record for one home
+cannot authorize a write to another.
+
 ## Cline paired files
 
 Cline CLI uses `providers.json` for connection settings and sibling `models.json` for its

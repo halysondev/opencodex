@@ -530,8 +530,22 @@ export function readIntegrationState(input: IntegrationStateInput): IntegrationS
      * would let the badge and the switch disagree.
      */
     record = store.readRecords()[input.clientId] ?? null;
+    /*
+     * Same binding as observeIntegration: while the client's
+     * `bindsDriftedRecord` accepts the recorded path (Kilo's first-existing
+     * candidates under the CURRENT env and home), status reports the owned
+     * file rather than a newcomer that won discovery after apply. A record
+     * from another home never binds and keeps its refusal contract.
+     */
+    const boundConfigPath =
+      record && record.clientId === input.clientId
+      && record.configPath !== paths.configPath
+      && io.statKind(record.configPath) === "file"
+      && spec.bindsDriftedRecord?.(record.configPath, input.env, input.home) === true
+        ? record.configPath
+        : paths.configPath;
     effective = resolveIntegrationTarget({
-      clientId: input.clientId, configPath: paths.configPath, io, record, env: input.env, home: input.home,
+      clientId: input.clientId, configPath: boundConfigPath, io, record, env: input.env, home: input.home,
     });
   } catch (error) {
     if (!(error instanceof ClientPathError)) throw error;

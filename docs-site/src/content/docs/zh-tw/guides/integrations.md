@@ -22,7 +22,7 @@ description: 從儀表板把 opencodex 連接到 OpenCode、Pi、OMP、Hermes、
 | Raycast | `~/.config/raycast/ai/providers.yaml` | YAML | 儲存後立即生效——Raycast 會監看該檔案 | 無——僅限 loopback |
 | omo | `~/.omo/agent/models.json` | JSON | 新工作階段 | loopback 佔位符 |
 | Cline CLI | `~/.cline/data/settings/providers.json` + `models.json` | JSON | 結束並重新啟動後 | 僅限 loopback |
-| Kilo | `~/.config/kilo` 下最先存在的 `kilo.jsonc`、`kilo.json`、`opencode.jsonc`、`opencode.json` 或 `config.json` | JSONC | 新工作階段 | `OPENCODEX_KILO_API_KEY` |
+| Kilo | `~/.config/kilo` 下最先存在的 `kilo.jsonc`、`kilo.json`、`opencode.jsonc`、`opencode.json` 或 `config.json`（`XDG_CONFIG_HOME` 會移動該目錄；若都不存在則建立 `kilo.jsonc`） | JSONC | 新工作階段 | `OPENCODEX_KILO_API_KEY` |
 
 受管理 DSH 支援的相容性下限是 **DSH 0.1.0-rc.6**。OpenCodex 只擁有
 `llm-pi-ai.providers.opencodex`：Apply 與 Refresh 會取代該片段，Disable 只移除該片段，
@@ -203,7 +203,7 @@ ocx integration client restore --op <operation-id>
 
 ## Kilo
 
-Kilo 只會把 `provider.opencodex` 寫入 `~/.config/kilo` 下最先存在的全域檔。其他鍵保持不變。套用會重寫整個檔案，因此不會保留註解與尾隨逗號。請在 Kilo 中選擇 `opencodex/<模型>`。
+Kilo 只會把 `provider.opencodex` 寫入 `~/.config/kilo` 下最先存在的全域檔（`XDG_CONFIG_HOME` 會移動該目錄；若沒有任何候選檔則建立 `kilo.jsonc`）。其他鍵保持不變。套用會重寫整個檔案，因此不會保留註解與尾隨逗號。請在 Kilo 中選擇 `opencodex/<模型>`。
 
 ```bash
 ocx integration client enable --client kilo

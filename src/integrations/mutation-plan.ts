@@ -852,13 +852,30 @@ export function observeIntegration(input: IntegrationWriteInput, effects: Observ
      */
     stored = store.readRecords()[clientId] ?? null;
     /*
+     * A record proves ownership of one file, and a client whose path resolves
+     * by first-EXISTING candidate (Kilo) can drift after apply: a candidate
+     * created later wins discovery while the owned file still holds our block.
+     * Unbound, disable would no-op against the newcomer and strand the block.
+     * While the client's own `bindsDriftedRecord` accepts the recorded path —
+     * it is one of this client's candidates under the CURRENT env and home —
+     * reads and mutations stay bound to that file. A record from another home
+     * never binds, so that refusal contract is untouched.
+     */
+    const boundConfigPath =
+      stored && stored.clientId === clientId
+      && stored.configPath !== resolved.configPath
+      && io.statKind(stored.configPath) === "file"
+      && spec.bindsDriftedRecord?.(stored.configPath, input.env, input.home) === true
+        ? stored.configPath
+        : resolved.configPath;
+    /*
      * Inside the same guard as resolution, because this resolver can refuse the
      * same way: the store is named by a client env var, and a relative one is a
      * misconfiguration to report rather than an exception to leak through the
      * collection route.
      */
     effective = resolveIntegrationTarget({
-      clientId, configPath: resolved.configPath, io, record: stored, env: input.env, home: input.home,
+      clientId, configPath: boundConfigPath, io, record: stored, env: input.env, home: input.home,
     });
     configPath = effective.configPath;
   } catch (error) {

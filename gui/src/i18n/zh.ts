@@ -1576,7 +1576,7 @@ export const zh: Record<TKey, string> = {
   "integrations.semantics.raycast": "在 Raycast 的 providers.yaml 中添加一个 OpenCodex 提供商条目，让所有已路由的模型出现在 Raycast AI 模型选择器中。需要 Raycast Pro。",
   "integrations.semantics.omo": "仅管理 omo 的 models.json 中的 providers.opencodex，路径为 ~/.omo/agent，若设置了 OMO_CODING_AGENT_DIR、SENPI_CODING_AGENT_DIR 或 PI_CODING_AGENT_DIR 则以其为准。你的其他提供商保持不变。对新会话生效。",
   "integrations.semantics.cline": "管理 Cline CLI 的 providers.json 和 models.json 中的 OpenCodex 项目。修改或同步前请退出 Cline，完成后重新启动。撤销会恢复两个文件的原始内容。默认提供商保持不变，请在 Cline 中选择 OpenCodex。",
-  "integrations.semantics.kilo": "仅管理 Kilo 全局配置（~/.config/kilo 下最先存在的 kilo.jsonc、kilo.json、opencode.jsonc、opencode.json 或 config.json）中的 provider.opencodex。其他键保持不变。应用会重写整个文件，因此不会保留注释和尾随逗号。请在 Kilo 中选择 opencodex/<模型>。",
+  "integrations.semantics.kilo": "仅管理 Kilo 全局配置——~/.config/kilo 下最先存在的 kilo.jsonc、kilo.json、opencode.jsonc、opencode.json 或 config.json（XDG_CONFIG_HOME 会移动该目录；若都不存在则创建 kilo.jsonc）——中的 provider.opencodex。其他键保持不变。应用会重写整个文件，因此不会保留注释和尾随逗号。请在 Kilo 中选择 opencodex/<模型>。",
   "integrations.raycast.proRequired": "Custom Providers 是 Raycast Pro 功能。文件会被写入，但在 Pro 订阅生效之前 Raycast 会忽略它。",
   "integrations.raycast.planUnknown": "无法确定 Raycast Pro 是否已激活；Custom Providers 需要 Raycast Pro。",
   "integrations.raycast.revealConfig": "打开 Raycast → 设置 → AI，点击一次“Reveal Providers Config”，以便创建 providers 文件夹。",
