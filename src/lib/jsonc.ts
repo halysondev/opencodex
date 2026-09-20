@@ -27,7 +27,15 @@ function stripJsonComments(text: string): string {
     if (inBlock) {
       // Newlines are preserved so JSON.parse error positions stay meaningful.
       if (ch === "\n") out += ch;
-      else if (ch === "*" && next === "/") { inBlock = false; i++; }
+      else if (ch === "*" && next === "/") {
+        // Emit a separator, not nothing: a block comment between two digits is
+        // two tokens and must not collapse into one, which would silently
+        // change a malformed value into a different valid one. Whitespace is
+        // legal wherever a comment was, so this is identity for valid JSONC.
+        out += " ";
+        inBlock = false;
+        i++;
+      }
       continue;
     }
     if (inString) {

@@ -201,6 +201,15 @@ describe("kilo JSONC apply/disable/restore", () => {
     expect(restored.ok).toBe(true);
   });
 
+  test("a block comment is a token separator, not deletion: malformed values refuse", () => {
+    // `1/*x*/2` is two tokens; stripping the comment to nothing would yield
+    // `12` — a different valid value. The stripper keeps a separator, so the
+    // rewrite gate sees a parse failure instead of a changed user value.
+    expect(parseConfig('{"value":1/*c*/2}', "json", { jsonc: true })).toBe(PARSE_FAILED);
+    // Where a comment was, whitespace is legal: valid JSONC is unaffected.
+    expect(parseConfig('{"value": 1 /* keep */ , "b": [1,/*c*/2]}', "json", { jsonc: true })).toEqual({ value: 1, b: [1, 2] });
+  });
+
   test("an unterminated block comment is PARSE_FAILED, and apply refuses without touching the file", () => {
     const spec = INTEGRATION_CLIENTS.kilo;
     mkdirSync(spec.detectDir({}, home), { recursive: true });
