@@ -373,6 +373,36 @@ export const INTEGRATION_CLIENTS: Record<IntegrationClientId, IntegrationClientS
 export const INTEGRATION_CLIENT_IDS: readonly IntegrationClientId[] =
   Object.keys(INTEGRATION_CLIENTS) as IntegrationClientId[];
 
+/**
+ * The effective config path for a read or mutation, given the ownership record.
+ *
+ * One implementation for status AND the mutation planner: when only one side
+ * carried the binding, the two could disagree again and status would report a
+ * file the writer never touches. Binds only while the client's own
+ * `bindsDriftedRecord` accepts the recorded path (still one of that client's
+ * candidates under the CURRENT env and home) and the file still exists; a
+ * record from another home never binds and keeps its refusal contract.
+ */
+export function boundIntegrationConfigPath(input: {
+  clientId: IntegrationClientId;
+  record: { clientId: IntegrationClientId; configPath: string } | null;
+  resolvedPath: string;
+  statKind: (path: string) => string;
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+}): string {
+  const record = input.record;
+  if (
+    record && record.clientId === input.clientId &&
+    record.configPath !== input.resolvedPath &&
+    input.statKind(record.configPath) === "file" &&
+    INTEGRATION_CLIENTS[input.clientId].bindsDriftedRecord?.(record.configPath, input.env, input.home) === true
+  ) {
+    return record.configPath;
+  }
+  return input.resolvedPath;
+}
+
 export function isIntegrationClientId(value: string): value is IntegrationClientId {
   return Object.prototype.hasOwnProperty.call(INTEGRATION_CLIENTS, value);
 }

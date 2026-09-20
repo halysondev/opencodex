@@ -26,6 +26,7 @@ import { parseClineDocument } from "./cline-document";
 import { PARSE_FAILED, defaultIntegrationIO, loadTarget, parseConfig, type IntegrationIO } from "./config-io";
 import {
   INTEGRATION_CLIENTS,
+  boundIntegrationConfigPath,
   isLoopbackOnly,
   resolveIntegrationPaths,
   type IntegrationClientId,
@@ -745,7 +746,7 @@ function previewRestore(input: IntegrationWriteInput, request: PreviewRequest): 
       ? {}
       : observed.clientId === "cline"
         ? parseClineDocument(observed.before)
-        : parseConfig(observed.before, observed.format, observed.clientId === "kilo" ? { jsonc: true } : undefined),
+        : parseConfig(observed.before, observed.format, EXPORT_CLIENTS[observed.clientId].jsonc ? { jsonc: true } : undefined),
     restore: {
       opId: observed.entry.opId,
       entry: observed.entry,
@@ -853,22 +854,29 @@ export function observeIntegration(input: IntegrationWriteInput, effects: Observ
      */
     stored = store.readRecords()[clientId] ?? null;
     /*
-     * A record proves ownership of one file, and a client whose path resolves
-     * by first-EXISTING candidate (Kilo) can drift after apply: a candidate
-     * created later wins discovery while the owned file still holds our block.
-     * Unbound, disable would no-op against the newcomer and strand the block.
-     * While the client's own `bindsDriftedRecord` accepts the recorded path —
-     * it is one of this client's candidates under the CURRENT env and home —
-     * reads and mutations stay bound to that file. A record from another home
-     * never binds, so that refusal contract is untouched.
+     * boundIntegrationConfigPath is the ONE binding shared with status: while
+     * the client's own accepts-the-record rule holds (Kilo's first-EXISTING
+     * candidates under the CURRENT env and home), reads and mutations stay on
+     * the recorded file instead of silently re-homing onto a newcomer. A
+     * record from another home never binds, so that refusal contract is
+     * untouched.
      */
-    const boundConfigPath =
-      stored && stored.clientId === clientId
-      && stored.configPath !== resolved.configPath
-      && io.statKind(stored.configPath) === "file"
-      && spec.bindsDriftedRecord?.(stored.configPath, input.env, input.home) === true
-        ? stored.configPath
-        : resolved.configPath;
+    /*
+     * boundIntegrationConfigPath is the ONE binding shared with status: while
+     * the client's own accepts-the-record rule holds (Kilo's first-EXISTING
+     * candidates under the CURRENT env and home), reads and mutations stay on
+     * the recorded file instead of silently re-homing onto a newcomer. A
+     * record from another home never binds, so that refusal contract is
+     * untouched.
+     */
+    const boundConfigPath = boundIntegrationConfigPath({
+      clientId,
+      record: stored,
+      resolvedPath: resolved.configPath,
+      statKind: io.statKind,
+      env: input.env,
+      home: input.home,
+    });
     /*
      * Inside the same guard as resolution, because this resolver can refuse the
      * same way: the store is named by a client env var, and a relative one is a
@@ -901,7 +909,7 @@ export function observeIntegration(input: IntegrationWriteInput, effects: Observ
   const before = loaded.before;
   const parsed = clientId === "cline"
     ? parseClineDocument(before)
-    : parseConfig(before, effective.format, clientId === "kilo" ? { jsonc: true } : undefined);
+    : parseConfig(before, effective.format, exportSpec.jsonc ? { jsonc: true } : undefined);
   if (parsed === PARSE_FAILED) {
     return { failed: observationFailure("unsafe", "unsafe",
       `${configPath} could not be parsed, or holds something opencodex cannot rewrite without changing it (a non-finite number, a large integer or a tiny one a rewrite would round, -0, a duplicate member, or nesting deeper than 1000 levels)`) } as const;
