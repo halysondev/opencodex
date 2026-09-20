@@ -193,6 +193,7 @@ export const MANAGEMENT_ROUTES: readonly ManagementRoute[] = [
   // server/management/config-routes
   { method: "GET", path: "/api/config", module: "server/management/config-routes", mutates: false },
   { method: "GET", path: "/api/dictation-settings", module: "server/management/config-routes", mutates: false },
+  { method: "GET", path: "/api/live-voice-settings", module: "server/management/config-routes", mutates: false },
   { method: "GET", path: "/api/diagnostics/project-config", module: "server/management/config-routes", mutates: false },
   { method: "GET", path: "/api/settings", module: "server/management/config-routes", mutates: false },
   { method: "GET", path: "/api/shadow-call-settings", module: "server/management/config-routes", mutates: false },
@@ -207,6 +208,7 @@ export const MANAGEMENT_ROUTES: readonly ManagementRoute[] = [
   { method: "POST", path: "/api/windows-tray", module: "server/management/config-routes", mutates: true },
   { method: "PUT", path: "/api/config", module: "server/management/config-routes", mutates: true, exempt: { reason: "disabled", why: "Returns 405 by design; provider changes go through POST /api/providers." } },
   { method: "PUT", path: "/api/dictation-settings", module: "server/management/config-routes", mutates: true },
+  { method: "PUT", path: "/api/live-voice-settings", module: "server/management/config-routes", mutates: true },
   { method: "PUT", path: "/api/settings", module: "server/management/config-routes", mutates: true },
   { method: "PUT", path: "/api/shadow-call-settings", module: "server/management/config-routes", mutates: true },
   { method: "PUT", path: "/api/sidecar-settings", module: "server/management/config-routes", mutates: true },
