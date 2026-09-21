@@ -3199,4 +3199,7 @@ export const de: Record<TKey, string> = {
   "quotaSummary.critical": "Über 90 % genutzt",
   "quotaSummary.credits": "Guthaben",
   "quotaSummary.refreshFailed": "Letzte Aktualisierung fehlgeschlagen; vorheriger Stand wird angezeigt",
+  "integrations.tab.factoryDroid": "Factory Droid",
+  "integrations.semantics.factoryDroid": "Verwaltet aktive OpenCodex-Modelle in der settings.json von Factory Droid. Synchronisieren ändert nur OpenCodex-Einträge; beim Deaktivieren werden sie entfernt, und mit „Rückgängig“ wird die vorherige Datei wiederhergestellt.",
+  "api.clientConfig.clientFactoryDroid": "Factory Droid",
 };
