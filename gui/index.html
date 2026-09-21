@@ -14,6 +14,22 @@
           var t = localStorage.getItem("ocx-theme");
           if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
         } catch (e) {}
+        try {
+          var l = localStorage.getItem("ocx-lang");
+          var map = { zh: "zh-CN", "zh-TW": "zh-TW", ko: "ko", ja: "ja", de: "de", fr: "fr", ru: "ru", tr: "tr", vi: "vi", en: "en" };
+          if (l && map[l]) {
+            document.documentElement.lang = map[l];
+          } else {
+            var nav = (navigator.language || "").toLowerCase();
+            if (nav.startsWith("zh")) {
+              document.documentElement.lang = (nav.includes("tw") || nav.includes("hk") || nav.includes("mo") || nav.includes("hant")) ? "zh-TW" : "zh-CN";
+            } else if (nav.startsWith("ko")) {
+              document.documentElement.lang = "ko";
+            } else if (nav.startsWith("ja")) {
+              document.documentElement.lang = "ja";
+            }
+          }
+        } catch (e) {}
       })();
     </script>
   </head>
