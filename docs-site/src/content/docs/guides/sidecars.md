@@ -257,7 +257,7 @@ entry) at it:
   },
   "dictation": {
     "provider": "my-dictation",
-    "byModel": { "gpt-6-astra": "openai" }
+    "byModel": { "my-model-provider/gpt-6-astra": "openai" }
   }
 }
 ```

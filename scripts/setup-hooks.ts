@@ -90,5 +90,10 @@ installHook(
   "post-merge.sh",
   "Rebuilds the packaged GUI when a merge or pull brought gui/ changes.",
 );
+installHook(
+  "pre-commit",
+  "pre-commit.sh",
+  "Runs `bun run check` (typecheck, structure and skill-surface gates, red tests, guard coverage; ~2.6s) before every commit.",
+);
 
 console.log("Run validation explicitly before review; see AGENTS.md for test scope.");
