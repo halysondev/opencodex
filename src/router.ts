@@ -556,6 +556,7 @@ function isBareOpenAiFamilyModel(modelId: string): boolean {
 }
 
 function routeResult(
+  config: OcxConfig | undefined,
   providerName: string,
   provider: OcxProviderConfig,
   modelId: string,
@@ -719,7 +720,7 @@ function routeModelInternal(
         throw new NoEnabledOpenAiProviderError(effectiveNativeModelId);
       }
       return {
-        ...routeResult(
+        ...routeResult(config, 
           OPENAI_CODEX_PROVIDER_ID,
           provider,
           effectiveNativeModelId,
@@ -818,7 +819,7 @@ function routeModelInternal(
       // itself a known model (e.g. orcarouter/auto). Route it whole instead of stripping to the
       // remainder, which would send a bare `auto` the upstream cannot resolve.
       if (known.includes(modelId)) {
-        return routeResult(provName, prov, modelId, "explicit-provider", "explicit-provider-namespace");
+        return routeResult(config, provName, prov, modelId, "explicit-provider", "explicit-provider-namespace");
       }
       // Codex-facing alias ids (`provider/vendor-model`) decode back to the native
       // slash id via an exact known-id lookup; raw full-slash selectors keep working.
@@ -839,7 +840,7 @@ function routeModelInternal(
           sharedRedirectState,
         ), modelId);
       }
-      return routeResult(
+      return routeResult(config, 
         provName,
         prov,
         nativeModel,
@@ -853,7 +854,7 @@ function routeModelInternal(
   if (isBareOpenAiFamilyModel(modelId)) {
     const provider = config.providers[OPENAI_CODEX_PROVIDER_ID];
     if (provider && provider.disabled !== true) {
-      return routeResult(OPENAI_CODEX_PROVIDER_ID, provider, modelId, "native", "native-family");
+      return routeResult(config, OPENAI_CODEX_PROVIDER_ID, provider, modelId, "native", "native-family");
     }
     // Codex chooses a bare native model for compaction even when the operator's
     // ordinary route is a third-party provider. Keep the native reservation
@@ -867,7 +868,7 @@ function routeModelInternal(
       const defaultProvider = config.providers[config.defaultProvider];
       if (defaultProvider.disabled !== true) {
         warnCompactionDefaultProviderFallbackOnce(config.defaultProvider);
-        return routeResult(
+        return routeResult(config, 
           config.defaultProvider,
           defaultProvider,
           modelId,
@@ -882,7 +883,7 @@ function routeModelInternal(
   for (const [provName, prov] of activeProviderEntries(config)) {
     if (prov.defaultModel === modelId
       || (typeof prov.defaultModel === "string" && encodeRoutedModelId(prov.defaultModel) === modelId)) {
-      return routeResult(provName, prov, prov.defaultModel as string, "explicit-provider", "configured-default-model");
+      return routeResult(config, provName, prov, prov.defaultModel as string, "explicit-provider", "configured-default-model");
     }
   }
 
@@ -893,7 +894,7 @@ function routeModelInternal(
     if (prov.models && Array.isArray(prov.models)) {
       const hit = (prov.models as string[]).find(id => id === modelId || encodeRoutedModelId(id) === modelId);
       if (hit !== undefined) {
-        return routeResult(provName, prov, hit, "explicit-provider", "configured-model-list");
+        return routeResult(config, provName, prov, hit, "explicit-provider", "configured-model-list");
       }
     }
   }
@@ -929,7 +930,7 @@ function routeModelInternal(
       );
       return wrapRedirectedRoute(targetRoute, modelId);
     }
-    return routeResult(match.provider, config.providers[match.provider], match.model, "explicit-provider", "model-alias");
+    return routeResult(config, match.provider, config.providers[match.provider], match.model, "explicit-provider", "model-alias");
   }
 
   if (config.defaultProvider === LEGACY_CHATGPT_PROVIDER_ID) {
@@ -938,7 +939,7 @@ function routeModelInternal(
   if (hasOwnProvider(config.providers, config.defaultProvider)) {
     const defaultProv = config.providers[config.defaultProvider];
     if (defaultProv.disabled === true) throw new Error(`Default provider is disabled: ${config.defaultProvider}`);
-    return routeResult(config.defaultProvider, defaultProv, modelId, "default-provider", "default-provider");
+    return routeResult(config, config.defaultProvider, defaultProv, modelId, "default-provider", "default-provider");
   }
 
   throw new Error(`No provider configured for model: ${modelId}`);
@@ -1007,7 +1008,7 @@ function routeByKnownModelPattern(config: OcxConfig, modelId: string): RouteResu
       );
       if (matchingProvider) {
         const [provName, prov] = matchingProvider;
-        return routeResult(provName, prov, modelId, "explicit-provider", "model-pattern");
+        return routeResult(config, provName, prov, modelId, "explicit-provider", "model-pattern");
       }
       // Deliberately no "first provider with an Anthropic adapter" fallback here. Picking by
       // object insertion order, without checking `models`, `selectedModels`, `disabledModels` or
