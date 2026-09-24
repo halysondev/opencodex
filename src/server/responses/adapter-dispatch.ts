@@ -56,7 +56,7 @@ import {
   genericOAuthMaxFailovers,
   isGenericOAuthFailoverEnabled,
   isGenericOAuthFailoverStatus,
-  readGenericOAuthFailoverClassification,
+  isGenericOAuthFailoverResponse,
   rotateGenericOAuthAccountOnError,
   rotateGenericOAuthAccountOn429,
   failoverAccountSnapshot,
@@ -880,23 +880,24 @@ export async function prepareAdapterExchange(
           !adapterOwnsDispatch && transientRetryPolicyFor(route.provider) !== null,
         );
         if (!hop.allowed) break;
-        const errorClassification = upstreamResponse.status === 403
-          ? await readGenericOAuthFailoverClassification(
+        const validationRequired = upstreamResponse.status !== 403
+          || await isGenericOAuthFailoverResponse(
             upstreamResponse,
             route.providerName,
             upstream.signal,
+          );
+        const nextAccountId = validationRequired
+          ? rotateGenericOAuthAccountOnError(
+            config,
+            route.providerName,
+            transportState.genericFailoverAccountId,
+            upstreamResponse.status,
+            upstreamResponse.headers.get("retry-after"),
+            Date.now(),
+            route.modelId,
+            upstreamResponse.status === 403 ? "VALIDATION_REQUIRED" : undefined,
           )
-          : undefined;
-        const nextAccountId = rotateGenericOAuthAccountOnError(
-          config,
-          route.providerName,
-          transportState.genericFailoverAccountId,
-          upstreamResponse.status,
-          upstreamResponse.headers.get("retry-after"),
-          Date.now(),
-          route.modelId,
-          errorClassification,
-        );
+          : null;
         if (!nextAccountId) {
           hop.permit?.release();
           break;
