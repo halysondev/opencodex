@@ -425,15 +425,6 @@ export function createAdapterContinuations(
           `${route.providerName}|${route.modelId}|continuation-oauth-failover`,
           !adapterOwnsDispatch && transientRetryPolicyFor(route.provider) !== null,
         );
-        let errorDetails: string | undefined;
-        if (response.status === 403 || response.status === 401) {
-          try {
-            const cloned = response.clone();
-            errorDetails = await cloned.text().catch(() => undefined);
-          } catch {
-            // ignore
-          }
-        }
         const nextAccountId = hop.allowed
           ? rotateGenericOAuthAccountOnError(
             config,
@@ -443,7 +434,6 @@ export function createAdapterContinuations(
             response.headers.get("retry-after"),
             Date.now(),
             route.modelId,
-            errorDetails,
           )
           : null;
         // A roster quorum ignores cooldowns, so only attribute a budget refusal when the
