@@ -43,7 +43,7 @@ import {
   genericOAuthMaxFailovers,
   isGenericOAuthFailoverEnabled,
   isGenericOAuthFailoverStatus,
-  readGenericOAuthFailoverClassification,
+  isGenericOAuthFailoverResponse,
   rotateGenericOAuthAccountOnError,
   rotateGenericOAuthAccountOn429,
   failoverAccountSnapshot,
@@ -425,10 +425,9 @@ export function createAdapterContinuations(
           `${route.providerName}|${route.modelId}|continuation-oauth-failover`,
           !adapterOwnsDispatch && transientRetryPolicyFor(route.provider) !== null,
         );
-        const errorClassification = hop.allowed && response.status === 403
-          ? await readGenericOAuthFailoverClassification(response, route.providerName, upstream.signal)
-          : undefined;
-        const nextAccountId = hop.allowed
+        const validationRequired = !hop.allowed || response.status !== 403
+          || await isGenericOAuthFailoverResponse(response, route.providerName, upstream.signal);
+        const nextAccountId = hop.allowed && validationRequired
           ? rotateGenericOAuthAccountOnError(
             config,
             route.providerName,
@@ -437,7 +436,7 @@ export function createAdapterContinuations(
             response.headers.get("retry-after"),
             Date.now(),
             route.modelId,
-            errorClassification,
+            response.status === 403 ? "VALIDATION_REQUIRED" : undefined,
           )
           : null;
         // A roster quorum ignores cooldowns, so only attribute a budget refusal when the
