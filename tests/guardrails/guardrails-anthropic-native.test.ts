@@ -11,6 +11,10 @@ import {
   installIsolatedCodexHome,
   type IsolatedCodexHome,
 } from "../helpers/isolated-codex-home";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
+
+let releaseSpendHome: (() => void) | undefined;
+const takeSpendHome = (): void => { releaseSpendHome ??= acquireOwnedSpendHome(); };
 
 setDefaultTimeout(15_000);
 
@@ -30,6 +34,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseSpendHome?.();
+  releaseSpendHome = undefined;
   if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
   else process.env.OPENCODEX_HOME = previousHome;
   isolatedCodexHome?.restore();
@@ -129,6 +135,7 @@ test("active Guardrails marks the Anthropic request-log context as privacy-sensi
   const logCtx: RequestLogContext = { model: "", provider: "" };
 
   try {
+    takeSpendHome();
     const response = await handleClaudeMessages(
       new Request("http://localhost/v1/messages", {
         method: "POST",
@@ -617,7 +624,8 @@ test("Guardrails routed translation ignores discarded Anthropic document sources
     expect(serialized).toContain("[document: public attachment]");
     expect(serialized).not.toContain(PLACEHOLDER);
     expect(serialized).not.toContain(SECRET);
-    expect(serialized).not.toContain(BASE64_DOCUMENT);
+    expect(serialized).toContain(BASE64_DOCUMENT);
+    expect(serialized).toContain("opaque.pdf");
   } finally {
     await proxy.stop(true);
     upstream.stop(true);

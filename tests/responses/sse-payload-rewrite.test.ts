@@ -736,5 +736,4 @@ describe("SSE payload rewrite composition", () => {
       }
     },
   );
-  });
 });

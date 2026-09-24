@@ -2897,6 +2897,7 @@ export const en = {
   "claudeDesktop.laneEmpty": "Drop a model here or use its Move control.",
   "claudeDesktop.laneNoMatch": "No model in this family matches your search.",
   "nav.grok": "Grok",
+  "nav.guardrails": "Guardrails",
   "grok.title": "Grok Build",
   "grok.subtitle": "Models opencodex has registered in your Grok config.",
   "grok.loading": "Loading Grok status…",

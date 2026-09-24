@@ -2690,6 +2690,7 @@ export const ru: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "Перетащите модель сюда или используйте её элемент «Переместить».",
   "claudeDesktop.laneNoMatch": "В этом семействе нет моделей, соответствующих запросу.",
   "nav.grok": "Grok",
+  "nav.guardrails": "Защита данных",
   "grok.title": "Grok Build",
   "grok.subtitle": "Модели, зарегистрированные opencodex в вашей конфигурации Grok.",
   "grok.loading": "Загрузка состояния Grok…",

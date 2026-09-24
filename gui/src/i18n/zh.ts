@@ -2817,6 +2817,7 @@ export const zh: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "将模型拖到这里，或使用移动控件。",
   "claudeDesktop.laneNoMatch": "该系列中没有与搜索匹配的模型。",
   "nav.grok": "Grok",
+  "nav.guardrails": "Guardrails",
   "grok.title": "Grok Build",
   "grok.subtitle": "opencodex 已注册到你的 Grok 配置中的模型。",
   "grok.loading": "正在加载 Grok 状态…",

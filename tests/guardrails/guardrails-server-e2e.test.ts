@@ -564,9 +564,10 @@ test("Guardrails masks native Responses input_file names and preserves file byte
   }
 });
 
-test("Guardrails masks routed input_file markers and never forwards file bytes", async () => {
+test("Guardrails masks routed input_file names and carries bytes to a file-capable wire", async () => {
   const secret = ["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_");
-  const fileData = "ZmlsZQ==";
+  const fileBytes = "ZmlsZQ==";
+  const fileData = `data:application/pdf;base64,${fileBytes}`;
   let upstreamBody: Record<string, unknown> | undefined;
   let proxy: ReturnType<typeof startServer> | null = null;
   const upstream = Bun.serve({
@@ -618,9 +619,9 @@ test("Guardrails masks routed input_file markers and never forwards file bytes",
     expect(response.status).toBe(200);
     await response.body?.cancel();
     const upstreamText = JSON.stringify(upstreamBody);
-    expect(upstreamText).toContain("[file: <STRIPE_ACCESS_TOKEN_1>]");
+    expect(upstreamText).toContain("<STRIPE_ACCESS_TOKEN_1>");
     expect(upstreamText).not.toContain(secret);
-    expect(upstreamText).not.toContain(fileData);
+    expect(upstreamText).toContain(fileBytes);
   } finally {
     await proxy?.stop(true);
     upstream.stop(true);

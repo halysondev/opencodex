@@ -2815,6 +2815,7 @@ export const fr: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "Déposez un modèle ici ou utilisez sa commande Déplacer.",
   "claudeDesktop.laneNoMatch": "Aucun modèle de cette famille ne correspond à votre recherche.",
   "nav.grok": "Grok",
+  "nav.guardrails": "Protection des données",
   "grok.title": "Grok Build",
   "grok.subtitle": "Modèles qu’opencodex a enregistrés dans votre configuration Grok.",
   "grok.loading": "Chargement de l’état de Grok…",

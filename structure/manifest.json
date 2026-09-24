@@ -212,8 +212,17 @@
       "title": "Streaming Health And WebSocket",
       "scope": "Heartbeat and stall deadlines, plus the opt-in WebSocket transport.",
       "documents": [
-        "src/server/",
-        "src/guardrails/"
+        "src/server/"
+      ]
+    },
+    {
+      "path": "guardrails-integration-contract.md",
+      "tier": 3,
+      "title": "Guardrails Integration Contract",
+      "scope": "Proposed design-freeze contract for the staged Guardrails review: hook/failure matrix, policy invariants, and landing order.",
+      "documents": [
+        "src/guardrails/",
+        "src/server/"
       ]
     },
     {

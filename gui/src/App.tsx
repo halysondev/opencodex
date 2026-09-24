@@ -16,7 +16,6 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import QuotaSummaryBar from "./components/quota-summary-bar/QuotaSummaryBar";
 import { SidebarGithubRow } from "./components/sidebar-github-row";
 import { DesktopStarOnboarding } from "./components/desktop-star-onboarding";
-import { IconGrid, IconServer, IconBoxes, IconBot, IconList, IconActivity, IconHardDrive, IconCodex, IconMenu, IconSun, IconMoon, IconMonitor, IconGlobe, IconPower, IconX, IconRefresh} from "./icons";
 import { IconGrid, IconServer, IconBoxes, IconBot, IconList, IconActivity, IconHardDrive, IconCodex, IconLock, IconMenu, IconSun, IconMoon, IconMonitor, IconGlobe, IconPower, IconX, IconRefresh} from "./icons";
 import { useI18n, useT, LOCALES, localeDisplayName, type Locale, type TKey } from "./i18n/shared";
 import { Select, ToastNotice, type NoticeTone } from "./ui";

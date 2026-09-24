@@ -53,9 +53,6 @@ export function composeSseBlockRewrites(...rewrites: SseBlockRewrite[]): SseBloc
     }
     return blocks;
   };
-  // Child disposal is part of the contract: one idempotent disposer for the
-  // whole chain, so relay teardown never leaks a nested collector.
-  let disposed = false;
   composed.flush = () => {
     const emitted: string[] = [];
     for (let index = 0; index < active.length; index += 1) {
@@ -72,6 +69,8 @@ export function composeSseBlockRewrites(...rewrites: SseBlockRewrite[]): SseBloc
     }
     return emitted;
   };
+  // Child disposal is part of the contract: one idempotent disposer for the
+  // whole chain, so relay teardown never leaks a nested collector.
   composed.dispose = () => {
     if (disposed) return;
     disposed = true;
@@ -148,24 +147,73 @@ export function createSseBlockBuffer(
     },
     next() {
       for (;;) {
-        const newline = buffer.indexOf("\n", scanOffset);
+        let newline = -1;
+        for (let index = scanOffset; index < buffer.length; index += 1) {
+          if (buffer[index] === "\r" || buffer[index] === "\n") { newline = index; break; }
+        }
         if (newline < 0) {
           scanOffset = buffer.length;
           return null;
         }
-        let end = newline + 1;
-        if (buffer[end] === "\r") end += 1;
-        if (end === buffer.length) {
-          // Keep the candidate first newline until its possible blank-line delimiter arrives.
-          scanOffset = newline;
-          return null;
+        // Matches nextSseBlock: \r\n groups as one newline when a second newline
+        // event follows, otherwise \r and \n each stand alone.
+        let firstLength: number;
+        if (buffer[newline] === "\r") {
+          if (newline + 1 === buffer.length) {
+            // A trailing \r may still extend into \r\n.
+            scanOffset = newline;
+            return null;
+          }
+          firstLength = buffer[newline + 1] === "\n" ? 2 : 1;
+        } else {
+          firstLength = 1;
         }
-        if (buffer[end] !== "\n") {
-          scanOffset = newline + 1;
+        const secondIndex = newline + firstLength;
+        let secondLength = 0;
+        if (secondIndex < buffer.length) {
+          const nextChar = buffer[secondIndex];
+          if (nextChar === "\n") secondLength = 1;
+          else if (nextChar === "\r") {
+            if (secondIndex + 1 === buffer.length) {
+              // A trailing \r may still extend into \r\n.
+              scanOffset = newline;
+              return null;
+            }
+            secondLength = buffer[secondIndex + 1] === "\n" ? 2 : 1;
+          }
+        }
+        if (secondLength === 0) {
+          if (firstLength === 2) {
+            // Regex backtracking: a lone \r\n delimits (the \r and \n count as
+            // two newline events) whether it is followed by a non-newline or
+            // ends the current buffer.
+            const end = secondIndex;
+            const block = buffer.slice(offset, newline);
+            const delimiter = buffer.slice(newline, end);
+            const nextBytes = bufferBytes - Buffer.byteLength(block, "utf8") - delimiter.length;
+            const reservation = budget.reserveTransient(nextBytes, scope);
+            reservation.commitRetained();
+            budget.releaseRetained(bufferBytes, scope);
+            bufferBytes = nextBytes;
+            offset = end;
+            scanOffset = end;
+            if (offset === buffer.length) {
+              buffer = "";
+              offset = 0;
+              scanOffset = 0;
+            }
+            return { block, delimiter };
+          }
+          if (secondIndex >= buffer.length) {
+            // Keep the candidate first newline until its possible blank-line delimiter arrives.
+            scanOffset = newline;
+            return null;
+          }
+          scanOffset = secondIndex;
           continue;
         }
-        end += 1;
-        const start = newline > offset && buffer[newline - 1] === "\r" ? newline - 1 : newline;
+        const start = newline;
+        const end = secondIndex + secondLength;
         const block = buffer.slice(offset, start);
         const delimiter = buffer.slice(start, end);
         const nextBytes = bufferBytes - Buffer.byteLength(block, "utf8") - delimiter.length;
@@ -353,8 +401,8 @@ export function relaySseWithBlockRewrite(
   ): void => {
     const reservation = translatorBudget.reserveTransient(bytes.byteLength, { kind: "live_transient" });
     try {
-      reservation.commitRetained();
       controller.enqueue(bytes);
+      reservation.commitRetained();
       translatorBudget.releaseRetained(bytes.byteLength, { kind: "live_transient" });
     } catch (error) {
       reservation.release();
@@ -365,7 +413,19 @@ export function relaySseWithBlockRewrite(
   const enqueueText = (
     controller: ReadableStreamDefaultController<Uint8Array>,
     text: string,
-  ): void => enqueueBytes(controller, encoder.encode(text));
+  ): void => {
+    const bytes = Buffer.byteLength(text, "utf8");
+    const reservation = translatorBudget.reserveTransient(bytes, { kind: "live_transient" });
+    try {
+      const encoded = encoder.encode(text);
+      controller.enqueue(encoded);
+      reservation.commitRetained();
+      translatorBudget.releaseRetained(bytes, { kind: "live_transient" });
+    } catch (error) {
+      reservation.release();
+      throw error;
+    }
+  };
 
   const enqueueRetainedBytes = (
     controller: ReadableStreamDefaultController<Uint8Array>,
@@ -414,7 +474,11 @@ export function relaySseWithBlockRewrite(
     for (let index = bufferOffset; index < bufferLength; index += 1) {
       const firstLength = newlineLengthAt(buffer, index);
       if (firstLength === 0) continue;
-      const secondLength = newlineLengthAt(buffer, index + firstLength);
+      const secondIndex = index + firstLength;
+      // A \r in the last buffered position cannot be classified: it may still
+      // extend into \r\n when the next chunk arrives.
+      if (secondIndex === bufferLength - 1 && buffer[secondIndex] === 0x0d) return null;
+      const secondLength = newlineLengthAt(buffer, secondIndex);
       if (secondLength === 0) {
         index += firstLength - 1;
         continue;
@@ -569,7 +633,9 @@ export function relaySseWithBlockRewrite(
           releaseBuffer();
         }
         let retainedTailPending = true;
-        try { await reader.cancel(error); } catch { /* already closed */ }
+        // Cancelling one tee branch waits for its sibling. Surface the failure
+        // now so downstream can abort upstream and release the inspection branch.
+        void reader.cancel(error).catch(() => {});
         try {
           const flushed = emitRewriteFlush(controller, delimiter);
           if (bufferedTail.byteLength > 0) {

@@ -2839,6 +2839,7 @@ export const tr: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "Buraya bir model sürükleyin.",
   "claudeDesktop.laneNoMatch": "Bu ailede aramanızla eşleşen model yok.",
   "nav.grok": "Grok",
+  "nav.guardrails": "Guardrails",
   "grok.title": "Grok Build",
   "grok.subtitle": "opencodex'in Grok konfigürasyonunuza kaydettiği modeller.",
   "grok.loading": "Grok durumu yükleniyor…",

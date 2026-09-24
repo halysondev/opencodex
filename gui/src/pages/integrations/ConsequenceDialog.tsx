@@ -53,6 +53,7 @@ export default function ConsequenceDialog({
   const t = useT();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const pendingRef = useRef(false);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [staleOverride, setStaleOverride] = useState<{
@@ -70,8 +71,8 @@ export default function ConsequenceDialog({
   const showUndo = !planRequired
     || (activePlan ? planHasRollback(activePlan) : plans?.some(item => planHasRollback(item.plan)) === true);
   const dismiss = useCallback(() => {
-    if (!pending) onClose();
-  }, [onClose, pending]);
+    if (!pendingRef.current) onClose();
+  }, [onClose]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -93,7 +94,8 @@ export default function ConsequenceDialog({
   // reads exactly like the platform dialog this dashboard no longer uses, and the source
   // guard in tests/gui/platform-dialog-guard.test.ts cannot tell the two call forms apart.
   const applyConsequence = useCallback(async () => {
-    if (pending) return;
+    if (pendingRef.current) return;
+    pendingRef.current = true;
     setPending(true);
     setFailure(null);
     try {
@@ -105,9 +107,10 @@ export default function ConsequenceDialog({
       }
       setFailure(error instanceof Error ? error.message : t("integrations.error.generic"));
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
-  }, [activePlan, onConfirm, pending, plan?.fingerprint, t]);
+  }, [activePlan, onConfirm, plan?.fingerprint, t]);
 
   const slots: ReactNode[] = [
     <CopySlot key="changes" copyKey={copy.changesKey} vars={copy.vars} />,

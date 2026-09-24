@@ -433,6 +433,7 @@ export async function executeComboResponses(
         : comboUnavailable(comboId);
     }
     if (!(await recoverUnreadableEncryptedTask())) {
+      if (guardrailsRecoveryFailure) return guardrailsRecoveryFailure;
       return options.abortSignal?.aborted
         ? clientCancelledResponse()
         : unreadableEncryptedAgentTaskResponse(recoveryFailureReason);

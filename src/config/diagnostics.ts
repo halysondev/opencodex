@@ -11,7 +11,7 @@ import { isMissingPathError } from "./atomic-write";
 import { getConfigPath } from "./paths";
 import { getDefaultConfig } from "./proxy-env";
 import { salvageConfigCandidate } from "./salvage";
-import { guardrailsConfigError, malformedGuardrailsConfigWarning } from "../guardrails/config-schema";
+import { guardrailsConfigError } from "../guardrails/config-schema";
 import {
   sanitizeReasoningPinsForLoad,
   sanitizeRetryOn429ForLoad,
@@ -40,6 +40,8 @@ import {
   malformedNativeSubagentFields,
   malformedNativeSubagentFieldWarning,
   malformedCodexAccountPickerWarning,
+  guardrailsLoadWarning,
+  withFailSafeDegradedGuardrails,
   nativeSubagentSyncDisabledReason,
   normalizeNativeSubagentSync,
   inheritedFastWireConflictProviderNames,
@@ -94,9 +96,10 @@ function validFileConfigDiagnostics(config: OcxConfig, rawParsed: unknown): Conf
   // Unsafe hand-edited optional values are disabled in memory instead of rejecting
   // the entire config, which would hide unrelated providers/accounts. The next
   // ordinary save persists the normalized absence.
-  const syncDisabledReason = nativeSubagentSyncDisabledReason(config, rawParsed);
+  const failSafeConfig = withFailSafeDegradedGuardrails(config, rawParsed);
+  const syncDisabledReason = nativeSubagentSyncDisabledReason(failSafeConfig, rawParsed);
   const rawEffort = rawClaudeSubagentEffort(rawParsed);
-  const normalized = normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(config, rawParsed), rawParsed);
+  const normalized = normalizeClaudeSubagentEffort(normalizeNativeSubagentSync(failSafeConfig, rawParsed), rawParsed);
   const warnings = configPlaceholderWarnings(normalized);
   warnings.push(...inheritedFastWireConflictProviderNames(normalized).map(inheritedFastWireConflictWarning));
   warnings.push(...degradedCodexAccountPriorityWarnings(rawParsed, normalized));
@@ -123,7 +126,7 @@ function validFileConfigDiagnostics(config: OcxConfig, rawParsed: unknown): Conf
   if (clientWarning) warnings.push(clientWarning);
   const notifyWarning = malformedQuotaResetNotifyWarning(rawParsed);
   if (notifyWarning) warnings.push(notifyWarning);
-  const guardrailsWarning = malformedGuardrailsConfigWarning(rawParsed);
+  const guardrailsWarning = guardrailsLoadWarning(rawParsed);
   if (guardrailsWarning) warnings.push(guardrailsWarning);
   const catalogRefreshWarning = malformedCatalogAutoRefreshWarning(rawParsed);
   if (catalogRefreshWarning) warnings.push(catalogRefreshWarning);

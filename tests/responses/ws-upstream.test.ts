@@ -592,6 +592,7 @@ describe("handleResponses Codex WS relay selection", () => {
       body: JSON.stringify({ model: "gpt-5.5", input: secret, stream: true }),
     });
 
+    takeSpendHome();
     const response = await handleResponses(
       guardedRequest,
       guarded,
@@ -622,6 +623,7 @@ describe("handleResponses Codex WS relay selection", () => {
       });
     });
 
+    takeSpendHome();
     const baselineResponse = await handleResponses(
       request(),
       forwardConfig(),

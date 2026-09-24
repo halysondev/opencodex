@@ -14,6 +14,10 @@ import { INTERNAL_DEADLINE_MS, SERVER_BUDGET_MS } from "../helpers/test-budget";
 import { clearComboTargetCooldowns } from "../../src/combos/failover";
 import { setGuardrailsRuntimeModuleLoaderForTests } from "../../src/guardrails/activation";
 import type { OcxConfig } from "../../src/types";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
+
+let releaseSpendHome: (() => void) | undefined;
+const takeSpendHome = (): void => { releaseSpendHome ??= acquireOwnedSpendHome(); };
 
 setDefaultTimeout(15_000);
 const originalFetch = globalThis.fetch;
@@ -21,6 +25,8 @@ const SECRET = ["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_");
 const PLACEHOLDER = "<STRIPE_ACCESS_TOKEN_1>";
 
 afterEach(() => {
+  releaseSpendHome?.();
+  releaseSpendHome = undefined;
   globalThis.fetch = originalFetch;
   setGuardrailsRuntimeModuleLoaderForTests();
   clearGuardrailsCompactContinuationsForTests();
@@ -81,6 +87,7 @@ test.each(["completed", "incomplete", "disabled", "excluded"] as const)(
       });
     }) as typeof fetch;
     const before = translatorObservedBufferSnapshot().currentBytes;
+    takeSpendHome();
     const response = await handleChatCompletions(new Request("http://localhost/v1/chat/completions", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "openai-apikey/gpt-5.5", stream: true,
@@ -129,6 +136,7 @@ test.each(["enforced", "excluded", "disabled"] as const)("native compact 404 ret
     }
     return Response.json(completed(`summary ${token}`));
   }) as typeof fetch;
+  takeSpendHome();
   const response = await handleResponsesCompact(new Request("http://localhost/v1/responses/compact", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ model: "openai-apikey/gpt-5.5", input: [{ role: "user", content: SECRET }] }),
@@ -178,6 +186,7 @@ test.each(["mixed", "all-excluded"] as const)("unchecked-first compact combo use
     method: "POST", headers: { "content-type": "application/json", session_id: "guardrails-compact-scope" },
     body: JSON.stringify({ model: "combo/compact", input: [{ role: "user", content: SECRET }] }),
   });
+  takeSpendHome();
   const response = await handleResponsesCompact(compactRequest, cfg, { model: "", provider: "", admissionKind: "loopback" });
   for (const call of calls) {
     expect(call.body).toContain(token);
@@ -226,7 +235,9 @@ test.each(["xai/grok-4.5", "combo/recovery", "combo/native-recovery"])("cached e
     return providerResponse();
   }) as typeof fetch;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await post(cfg, model, encryptedInput(), headers);
+    takeSpendHome();
+    takeSpendHome();
+  const response = await post(cfg, model, encryptedInput(), headers);
     expect(response.status).toBe(200);
     await response.text();
   }
@@ -250,6 +261,7 @@ test.each(["block", "passthrough"] as const)("combo recovered-task capacity fail
     bodies.push(String(init?.body));
     return providerResponse();
   }) as typeof fetch;
+  takeSpendHome();
   const response = await post(cfg, "combo/recovery", [
     { type: "message", role: "user", content: [{ type: "input_text", text: SECRET }] },
     ...encryptedInput(),
@@ -289,6 +301,7 @@ test("native combo failure returns the recovered Guardrails capacity error befor
     nativeSends++;
     return Response.json({ error: { message: "model is not enabled for this account", code: "model_not_found" } }, { status: 401 });
   }) as typeof fetch;
+  takeSpendHome();
   const response = await post(cfg, "combo/recovery", encryptedInput(), codexHeaders());
   expect(nativeSends).toBe(1);
   expect(recoveries).toBe(1);
@@ -351,7 +364,7 @@ test.each(["expired", "missing"] as const)("protected WS reconnect masks full to
   const toolResult = { type: "function_call_output", call_id: "call_refresh", output: SECRET };
   try {
     if (mode === "expired") {
-      Date.now = () => realNow() - 2 * 60 * 60 * 1000;
+      Date.now = () => realNow() - 25 * 60 * 60 * 1000;
       rememberResponseState({ input: [message], store: false },
         { id: previousId, status: "completed", output: [toolCall] }, undefined, { force: true });
       Date.now = realNow;

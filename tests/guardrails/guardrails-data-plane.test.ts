@@ -27,6 +27,10 @@ import { handleResponses } from "../../src/server/responses/core";
 import type { RequestLogContext } from "../../src/server/request-log";
 import type { OcxConfig, OcxProviderConfig } from "../../src/types";
 import { createTestTranslatorBudget } from "../helpers/translator-budget";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
+
+let releaseSpendHome: (() => void) | undefined;
+const takeSpendHome = (): void => { releaseSpendHome ??= acquireOwnedSpendHome(); };
 
 const originalFetch = globalThis.fetch;
 const PLACEHOLDER = "<STRIPE_ACCESS_TOKEN_1>";
@@ -39,6 +43,8 @@ const STALE_INTEGRITY_HEADERS = [
 ] as const;
 
 afterEach(() => {
+  releaseSpendHome?.();
+  releaseSpendHome = undefined;
   globalThis.fetch = originalFetch;
   clearGuardrailsContinuationsForTests();
   clearGuardrailsTelemetryForTests();
@@ -195,11 +201,13 @@ test("disabled Guardrails matches baseline Responses JSON and SSE handlers", asy
   }) as typeof fetch;
 
   for (const stream of [false, true]) {
+    takeSpendHome();
     const baselineResponse = await handleResponses(
       request(["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_"), stream),
       baseline,
       { model: "", provider: "" },
     );
+    takeSpendHome();
     const disabledResponse = await handleResponses(
       request(["sk", "live", "abcdefghijklmnopqrstuvwx"].join("_"), stream),
       disabled,
@@ -237,6 +245,7 @@ test("Guardrails masks Responses input upstream and demasks a JSON response to t
   }) as typeof fetch;
 
   const logCtx: RequestLogContext = { model: "", provider: "" };
+  takeSpendHome();
   const response = await handleResponses(request(secret), config(), logCtx);
   expect(upstreamBody).toMatchObject({ input: "<STRIPE_ACCESS_TOKEN_1>" });
   expect(JSON.stringify(await response.json())).toContain(secret);
@@ -285,6 +294,7 @@ test("provider scope leaves an excluded Responses route unchanged", async () => 
     providerIds: ["other"],
   };
 
+  takeSpendHome();
   const response = await handleResponses(
     request(secret),
     scoped,
@@ -343,6 +353,7 @@ test("mixed-scope combo children reuse one protected body and final child demask
     body: JSON.stringify({ model: "combo/guarded", input: secret }),
   });
 
+  takeSpendHome();
   const response = await handleResponses(
     comboRequest,
     comboConfig,
@@ -407,6 +418,7 @@ test("mixed-scope combo keeps its parent runtime snapshot pinned across hot relo
   }) as typeof fetch;
 
   try {
+    takeSpendHome();
     const response = await handleResponses(
       new Request("http://localhost/v1/responses", {
         method: "POST",
@@ -457,6 +469,7 @@ test("provider scope leaves an all-excluded combo unchanged", async () => {
     });
   }) as typeof fetch;
 
+  takeSpendHome();
   const response = await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -501,6 +514,7 @@ test("Guardrails preserves SSE framing while demasking streamed payload JSON", a
     },
   })) as typeof fetch;
 
+  takeSpendHome();
   const response = await handleResponses(request(secret, true), config(), { model: "", provider: "" });
   const text = await response.text();
   expect(text).toContain("event: response.output_text.delta");
@@ -522,6 +536,7 @@ test("Guardrails demasks a placeholder split across Responses SSE delta events",
     headers: { "content-type": "text/event-stream" },
   })) as typeof fetch;
 
+  takeSpendHome();
   const response = await handleResponses(request(secret, true), config(), { model: "", provider: "" });
   const text = await response.text();
   const deltas = [...text.matchAll(/^data: (\{.*\})$/gm)]
@@ -942,6 +957,7 @@ test("Guardrails never restores originals inside reasoning SSE", async () => {
     headers: { "content-type": "text/event-stream" },
   })) as typeof fetch;
 
+  takeSpendHome();
   const response = await handleResponses(request(secret, true), config(), { model: "", provider: "" });
   const text = await response.text();
   expect(text).toContain("private <STRIPE_ACCESS_TOKEN_1>");
@@ -962,6 +978,7 @@ test("Guardrails SSE capacity fallback keeps the stream alive and masked", async
     headers: { "content-type": "text/event-stream" },
   })) as typeof fetch;
 
+  takeSpendHome();
   const response = await handleResponses(request(secret, true), config(), { model: "", provider: "" });
   const text = await response.text();
   expect(response.status).toBe(200);
@@ -1697,6 +1714,7 @@ test("detect mode never persists matched input in the Responses continuation cac
     body: JSON.stringify({ model: "deepseek-v4-flash", input: secret }),
   });
 
+  takeSpendHome();
   expect((await handleResponses(initial, detectConfig, { model: "", provider: "" })).status).toBe(200);
   const continuation = { previous_response_id: "resp-guardrails-detect-private", input: "follow up" };
   expect(expandPreviousResponseInput(continuation, "detect-thread")).toBe(continuation);
@@ -1728,6 +1746,7 @@ test("Responses continuation keeps inherited mappings across enforce policy revi
     },
     body: JSON.stringify({ model: "deepseek-v4-flash", input: secret }),
   });
+  takeSpendHome();
   expect((await handleResponses(
     first,
     guardedConfig,
@@ -1738,6 +1757,7 @@ test("Responses continuation keeps inherited mappings across enforce policy revi
     ...guardedConfig.guardrails!,
     disabledBuiltinRuleIds: ["credentials.url_with_creds"],
   };
+  takeSpendHome();
   const continued = await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -1775,6 +1795,7 @@ test("Responses continuation still rejects enforce to disabled transitions", asy
     "content-type": "application/json",
     "x-codex-parent-thread-id": "policy-disabled-thread",
   };
+  takeSpendHome();
   expect((await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -1789,6 +1810,7 @@ test("Responses continuation still rejects enforce to disabled transitions", asy
   )).status).toBe(200);
 
   guardedConfig.guardrails = { enabled: false };
+  takeSpendHome();
   const continued = await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -1824,6 +1846,7 @@ test("Responses continuation rejects a provider excluded after an enforced turn"
     "content-type": "application/json",
     "x-codex-parent-thread-id": "provider-scope-thread",
   };
+  takeSpendHome();
   expect((await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -1841,6 +1864,7 @@ test("Responses continuation rejects a provider excluded after an enforced turn"
     ...guardedConfig.guardrails!,
     providerScope: { mode: "selected", providerIds: ["other"] },
   };
+  takeSpendHome();
   const continued = await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -1874,6 +1898,7 @@ test("missing continuation mappings create a privacy-safe warning event", async 
     "content-type": "application/json",
     "x-codex-parent-thread-id": "mapping-loss-thread",
   };
+  takeSpendHome();
   expect((await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -1889,6 +1914,7 @@ test("missing continuation mappings create a privacy-safe warning event", async 
   clearGuardrailsContinuationsForTests();
   clearGuardrailsTelemetryForTests();
 
+  takeSpendHome();
   const continued = await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",

@@ -42,6 +42,7 @@ The wire surfaces a client actually talks to.
 | [`transports/responses-failover.md`](transports/responses-failover.md) | Upstream reset retry, the ambiguous-resend gate, combo failover and commit boundaries, compaction routing, and output headroom. |
 | [`transports/responses-spend.md`](transports/responses-spend.md) | Credential-hop and durable spend reservations, and what a spent budget tells the client. |
 | [`transports/streaming-health.md`](transports/streaming-health.md) | Heartbeat and stall deadlines, plus the opt-in WebSocket transport. |
+| [`guardrails-integration-contract.md`](guardrails-integration-contract.md) | Proposed design-freeze contract for the staged Guardrails review: hook/failure matrix, policy invariants, and landing order. |
 | [`transports/inventory.md`](transports/inventory.md) | The per-provider transport table and diagnostic outbound safety. |
 | [`data-planes/images.md`](data-planes/images.md) | Standalone image generation and edit relay. |
 | [`data-planes/search.md`](data-planes/search.md) | Hosted search relay and exact account selectors. |
@@ -125,7 +126,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/generated/` | [`runtime.md`](runtime.md) |
 | `src/github/` | [`runtime.md`](runtime.md) |
 | `src/grok/` | [`runtime.md`](runtime.md) |
-| `src/guardrails/` | [`transports/streaming-health.md`](transports/streaming-health.md) |
+| `src/guardrails/` | [`guardrails-integration-contract.md`](guardrails-integration-contract.md) |
 | `src/images/` | [`runtime.md`](runtime.md)<br>[`transports/inventory.md`](transports/inventory.md) |
 | `src/index.ts` | [`runtime.md`](runtime.md) |
 | `src/integrations/` | [`clients/integrations.md`](clients/integrations.md) |
@@ -140,7 +141,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/responses/` | [`runtime.md`](runtime.md)<br>[`transports/responses.md`](transports/responses.md)<br>[`transports/responses-wire-shapes.md`](transports/responses-wire-shapes.md)<br>[`providers-and-adapters.md`](providers-and-adapters.md)<br>[`providers/kiro.md`](providers/kiro.md)<br>[`providers/xai-grok.md`](providers/xai-grok.md)<br>[`providers/chat-compat.md`](providers/chat-compat.md) |
 | `src/router.ts` | [`runtime.md`](runtime.md) |
 | `src/routing/` | [`catalog.md`](catalog.md) |
-| `src/server/` | [`runtime.md`](runtime.md)<br>[`catalog.md`](catalog.md)<br>[`subagents.md`](subagents.md)<br>[`transports/byte-accounting.md`](transports/byte-accounting.md)<br>[`transports/responses.md`](transports/responses.md)<br>[`transports/responses-wire-shapes.md`](transports/responses-wire-shapes.md)<br>[`transports/responses-failover.md`](transports/responses-failover.md)<br>[`transports/streaming-health.md`](transports/streaming-health.md)<br>[`transports/inventory.md`](transports/inventory.md)<br>[`data-planes/images.md`](data-planes/images.md)<br>[`data-planes/inbound-compat.md`](data-planes/inbound-compat.md)<br>[`providers-and-adapters.md`](providers-and-adapters.md)<br>[`providers/xai-grok.md`](providers/xai-grok.md)<br>[`adapters/registry.md`](adapters/registry.md)<br>[`gui-and-management-api.md`](gui-and-management-api.md)<br>[`dashboard-and-usage.md`](dashboard-and-usage.md)<br>[`clients/claude-desktop.md`](clients/claude-desktop.md)<br>[`ops/service-and-sidecars.md`](ops/service-and-sidecars.md) |
+| `src/server/` | [`runtime.md`](runtime.md)<br>[`catalog.md`](catalog.md)<br>[`subagents.md`](subagents.md)<br>[`transports/byte-accounting.md`](transports/byte-accounting.md)<br>[`transports/responses.md`](transports/responses.md)<br>[`transports/responses-wire-shapes.md`](transports/responses-wire-shapes.md)<br>[`transports/responses-failover.md`](transports/responses-failover.md)<br>[`transports/streaming-health.md`](transports/streaming-health.md)<br>[`guardrails-integration-contract.md`](guardrails-integration-contract.md)<br>[`transports/inventory.md`](transports/inventory.md)<br>[`data-planes/images.md`](data-planes/images.md)<br>[`data-planes/inbound-compat.md`](data-planes/inbound-compat.md)<br>[`providers-and-adapters.md`](providers-and-adapters.md)<br>[`providers/xai-grok.md`](providers/xai-grok.md)<br>[`adapters/registry.md`](adapters/registry.md)<br>[`gui-and-management-api.md`](gui-and-management-api.md)<br>[`dashboard-and-usage.md`](dashboard-and-usage.md)<br>[`clients/claude-desktop.md`](clients/claude-desktop.md)<br>[`ops/service-and-sidecars.md`](ops/service-and-sidecars.md) |
 | `src/server/index.ts` | [`adapters/compatibility-lab.md`](adapters/compatibility-lab.md) |
 | `src/server/management/companion-routes.ts` | [`desktop-shell.md`](desktop-shell.md) |
 | `src/service-manager-probe.ts` | [`ops/service-and-sidecars.md`](ops/service-and-sidecars.md) |

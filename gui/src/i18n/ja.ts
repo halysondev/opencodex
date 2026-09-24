@@ -2619,6 +2619,7 @@ export const ja: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "ここにモデルをドロップするか、移動コントロールを使用してください。",
   "claudeDesktop.laneNoMatch": "検索に一致するモデルはこのファミリーにありません。",
   "nav.grok": "Grok",
+  "nav.guardrails": "Guardrails",
   "grok.title": "Grok Build",
   "grok.subtitle": "opencodex が Grok 設定に登録したモデルです。",
   "grok.loading": "Grok の状態を読み込み中…",

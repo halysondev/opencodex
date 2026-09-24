@@ -744,11 +744,6 @@ async function handleChatCompletionsAfterAdmission(
       ? { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" }
       : { "Content-Type": "application/json" },
   }));
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  });
   } finally {
     admission.lease?.release();
   }

@@ -8,6 +8,10 @@ import { handleChatCompletions } from "../../src/server/chat-completions";
 import type { RequestLogContext } from "../../src/server/request-log";
 import type { OcxConfig } from "../../src/types";
 import { installIsolatedCodexHome, type IsolatedCodexHome } from "../helpers/isolated-codex-home";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
+
+let releaseSpendHome: (() => void) | undefined;
+const takeSpendHome = (): void => { releaseSpendHome ??= acquireOwnedSpendHome(); };
 
 setDefaultTimeout(15_000);
 
@@ -26,6 +30,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseSpendHome?.();
+  releaseSpendHome = undefined;
   if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
   else process.env.OPENCODEX_HOME = previousHome;
   isolatedCodexHome?.restore();
@@ -290,6 +296,7 @@ test("active Guardrails marks the native Chat request-log context as privacy-sen
   const logCtx: RequestLogContext = { model: "", provider: "" };
 
   try {
+    takeSpendHome();
     const response = await handleChatCompletions(
       new Request("http://localhost/v1/chat/completions", {
         method: "POST",

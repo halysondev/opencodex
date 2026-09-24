@@ -18,11 +18,18 @@ import {
   handleResponsesCompact,
 } from "../../src/server/responses/compact";
 import type { RequestLogContext } from "../../src/server/request-log";
+import type { DataPlaneAdmission } from "../../src/server/auth-cors";
 import type { OcxConfig } from "../../src/types";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
+
+let releaseSpendHome: (() => void) | undefined;
+const takeSpendHome = (): void => { releaseSpendHome ??= acquireOwnedSpendHome(); };
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
+  releaseSpendHome?.();
+  releaseSpendHome = undefined;
   globalThis.fetch = originalFetch;
   clearGuardrailsCompactContinuationsForTests();
   clearCompactHandoffRoutesForTests();
@@ -86,6 +93,7 @@ test("native compact stays masked and its mapping follows exact returned items",
   const logCtx: RequestLogContext = { model: "", provider: "", admissionKind: "loopback" };
   const initialConfig = config();
 
+  takeSpendHome();
   const response = await handleResponsesCompact(request, initialConfig, logCtx);
   const compactPayload = await response.json() as { output: unknown[] };
   expect(upstreamBodies[0]).toContain("<STRIPE_ACCESS_TOKEN_1>");
@@ -113,6 +121,7 @@ test("native compact stays masked and its mapping follows exact returned items",
     ...continuedConfig.guardrails!,
     disabledBuiltinRuleIds: ["credentials.url_with_creds"],
   };
+  takeSpendHome();
   const continued = await handleResponses(
     continuation,
     continuedConfig,
@@ -141,6 +150,7 @@ test("Guardrails detect mode leaves native compact request and response unchange
   const detectConfig = config({
     guardrails: { enabled: true, mode: "detect", failurePolicy: "block" },
   });
+  takeSpendHome();
   const response = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -191,6 +201,7 @@ test("routed compact stays masked and retains its continuation mapping", async (
     baseUrl: "https://gateway.example/v1",
     providerName: "gw",
   });
+  takeSpendHome();
   const response = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -213,6 +224,7 @@ test("routed compact stays masked and retains its continuation mapping", async (
   expect(JSON.stringify(compactPayload)).toContain("<STRIPE_ACCESS_TOKEN_1>");
   expect(JSON.stringify(compactPayload)).not.toContain(secret);
 
+  takeSpendHome();
   const continued = await handleResponses(
     new Request("http://localhost/v1/responses", {
       method: "POST",
@@ -261,6 +273,7 @@ test("provider scope leaves an excluded routed compact request unchanged", async
     providerIds: ["other"],
   };
   const logCtx: RequestLogContext = { model: "", provider: "" };
+  takeSpendHome();
   const response = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -299,6 +312,7 @@ test("native compact masks plaintext inside local ocx1 envelopes before upstream
     });
   }) as typeof fetch;
 
+  takeSpendHome();
   const response = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -350,6 +364,7 @@ test("compact quota fallback blocks an excluded-to-protected provider transition
     mode: "selected",
     providerIds: ["protected"],
   };
+  takeSpendHome();
   const blocked = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -388,6 +403,7 @@ test("compact late scan failure blocks atomically or restores the complete origi
     }) as typeof fetch;
     const candidate = config();
     candidate.guardrails!.failurePolicy = failurePolicy;
+    takeSpendHome();
     const response = await handleResponsesCompact(
       new Request("http://localhost/v1/responses/compact", {
         method: "POST",
@@ -459,6 +475,13 @@ test("compact quota handoff returns Guardrails provider-scope 409 instead of the
     "content-type": "application/json",
     "x-codex-parent-thread-id": "guardrails-scope-handoff",
   };
+  const admission: DataPlaneAdmission = {
+    kind: "configured",
+    keyId: "key-scope-handoff",
+    source: "bearer",
+    contextPrincipalId: "principal-scope-handoff",
+  };
+  takeSpendHome();
   const seed = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -469,12 +492,15 @@ test("compact quota handoff returns Guardrails provider-scope 409 instead of the
       }),
     }),
     candidate,
-    { model: "", provider: "", admissionKind: "loopback" },
+    { model: "", provider: "", admissionKind: "configured", apiKeyId: admission.keyId },
+    undefined,
+    admission,
   );
   expect(seed.status).toBe(200);
   await seed.text();
   calls.length = 0;
 
+  takeSpendHome();
   const response = await handleResponsesCompact(
     new Request("http://localhost/v1/responses/compact", {
       method: "POST",
@@ -485,7 +511,9 @@ test("compact quota handoff returns Guardrails provider-scope 409 instead of the
       }),
     }),
     candidate,
-    { model: "", provider: "", admissionKind: "loopback" },
+    { model: "", provider: "", admissionKind: "configured", apiKeyId: admission.keyId },
+    undefined,
+    admission,
   );
   const payload = await response.json() as { error?: { code?: string } };
 
@@ -519,6 +547,7 @@ test("disabled Guardrails preserve native and routed compact behavior", async ()
       input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "plain input" }] }],
     };
     const run = async (runConfig: OcxConfig): Promise<string> => {
+      takeSpendHome();
       const response = await handleResponsesCompact(
         new Request("http://localhost/v1/responses/compact", {
           method: "POST",

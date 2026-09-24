@@ -2836,6 +2836,7 @@ export const ko: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "모델을 여기에 놓거나 이동 컨트롤을 사용하세요.",
   "claudeDesktop.laneNoMatch": "검색어와 일치하는 모델이 이 계열에 없습니다.",
   "nav.grok": "Grok",
+  "nav.guardrails": "Guardrails",
   "grok.title": "Grok Build",
   "grok.subtitle": "opencodex가 Grok 설정에 등록한 모델입니다.",
   "grok.loading": "Grok 상태를 불러오는 중…",

@@ -730,8 +730,31 @@ export function warnDegradedQuotaResetNotify(rawParsed: unknown): void {
   if (warning) console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
 }
 
-export function warnDegradedGuardrailsConfig(rawParsed: unknown): void {
+export function guardrailsLoadWarning(rawParsed: unknown): string | null {
   const warning = malformedGuardrailsConfigWarning(rawParsed);
+  if (!warning) return null;
+  const rawGuardrails = rawConfigRecord(rawConfigRecord(rawParsed)?.guardrails);
+  return rawGuardrails?.enabled === true
+    ? `${warning.replace(/ was ignored$/, "")}; enabled Guardrails fell back to built-in enforce/block defaults`
+    : warning;
+}
+
+export function withFailSafeDegradedGuardrails(config: OcxConfig, rawParsed: unknown): OcxConfig {
+  if (!malformedGuardrailsConfigWarning(rawParsed)) return config;
+  const rawGuardrails = rawConfigRecord(rawConfigRecord(rawParsed)?.guardrails);
+  if (rawGuardrails?.enabled !== true) return config;
+  return {
+    ...config,
+    guardrails: {
+      enabled: true,
+      mode: "enforce",
+      failurePolicy: "block",
+    },
+  };
+}
+
+export function warnDegradedGuardrailsConfig(rawParsed: unknown): void {
+  const warning = guardrailsLoadWarning(rawParsed);
   if (warning) console.warn(`⚠️  config.json ${warning}. Other settings were preserved.`);
 }
 

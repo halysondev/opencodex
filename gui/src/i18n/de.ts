@@ -2797,6 +2797,7 @@ export const de: Record<TKey, string> = {
   "claudeDesktop.laneEmpty": "Modell hier ablegen oder die Verschieben-Steuerung verwenden.",
   "claudeDesktop.laneNoMatch": "Kein Modell dieser Familie passt zur Suche.",
   "nav.grok": "Grok",
+  "nav.guardrails": "Guardrails",
   "grok.title": "Grok Build",
   "grok.subtitle": "Modelle, die opencodex in deiner Grok-Konfiguration registriert hat.",
   "grok.loading": "Grok-Status wird geladen…",
