@@ -24,11 +24,14 @@ function overlay(raw: unknown, before: unknown, after: unknown): unknown {
   return after;
 }
 
-function content(parts: string | OcxContentPart[]): unknown {
+function content(parts: string | OcxContentPart[], inToolResult = false): unknown {
   return typeof parts === "string" ? parts : parts.map(part => {
     if (part.type === "text") return { type: "input_text", text: part.text };
     if (part.type === "image") return { type: "input_image", image_url: part.imageUrl, ...(part.detail ? { detail: part.detail } : {}) };
-    return { type: "input_video", video_url: part.videoUrl };
+    if (part.type === "video") return { type: "input_video", video_url: part.videoUrl };
+    if (inToolResult) return { type: "input_text", text: part.text };
+    return { type: "input_file", file_data: `data:${part.mediaType};base64,${part.data}`,
+      ...(part.filename ? { filename: part.filename } : {}) };
   });
 }
 
@@ -36,7 +39,7 @@ function content(parts: string | OcxContentPart[]): unknown {
 function input(messages: OcxMessage[]): Row[] {
   return messages.flatMap((message): Row[] => {
     if (message.role === "toolResult") {
-      return [{ type: "function_call_output", call_id: message.toolCallId, output: content(message.content) }];
+      return [{ type: "function_call_output", call_id: message.toolCallId, output: content(message.content, true) }];
     }
     if (message.role !== "assistant") return [{ role: message.role, content: content(message.content) }];
     const rows: Row[] = [];

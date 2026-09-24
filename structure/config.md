@@ -596,12 +596,4 @@ Stored Direct substitution follows the [credential identity contract](providers/
 
 Proxy activation and credential-safe CLI output follow [Proxy Configuration](config-proxy.md).
 
-## Request transforms
-
-`requestTransforms` can be configured globally in `config.json` or scoped under individual providers in `providers.<name>.requestTransforms`. Handlers are loaded dynamically and executed sequentially on `OcxParsedRequest` in `src/server/responses/request-prepare.ts` before provider adapters construct wire requests.
-
-- Specifiers are resolved relative to `OPENCODEX_HOME` (`~/.opencodex`), current working directory, or treated as module specifiers.
-- Handlers receive `{ providerName, modelId, providerConfig, config, acceptsImageInput }` to facilitate optimizations like `pxpipe` (text-to-image for vision models) and `headroom` (context compression).
-- Transform lists are local-file configuration only; management API writes cannot add or change executable handlers.
-- Configuration context is a deeply read-only snapshot. Each handler's request changes are committed only after validation and native synchronization succeed; failures retain the last valid request.
-- Execution is guarded by `_requestTransformsApplied` for internal retries reusing a parsed request. New inbound requests, including history replays, run the pipeline again.
+Request transforms follow the [request transform contract](transports/responses.md#request-transforms).

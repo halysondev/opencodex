@@ -479,3 +479,13 @@ replacement-decoded; other malformed-body usage, quota, reset evidence and class
 status-only fallback. Rebuilt failures remain non-replayable and cyber-policy failures carry neither
 `Retry-After` nor quota-reset metadata. The [Responses failover contract](responses-failover.md)
 owns the bounded recovery and replay decisions.
+
+## Request transforms
+
+`requestTransforms` can be configured globally in `config.json` or scoped under individual providers in `providers.<name>.requestTransforms`. Handlers are loaded dynamically and executed sequentially on `OcxParsedRequest` by `src/transforms/runner.ts` at the `src/server/responses/request-prepare.ts` admission point, before provider adapters construct wire requests.
+
+- Specifiers are resolved relative to `OPENCODEX_HOME` (`~/.opencodex`), current working directory, or treated as module specifiers.
+- Handlers receive `{ providerName, modelId, providerConfig, config, acceptsImageInput }` to facilitate optimizations like `pxpipe` (text-to-image for vision models) and `headroom` (context compression).
+- Transform lists are local-file configuration only; management API writes cannot add or change executable handlers.
+- Configuration context is a deeply read-only snapshot. Each handler's request changes are committed only after validation and the `src/transforms/responses-body.ts` native synchronization succeed; failures retain the last valid request.
+- Execution is guarded by `_requestTransformsApplied` for internal retries reusing a parsed request. New inbound requests, including history replays, run the pipeline again.

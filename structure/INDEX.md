@@ -148,6 +148,7 @@ A source area can be described by more than one doc, because these docs are orga
 | `src/sidecar/` | [`ops/service-and-sidecars.md`](ops/service-and-sidecars.md) |
 | `src/stall-timeout.ts` | [`runtime.md`](runtime.md) |
 | `src/storage/` | [`runtime.md`](runtime.md) |
+| `src/transforms/` | [`transports/responses.md`](transports/responses.md) |
 | `src/tray/` | [`runtime.md`](runtime.md) |
 | `src/types.ts` | [`runtime.md`](runtime.md)<br>[`config.md`](config.md) |
 | `src/types/` | [`providers-and-adapters.md`](providers-and-adapters.md) |

@@ -13,6 +13,7 @@ import { handleResponses } from "../../src/server/responses";
 import { syncTransformedResponsesBody } from "../../src/transforms/responses-body";
 import type { RequestTransformContext } from "../../src/transforms/types";
 import { repoPath } from "../helpers/repo-root";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
 
 describe("requestTransforms", () => {
   let testDir: string;
@@ -224,7 +225,7 @@ describe("requestTransforms", () => {
   });
 
   test("replacement requests are rebound to the settled turn termination scope", () => {
-    const source = readFileSync(repoPath("src/server/responses/core.ts"), "utf8");
+    const source = readFileSync(repoPath("src/server/responses/request-prepare.ts"), "utf8");
     const start = source.indexOf("parsed = await applyRequestTransforms({");
     const end = source.indexOf("const toolBridgeMaps =", start);
     expect(start).toBeGreaterThan(-1);
@@ -290,6 +291,9 @@ describe("requestTransforms", () => {
           tool_calls: [{ id: "call_transform", type: "function", function: { name: "changed__lookup", arguments: "{}" } }] } }],
       });
     }) as typeof fetch;
+    // This case calls the handler directly, so it takes the spend-journal writer lease that
+    // startServer would have taken. Released in the finally, before the fetch stub is restored.
+    const releaseSpendHome = acquireOwnedSpendHome();
     try {
       const response = await handleResponses(new Request("http://localhost/v1/responses", {
         method: "POST", headers: { "content-type": "application/json" },
@@ -305,6 +309,7 @@ describe("requestTransforms", () => {
       if (adapter === "openai-responses") expect(outbound[0]!.vendor_option).toEqual({ keep: true });
       expect(result.output).toContainEqual(expect.objectContaining({ type: "function_call", namespace: "changed", name: "lookup" }));
     } finally {
+      releaseSpendHome();
       globalThis.fetch = originalFetch;
     }
   });

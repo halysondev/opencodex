@@ -170,7 +170,8 @@
         "src/bridge.ts",
         "src/bridge/",
         "src/responses/",
-        "src/server/"
+        "src/server/",
+        "src/transforms/"
       ]
     },
     {
