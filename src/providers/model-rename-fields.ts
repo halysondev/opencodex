@@ -40,6 +40,7 @@ export const PROVIDER_MODEL_RENAME_ROLES = {
   directGeminiWireRenames: "none",
   disabled: "none",
   codexAccountMode: "none",
+  experimentalCodexSideChatCache: "none",
   apiKey: "none",
   apiKeyTransport: "none",
   apiKeyPool: "none",

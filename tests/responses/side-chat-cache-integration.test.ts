@@ -11,6 +11,7 @@ import { addFinalRequestLog, type RequestLogContext } from "../../src/server/req
 import type { OcxConfig } from "../../src/types";
 import { fakeChatGptJwt } from "../helpers/fake-chatgpt-jwt";
 import { installIsolatedCodexHome, type IsolatedCodexHome } from "../helpers/isolated-codex-home";
+import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
 
 const originalFetch = globalThis.fetch;
@@ -25,6 +26,7 @@ let terminal: "completed" | "failed" | "incomplete";
 let home: string;
 let previousHome: string | undefined;
 let codexHome: IsolatedCodexHome;
+let releaseSpendHome: (() => void) | undefined;
 
 beforeEach(() => {
   previousHome = process.env.OPENCODEX_HOME;
@@ -37,6 +39,7 @@ beforeEach(() => {
   captured = [];
   globalThis.WebSocket = new Proxy(originalWebSocket, { construct() { throw new Error("Synthetic HTTP-only upstream"); } });
   terminal = "completed";
+  releaseSpendHome = acquireOwnedSpendHome();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.hostname !== "chatgpt.com") throw new Error("Unexpected upstream destination");
@@ -54,6 +57,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseSpendHome?.();
+  releaseSpendHome = undefined;
   globalThis.fetch = originalFetch;
   globalThis.WebSocket = originalWebSocket;
   prepareSideChatCache({}, {}, false);
