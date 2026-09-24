@@ -196,6 +196,7 @@ import {
 import { createReadinessGate, type ReadinessGate } from "./readiness";
 import { createServeOptions, type ServerIngress } from "./index/serve-options";
 import { createClaudeInterceptLifecycle } from "./index/claude-intercept-lifecycle";
+import { createChatgptUnblockLifecycle } from "./index/chatgpt-unblock-lifecycle";
 import { createPackageTreeIntegrityGuardForServer } from "./index/package-tree-guard";
 import { inspectStartupOwnership, resolveInboundBodyLimitWithWarning, setStartupCacheInvalidationWrite, warnAgentTaskRecoveryStartup, warnPlaintextV2AgentMessagesStartup, type StartServerDeps } from "./index/startup-warnings";
 import { acquireSpendLedgerServerLifecycle, recordFailedStartRollback, type SpendLedgerServerLifecycle } from "./index/spend-ledger-lifecycle";
@@ -623,6 +624,7 @@ function startServerWithSpendLedgerOwner(port: number | undefined, deps: StartSe
   let loopbackServer: Server<WsData> | null = null;
   let managementIngressServer: Server<WsData> | null = null;
   const claudeIntercept = createClaudeInterceptLifecycle<WsData>();
+  const chatgptUnblock = createChatgptUnblockLifecycle<WsData>();
   const inboundBodyLimitBytes = resolveInboundBodyLimitWithWarning(config);
 
   function ingressForServer(requestServer: Server<WsData>): ServerIngress {
@@ -734,6 +736,7 @@ function startServerWithSpendLedgerOwner(port: number | undefined, deps: StartSe
       config, publicPort: server.port ?? listenPort, requestedPort: listenPort, maxRequestBodySize: inboundBodyLimitBytes,
       dispatch: (req, requestServer) => serveOptions.fetch(req, requestServer),
     });
+    chatgptUnblock.start({ config, publicPort: server.port ?? listenPort });
   } catch (error) {
     unregisterQuotaAutoRefresh?.();
     userCostOverlayReconciler?.stop();
@@ -767,6 +770,7 @@ function startServerWithSpendLedgerOwner(port: number | undefined, deps: StartSe
             ? [() => managementIngressRef.stop(closeActiveConnections)]
             : []),
           () => claudeIntercept.stop(),
+          () => chatgptUnblock.stop(),
           async () => { await remoteWorkspaceShutdown?.(); },
           async () => {
             try {
