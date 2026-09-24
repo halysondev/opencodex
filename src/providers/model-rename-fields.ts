@@ -138,6 +138,7 @@ export const PROVIDER_MODEL_RENAME_ROLES = {
   desktopExecutor: "none",
   unsafeAllowNativeLocalExec: "none",
   nativeLocalExec: "none",
+  projectContext: "none",
 } as const satisfies Record<keyof OcxProviderConfig, ModelRenameRole>;
 
 function fieldsWithRole(role: ModelRenameRole): string[] {
