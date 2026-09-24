@@ -142,6 +142,7 @@ import {
   genericOAuthMaxFailovers,
   isGenericOAuthFailoverEnabled,
   isGenericOAuthFailoverStatus,
+  readGenericOAuthFailoverClassification,
   rotateGenericOAuthAccountOnError,
   rotateGenericOAuthAccountOn429,
   failoverAccountSnapshot,
@@ -1333,12 +1334,20 @@ export async function preparePassthroughExchange(
         true,
       );
       if (hop.allowed) {
+        const errorClassification = upstreamResponse.status === 403
+          ? await readGenericOAuthFailoverClassification(
+            upstreamResponse,
+            route.providerName,
+            upstream.signal,
+          )
+          : undefined;
         const nextAccountId = rotateGenericOAuthAccountOnError(
           config, route.providerName, transportState.genericFailoverAccountId,
           upstreamResponse.status,
           upstreamResponse.headers.get("retry-after"),
           Date.now(),
           route.modelId,
+          errorClassification,
         );
         let snapshot: OAuthAccessSnapshot | undefined;
         if (nextAccountId) {
