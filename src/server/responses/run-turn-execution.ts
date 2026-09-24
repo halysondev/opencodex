@@ -243,7 +243,7 @@ export async function executeResponsesRunTurn(
       if (error.code === SEND_BUDGET_EXHAUSTED_CODE) return false;
       const status = error.status ?? adapterFailureFromMessage(error.message).httpStatus;
       if (
-        !isGenericOAuthFailoverStatus(status, route.providerName)
+        !isGenericOAuthFailoverStatus(status, route.providerName, error.message)
         || !transportState.genericFailoverAccountId
         || transportState.genericFailovers >= genericOAuthMaxFailovers(route.providerName)
         || !isGenericOAuthFailoverEnabled(config, route.providerName)
@@ -273,6 +273,7 @@ export async function executeResponsesRunTurn(
         null,
         Date.now(),
         route.modelId,
+        error.message,
       );
       if (!nextAccountId) {
         hop.permit?.release();
