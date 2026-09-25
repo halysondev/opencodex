@@ -12,6 +12,7 @@ import { formatProviderDisplayName } from "../../provider-icons";
 import { freshQuotaReportsFromResponse, type ProviderQuotaReportView } from "../../provider-workspace/report";
 import { buildQuotaSummary, formatQuotaPercent, type QuotaSummaryRow, type QuotaSummarySeverity, type QuotaSummaryWindow } from "../../quota-summary";
 import { formatResetFuture } from "../QuotaBars";
+import { publishStickyTop } from "./sticky-top";
 import "./quota-summary-bar.css";
 
 interface QuotaSummaryData {
@@ -139,7 +140,7 @@ export default function QuotaSummaryBar({ apiBase }: { apiBase: string }) {
   const stale = !resource.lastAttemptOk;
 
   return (
-    <section className="quota-summary-bar" aria-label={t("quotaSummary.aria")}>
+    <section className="quota-summary-bar" aria-label={t("quotaSummary.aria")} ref={publishStickyTop}>
       <ul className="quota-summary-list">
         {rows.map(row => <QuotaSummaryItem key={row.provider} row={row} t={t} locale={locale} />)}
       </ul>
