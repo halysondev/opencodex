@@ -675,7 +675,7 @@ export const en = {
   "models.contextCapped": "350k cap",
   "models.contextCapLabel": "Default window / cap",
   "models.v2Label": "Sub-agent",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "What is v1 / v2?",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",

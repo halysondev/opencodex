@@ -661,7 +661,7 @@ export const ko: Record<TKey, string> = {
   "models.contextCapped": "350k 제한",
   "models.contextCapLabel": "기본 창 / 상한",
   "models.v2Label": "서브에이전트",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",
   "models.v2Mode_v2": "v2",

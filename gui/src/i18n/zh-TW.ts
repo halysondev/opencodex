@@ -525,7 +525,7 @@ export const zhTW: Record<TKey, string> = {
   "models.contextCapped": "350k 限制",
   "models.contextCapLabel": "預設視窗 / 上限",
   "models.v2Label": "子代理",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "v1 / v2 是什麼？",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",

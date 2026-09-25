@@ -660,7 +660,7 @@ export const vi: Record<TKey, string> = {
   "models.contextCapped": "Giới hạn 350k",
   "models.contextCapLabel": "Cửa sổ/Giới hạn (Window / cap) mặc định",
   "models.v2Label": "Sub-agent",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "v1 / v2 là gì?",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "mặc định",

@@ -660,7 +660,7 @@ export const fr: Record<TKey, string> = {
   "models.contextCapped": "Plafond de 350k",
   "models.contextCapLabel": "Fenêtre par défaut / plafond",
   "models.v2Label": "Sous-agent",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "Que sont v1 et v2 ?",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",

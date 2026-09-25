@@ -650,7 +650,7 @@ export const de: Record<TKey, string> = {
   "models.contextCapped": "350k-Limit",
   "models.contextCapLabel": "Standardfenster / Limit",
   "models.v2Label": "Sub-Agent",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "Was ist v1 / v2?",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",

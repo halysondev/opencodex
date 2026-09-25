@@ -658,7 +658,7 @@ export const zh: Record<TKey, string> = {
   "models.contextCapped": "350k 限制",
   "models.contextCapLabel": "默认窗口 / 上限",
   "models.v2Label": "子代理",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",
   "models.v2Mode_v2": "v2",

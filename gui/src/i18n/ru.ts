@@ -663,7 +663,7 @@ export const ru: Record<TKey, string> = {
   "models.contextCapped": "Лимит 350k",
   "models.contextCapLabel": "Окно по умолчанию / лимит",
   "models.v2Label": "Подагент",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "Что такое v1 / v2?",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "base",

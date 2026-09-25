@@ -657,7 +657,7 @@ export const ja: Record<TKey, string> = {
   "models.contextCapped": "350k 上限",
   "models.contextCapLabel": "デフォルトウィンドウ / 上限",
   "models.v2Label": "サブエージェント",
-  "models.shadowCallOriginal": "⚠ {models} →",
+  "models.shadowCallOriginal": "{models} →",
   "models.v2DocsLink": "v1 / v2 とは?",
   "models.v2Mode_v1": "v1",
   "models.v2Mode_default": "ベース",
