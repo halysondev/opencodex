@@ -292,10 +292,8 @@ describe("GET /api/usage", () => {
         // A distinct key forces a fresh custom scan.
         url.searchParams.set("until", "1");
         const response = await fetch(url);
-        expect(response.status).toBe(200); // existing Usage UI reads the error field
-        expect(await response.json()).toMatchObject({
-          range: "today", customWindow: true, since: 0, until: 1, error: "read_failed",
-        });
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({ error: "read_failed" });
       } finally {
         scanSpy.mockRestore();
       }

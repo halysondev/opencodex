@@ -285,29 +285,11 @@ ordinary appends. It does not retain the full input or a normalized object for e
 neither the old byte window nor the parsed-entry cap can discard an earlier prefix before range and
 surface filtering. `managementUsageMaxReadBytes` remains a recognized compatibility setting for
 bounded legacy readers, but it is not an accuracy limit or tuning knob for `GET /api/usage`.
-A Codex-surface response also includes an `accounts` breakdown keyed by the stable non-PII
-`accountLogLabel`; current cards join those rows to the management account DTO and show the 30-day
-token total, API-equivalent cost estimate, and measurement coverage. New main-pool rows use `main`,
-while legacy bare `openai` rows stay ambiguous rather than being reassigned from current config.
-A missing `usage.jsonl` returns a zeroed summary with 200, not an error: a fresh install has no
-usage and must not render as a failure. What the shape must never do is present an unmeasured
-request as a measured zero — that is what the `measured / reported / unreported / unsupported /
-estimated` split exists for, and why coverage is reported alongside totals. The dashboard Usage tab renders the same shape, and the
-main Dashboard surfaces a 30d token / coverage summary. The in-memory `requestLog` is capped at
-200 entries and is **not** the source of truth for aggregation — the JSONL on disk is.
-
-Ledger read failures return `500 { error: "read_failed" }`; they are not empty summaries. The
-dashboard also rejects the legacy HTTP-200 form before updating its held cache, so an unavailable
-read keeps the last valid report visible with a stale/error state instead of replacing it with
-fabricated zero totals.
-
-[Decision Log]
-- 목적과 의도: Keep "no recorded usage" distinct from "usage could not be read" across the API and dashboard cache.
-- 기존 구현 및 제약 조건: Missing ledgers are valid empty installations, while older daemons encoded real read failures as HTTP 200 with zero-filled counters.
-- 검토한 주요 대안: Keep the zero-filled error envelope and teach every consumer about it; mark it incomplete; or use an HTTP failure and retain compatibility rejection in the primary dashboard.
-- 선택한 방식: Return a minimal HTTP 500 error envelope and reject the legacy HTTP-200 error before cache publication.
-- 다른 대안 대신 이 방식을 선택한 이유: Zero counters and incomplete history are valid data states; neither can truthfully represent an unavailable ledger, and a transport failure already composes with stale-data retention.
-- 장점, 단점 및 영향: Operators no longer see false zero cost or traffic and valid cached data survives refresh failures; clients that treated every 200 as data now receive an explicit failure and must use their existing retry/stale path.
+A Codex-surface response includes an `accounts` breakdown keyed by stable non-PII `accountLogLabel`; cards join it to the management account DTO for 30-day tokens, API-equivalent cost and coverage. New main-pool rows use `main`; legacy bare `openai` rows remain ambiguous.
+A missing `usage.jsonl` returns a zeroed summary with 200 because a fresh install has no usage. Unmeasured requests remain distinct from measured zero through `measured / reported / unreported / unsupported / estimated` counts and their coverage totals.
+The Usage tab renders that shape and the main Dashboard shows its 30-day summary. The 200-entry in-memory `requestLog` is not the aggregation source; the JSONL ledger is.
+Ledger read failures instead return `500 { error: "read_failed" }`. The dashboard rejects that legacy HTTP-200 error envelope before cache publication, retaining the last valid report with stale/error state rather than fabricating zero totals.
+> Decision record: [ADR-0106](decisions/ADR-0106-usage-read-failure-contract.md)
 
 A row also records the upstream cost of its logical request. `logicalRequestId` names the turn
 that a retry leg, a repair refetch and a combo child all belong to, and `spend` aggregates their
