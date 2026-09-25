@@ -1251,7 +1251,11 @@ export default function Usage({ apiBase, connected = false, apiKeyId }: { apiBas
         </Notice>
       ) : (
         <>
-          {state.showError && <Notice tone="err">{t(connected ? "usage.hubOffline" : "usage.loadError")}</Notice>}
+          {state.showError && (
+            <Notice tone="err">
+              {t(connected && !(state.error instanceof UsageReadFailedError) ? "usage.hubOffline" : "usage.loadError")}
+            </Notice>
+          )}
           <UsageIncompleteNotice data={data} />
           {data?.historyTruncated && (
             // Naming the loaded window is the point: without it, `30d` and "Available history"
