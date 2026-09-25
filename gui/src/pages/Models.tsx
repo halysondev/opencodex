@@ -2560,7 +2560,9 @@ export default function Models({ apiBase, restartEpoch = 0, connected = false, c
       </div>}
       <ModelsSettingsPanel title={t("models.settingsPanel.title")} attentionLabel={t("models.settingsPanel.attention")}
         warn={!!(v2?.enabled && v2.agentsMaxThreadsConflict) || v2Note !== "" || pickerResource.state.showError}
-        summary={modelsSettingsSummary(t, { multiAgentMode: v2?.multiAgentMode, shadowEnabled: shadowCall?.enabled === true, shadowModel: shadowCall?.model, windowOn: allCapped, windowValue: contextCapValue, pickerMode, newModelsOff: modelDiscovery?.policy === "off" })}>
+        summary={modelsSettingsSummary(t, { multiAgentMode: v2?.multiAgentMode, v2Threads: v2?.maxConcurrentThreadsPerSession, keepNativeOnV1: v2?.keepNativeChatGptOnV1 === true,
+          shadowEnabled: shadowCall?.enabled === true, shadowModel: shadowCall?.model, windowOn: allCapped, windowValue: contextCapValue, newModelsOff: modelDiscovery?.policy === "off", aliasesOn: aliases.defaults.global,
+          pickerMode: modelPickerOrderMode(pickerSettings?.pickerAvailable ?? [], pickerSettings?.pickerOrder ?? [], pickerSettings?.pickerOrderMode) })}>
         {controlsBlock}
       </ModelsSettingsPanel>
       <div className="models-workspace-root" aria-busy={catalogState.refreshing || undefined}>

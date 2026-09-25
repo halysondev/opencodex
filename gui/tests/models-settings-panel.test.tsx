@@ -66,7 +66,7 @@ function userToggle(details: HTMLDetailsElement) {
 }
 
 test("summary lists sub-agent, shadow, window and order in that order; new-model policy only when off", () => {
-  const base = { multiAgentMode: "v1" as const, shadowEnabled: true, shadowModel: "xai/grok-4.5", windowOn: false, windowValue: 350_000, pickerMode: "most-used", newModelsOff: false };
+  const base = { multiAgentMode: "v1" as const, shadowEnabled: true, shadowModel: "xai/grok-4.5", windowOn: false, windowValue: 350_000, pickerMode: "most-used", newModelsOff: false, aliasesOn: false };
   expect(modelsSettingsSummary(t, base).map(item => [item.id, item.value])).toEqual([
     ["subagent", "models.v2Mode_v1"],
     ["shadow", "xai/grok-4.5"],
@@ -79,6 +79,12 @@ test("summary lists sub-agent, shadow, window and order in that order; new-model
   expect(off.at(-1)?.id).toBe("new-models");
   // While the v2 settings are still loading there is no truthful mode to show.
   expect(modelsSettingsSummary(t, { ...base, multiAgentMode: undefined })[0]?.id).toBe("shadow");
+  // Non-default folded controls surface too; the thread cap and keep-native only mean anything on v2.
+  const v2 = modelsSettingsSummary(t, { ...base, multiAgentMode: "v2", v2Threads: 8, keepNativeOnV1: true, aliasesOn: true });
+  expect(v2.map(item => item.id)).toEqual(["subagent", "threads", "keep-native", "shadow", "window", "order", "aliases"]);
+  expect(v2.find(item => item.id === "threads")?.value).toBe("8");
+  expect(modelsSettingsSummary(t, { ...base, v2Threads: 8, keepNativeOnV1: true }).map(item => item.id))
+    .toEqual(["subagent", "shadow", "window", "order"]);
 });
 
 test("starts folded, and a user toggle is remembered under its own key", () => {

@@ -86,8 +86,6 @@ Messages와 `count_tokens`는 라우팅 클라이언트 호환성을 위해 세 
 
 `port`를 생략하면 *companion* 형태입니다. 리스너가 프록시 포트와 같은 번호로 `127.0.0.1`에 바인드합니다.
 
-가로채기는 모델을 기준으로 합니다. 모델 ID가 `sourceModels`와 일치하는 모든 요청은 일반 `request_kind: "turn"` 요청을 포함해 다시 보낼 수 있습니다. `x-openai-subagent: collab_spawn` 또는 `x-codex-turn-metadata` JSON 헤더의 `subagent_kind: "thread_spawn"`로 생성된 자식으로 표시된 요청은 예외이므로, 명시적으로 생성된 서브에이전트는 모델을 유지합니다.
-
 ```json
 {
   "hostname": "100.76.170.81",
@@ -163,6 +161,8 @@ ssh -L 20100:localhost:10100 -L 1455:localhost:1455 you@remote
 ## Shadow calls
 
 Codex는 제목과 커밋 메시지 같은 작업에 작은 보조 모델을 사용합니다. 인식된 source-model prefix를 다른 구성된 모델로 돌리려면 `shadowCallIntercept`를 활성화합니다. 대체 호출은 요청에 설정된 reasoning effort를 유지합니다. 클라이언트가 다른 helper id를 사용할 때만 `sourceModels`를 설정합니다.
+
+가로채기는 모델을 기준으로 합니다. 모델 ID가 `sourceModels`와 일치하는 모든 요청은 일반 `request_kind: "turn"` 요청을 포함해 다시 보낼 수 있습니다. `x-openai-subagent: collab_spawn` 또는 `x-codex-turn-metadata` JSON 헤더의 `subagent_kind: "thread_spawn"`로 생성된 자식으로 표시된 요청은 예외이므로, 명시적으로 생성된 서브에이전트는 모델을 유지합니다.
 
 ```json
 {

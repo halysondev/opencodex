@@ -38,12 +38,17 @@ export function writeSettingsOpen(open: boolean, storage?: StorageLike): void {
 
 export interface ModelsSettingsState {
   multiAgentMode?: "v1" | "default" | "v2";
+  /** Explicit per-session thread cap; null/undefined means Codex's default. */
+  v2Threads?: number | null;
+  keepNativeOnV1?: boolean;
   shadowEnabled: boolean;
   shadowModel?: string;
   windowOn: boolean;
   windowValue: number;
+  /** The SAVED picker mode — an unapplied draft is not the catalog's state. */
   pickerMode: string;
   newModelsOff: boolean;
+  aliasesOn: boolean;
 }
 
 const PICKER_MODE_KEYS: Record<string, TKey> = {
@@ -54,12 +59,22 @@ const PICKER_MODE_KEYS: Record<string, TKey> = {
   custom: "models.pickerOrder.custom",
 };
 
-/** Ordered by how much each control changes request behaviour. */
+/**
+ * Ordered by how much each control changes request behaviour. The four core controls
+ * always appear; the rest appear only when they differ from their default, so the line
+ * stays short while nothing that changes behaviour is hidden by the fold.
+ */
 export function modelsSettingsSummary(t: TFn, state: ModelsSettingsState): SettingsSummaryItem[] {
   const off = t("models.settingsPanel.off");
   const items: SettingsSummaryItem[] = [];
   if (state.multiAgentMode) {
     items.push({ id: "subagent", label: t("models.v2Label"), value: t(`models.v2Mode_${state.multiAgentMode}` as TKey) });
+  }
+  if (state.multiAgentMode === "v2" && typeof state.v2Threads === "number") {
+    items.push({ id: "threads", label: t("models.v2ThreadsLabel"), value: String(state.v2Threads) });
+  }
+  if (state.multiAgentMode === "v2" && state.keepNativeOnV1) {
+    items.push({ id: "keep-native", label: t("models.keepNativeOnV1"), value: "" });
   }
   items.push({
     id: "shadow",
@@ -70,5 +85,6 @@ export function modelsSettingsSummary(t: TFn, state: ModelsSettingsState): Setti
   const pickerKey = PICKER_MODE_KEYS[state.pickerMode];
   items.push({ id: "order", label: t("models.pickerOrder.label"), value: pickerKey ? t(pickerKey) : state.pickerMode });
   if (state.newModelsOff) items.push({ id: "new-models", label: t("models.newPolicyGlobal"), value: "" });
+  if (state.aliasesOn) items.push({ id: "aliases", label: t("models.useDefaultAliasesGlobal"), value: "" });
   return items;
 }

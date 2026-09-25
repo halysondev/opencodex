@@ -69,13 +69,15 @@ export function CustomModelsSummary({ count, label }: { count: number; label: st
 
 /**
  * A long explanatory hint folded behind an info glyph. The full text stays the trigger's
- * accessible name, so screen readers lose nothing when the paragraph leaves the layout.
+ * accessible name (Tooltip renders the focusable button; the visually hidden copy names
+ * it), so screen readers lose nothing when the paragraph leaves the layout.
  */
 export function InfoHint({ text }: { text: string }) {
   return (
     <Tooltip content={text} side="top" maxWidth={360}>
-      <span className="models-info-hint" role="img" tabIndex={0} aria-label={text}>
+      <span className="models-info-hint">
         <IconInfo width={14} height={14} aria-hidden="true" />
+        <span className="sr-only">{text}</span>
       </span>
     </Tooltip>
   );

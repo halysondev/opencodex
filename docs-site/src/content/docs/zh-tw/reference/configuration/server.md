@@ -80,8 +80,6 @@ stream 開啟前以 `401` 失敗。
 `unauthenticatedLoopbackListener` 會開啟第二個綁定到 `127.0.0.1` 的 listener，不要求憑證即可
 放行。主 listener 不受影響——遠端呼叫者仍需要 token。
 
-攔截依模型判定：裸模型 ID 符合 `sourceModels` 的請求（包括一般的 `request_kind: "turn"` 請求）都可以被重定向。由 `x-openai-subagent: collab_spawn` 或 `x-codex-turn-metadata` JSON 標頭中的 `subagent_kind: "thread_spawn"` 標記為已產生子代理的請求不受攔截，因此明確產生的子代理會保留其模型。
-
 ```json
 {
   "hostname": "0.0.0.0",
@@ -149,6 +147,8 @@ ssh -L 20100:localhost:10100 -L 1455:localhost:1455 you@remote
 ## Shadow call
 
 Codex 使用小型 helper 模型處理如標題與 commit 訊息等任務。啟用 `shadowCallIntercept` 以將識別的來源模型前綴重定向到另一個已設定的模型。替換後仍會保留為請求設定的 reasoning effort。僅在客戶端使用不同的 helper id 時設定 `sourceModels`。
+
+攔截依模型判定：裸模型 ID 符合 `sourceModels` 的請求（包括一般的 `request_kind: "turn"` 請求）都可以被重定向。由 `x-openai-subagent: collab_spawn` 或 `x-codex-turn-metadata` JSON 標頭中的 `subagent_kind: "thread_spawn"` 標記為已產生子代理的請求不受攔截，因此明確產生的子代理會保留其模型。
 
 ```json
 {
