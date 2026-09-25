@@ -5,7 +5,7 @@ import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
 import { clearClientResourceStoresForTests } from "../src/client-resource";
 import { readSessionListCache } from "../src/session-list-cache";
-import { readUsageMetadata } from "../src/usage-summary-resource";
+import { isUsageReadFailure, readUsageMetadata } from "../src/usage-summary-resource";
 import { DashboardOverviewHead } from "../src/pages/dashboard-overview-head";
 import ProviderWorkspaceShell from "../src/components/provider-workspace/ProviderWorkspaceShell";
 import AddProviderModal from "../src/components/AddProviderModal";
@@ -80,6 +80,13 @@ test("metadata reader preserves positive diagnostics without inferring completen
   for (const value of [null, {}, { usageIncomplete: false }, { usageIncomplete: "true" }]) expect(readUsageMetadata(value)).toEqual({});
   expect(readUsageMetadata({ ...partial, models: [1], token: "private" })).toEqual(partial);
   expect(readUsageMetadata({ usageIncomplete: true, usageIncompleteReason: "future_reason" })).toEqual({ usageIncomplete: true });
+});
+
+test("legacy successful error envelopes are not accepted as measured usage", () => {
+  expect(isUsageReadFailure({ error: "read_failed", summary: { requests: 0 } })).toBe(true);
+  for (const value of [null, {}, { error: "future_error" }, { error: true }]) {
+    expect(isUsageReadFailure(value)).toBe(false);
+  }
 });
 
 test("Dashboard warns even when no readable requests remain", async () => {

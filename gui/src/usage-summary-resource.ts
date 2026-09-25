@@ -13,6 +13,11 @@ export function readUsageMetadata(value: unknown): UsageReadMetadata {
   };
 }
 
+/** Older daemons returned this failure as HTTP 200; never admit that envelope as usage data. */
+export function isUsageReadFailure(value: unknown): boolean {
+  return !!value && typeof value === "object" && "error" in value && value.error === "read_failed";
+}
+
 export function usageSummary30dResourceKey(apiBase: string, surface: "all" | "codex" = "all"): string {
   return surface === "codex"
     ? ["usage-summary-30d", apiBase, "codex"].join(":")

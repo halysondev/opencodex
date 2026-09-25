@@ -1,7 +1,7 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useI18n, type TFn, type Locale } from "../i18n/shared";
-import type { UsageReadMetadata } from "../usage-summary-resource";
+import { isUsageReadFailure, type UsageReadMetadata } from "../usage-summary-resource";
 import { UsageIncompleteNotice } from "../components/usage-incomplete-notice";
 import { formatProviderDisplayName } from "../provider-icons";
 import { formatTokens } from "../format-tokens";
@@ -100,6 +100,7 @@ interface UsageProvider {
 }
 
 class UsageWindowMismatchError extends Error {}
+class UsageReadFailedError extends Error {}
 
 interface UsageResponse extends UsageReadMetadata {
   range: Range;
@@ -1092,6 +1093,9 @@ export default function Usage({ apiBase, connected = false, apiKeyId }: { apiBas
     const response = await fetch(`${apiBase}/api/usage?${query}`, { signal });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
     const next = await response.json() as UsageResponse;
+    // Compatibility with older proxies that encoded a failed ledger read as a successful zero
+    // report. Reject before the held cache is written so a valid snapshot remains available.
+    if (isUsageReadFailure(next)) throw new UsageReadFailedError();
     // HTTP 200 alone does not prove an older daemon honored the custom bounds.
     if (since !== undefined && (next?.customWindow !== true || next.since !== since || next.until !== until)) {
       throw new UsageWindowMismatchError();
@@ -1244,6 +1248,7 @@ export default function Usage({ apiBase, connected = false, apiKeyId }: { apiBas
         <Notice tone="err">
           {state.error instanceof UsageWindowMismatchError
             ? `${t("usage.loadError")} ${t("dash.codexRestartMalformed")}`
+            : state.error instanceof UsageReadFailedError ? t("usage.loadError")
             : connected ? t("usage.hubOffline") : state.error instanceof Error ? `${t("usage.loadError")} ${state.error.message}` : t("usage.loadError")}{" "}
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => resource.refresh()}>
             {t("common.retry")}

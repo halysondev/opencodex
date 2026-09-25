@@ -942,17 +942,14 @@ describe("GET /api/usage", () => {
     }
   });
 
-  test("read failure keeps the normalized surface in the fallback response", async () => {
+  test("read failure is unavailable instead of a successful measured-zero report", async () => {
     mkdirSync(join(testDir, "usage.jsonl"));
     const server = startServer(0);
     try {
       const res = await fetch(new URL("/api/usage?surface=claude", server.url));
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body.surface).toBe("claude");
-      expect(body.summary.requests).toBe(0);
-      expect(body.accounts).toEqual([]);
-      expect(body.error).toBe("read_failed");
+      expect(body).toEqual({ error: "read_failed" });
     } finally {
       await server.stop(true);
     }
