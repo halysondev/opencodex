@@ -55,8 +55,12 @@ function directOptions(options: ToolOptions = {}) {
 }
 
 function normalizeFrames(text: string): unknown[] {
-  return text.split("\n\n").filter(block => block.trim().length > 0).map(block => {
-    const data = block.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("");
+  return text.split("\n\n").filter(block => block.trim().length > 0).flatMap(block => {
+    const dataLines = block.split("\n").filter(line => line.startsWith("data:"));
+    // Heartbeats are SSE comment-only blocks. They are transport liveness, not Chat
+    // completion frames, and can arrive before the watchdog terminal under CI timing.
+    if (dataLines.length === 0) return [];
+    const data = dataLines.map(line => line.slice(5).trim()).join("");
     if (data === "[DONE]") return "[DONE]";
     const parsed = JSON.parse(data) as Record<string, unknown>;
     if ("id" in parsed) parsed.id = "ID";
