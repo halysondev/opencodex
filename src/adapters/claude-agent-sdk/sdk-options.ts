@@ -5,7 +5,7 @@
  * one place: the harness keeps its own preset (the caller's instructions are APPENDED), and the
  * client keeps tool ownership (no built-in tools, no settings, one in-process MCP catalog).
  */
-import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, SpawnedProcess, SpawnOptions } from "@anthropic-ai/claude-agent-sdk";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { mapReasoningEffort } from "../../reasoning-effort";
 import type { OcxParsedRequest, OcxProviderConfig } from "../../types";
@@ -75,6 +75,8 @@ export interface AgentSdkOptionInput {
   toolCatalog?: AgentSdkToolCatalog;
   /** Claude Code build to drive; the one the SDK ships is used when this is absent. */
   executablePath?: string;
+  /** Spawns and owns the harness process (see `./sdk-process.ts`). */
+  spawnProcess?: (options: SpawnOptions) => SpawnedProcess;
 }
 
 /**
@@ -112,6 +114,7 @@ export function buildAgentSdkTurnOptions(input: AgentSdkOptionInput): Options {
     stderr: input.onStderr,
     ...(effort !== undefined ? { effort } : {}),
     ...(input.executablePath !== undefined ? { pathToClaudeCodeExecutable: input.executablePath } : {}),
+    ...(input.spawnProcess !== undefined ? { spawnClaudeCodeProcess: input.spawnProcess } : {}),
     ...(toolCatalog !== undefined
       ? {
           mcpServers: {

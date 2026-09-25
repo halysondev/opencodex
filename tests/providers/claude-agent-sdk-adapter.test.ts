@@ -461,6 +461,7 @@ describe("claude-agent-sdk runTurn streams a subscription turn", () => {
     expect(JSON.stringify(sdk.prompts[0])).toContain("hello");
     expect(sdk.state.returned).toBe(1);
     expect(sdk.options[0]!.env).toMatchObject({ HOME: process.env.HOME! });
+    expect(typeof sdk.options[0]!.spawnClaudeCodeProcess).toBe("function");
   });
 
   test("runs in a scratch working directory and removes it once the harness is gone", async () => {

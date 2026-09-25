@@ -38,6 +38,7 @@ import { redactSecrets } from "../coding-agent/turn";
 import { buildChildEnv } from "./env";
 import type { ClaudeCliProfile } from "./profiles";
 import { buildAgentSdkTurnOptions } from "./sdk-options";
+import { createClaudeAgentSdkProcessOwner, type ClaudeAgentSdkProcessDeps } from "./sdk-process";
 
 /** The Agent SDK surface this adapter uses; narrow on purpose, so the test seam stays small. */
 export interface ClaudeAgentSdkQuery {
@@ -52,8 +53,23 @@ export interface ClaudeAgentSdkModule {
 /** Loads the Agent SDK package. Injectable so tests never start a real harness. */
 export type ClaudeAgentSdkLoader = () => Promise<ClaudeAgentSdkModule>;
 
-export const loadClaudeAgentSdkModule: ClaudeAgentSdkLoader = async () => {
-  return await import("@anthropic-ai/claude-agent-sdk") as unknown as ClaudeAgentSdkModule;
+let pendingSdkModule: Promise<ClaudeAgentSdkModule> | undefined;
+
+/**
+ * Load the Agent SDK once per process. The export shape is checked before it is trusted, and a
+ * failed load is forgotten so installing the optional package later works without a restart.
+ */
+export const loadClaudeAgentSdkModule: ClaudeAgentSdkLoader = () => {
+  pendingSdkModule ??= import("@anthropic-ai/claude-agent-sdk").then((mod: unknown) => {
+    if (!mod || typeof mod !== "object" || !("query" in mod) || typeof mod.query !== "function") {
+      throw new Error("@anthropic-ai/claude-agent-sdk has no query export");
+    }
+    return mod as ClaudeAgentSdkModule;
+  }).catch((err: unknown) => {
+    pendingSdkModule = undefined;
+    throw err;
+  });
+  return pendingSdkModule;
 };
 
 /** Capture-only catalog handed to the runner by the adapter (see `./sdk-bridge.ts`). */
@@ -79,6 +95,8 @@ export interface ClaudeAgentSdkDeps {
   makeScratchDir?: () => Promise<string>;
   /** Removes that directory once the harness is gone. */
   removeScratchDir?: (dir: string) => Promise<void>;
+  /** Spawn, platform and Windows tree-kill seams for the harness process. */
+  process?: Omit<ClaudeAgentSdkProcessDeps, "onStderr">;
 }
 
 /**
@@ -241,6 +259,7 @@ export async function runClaudeAgentSdkTurn(input: ClaudeAgentSdkTurnInput): Pro
     return;
   }
 
+  const processOwner = createClaudeAgentSdkProcessOwner({ ...deps.process, onStderr });
   const options = buildAgentSdkTurnOptions({
     provider,
     parsed,
@@ -248,6 +267,7 @@ export async function runClaudeAgentSdkTurn(input: ClaudeAgentSdkTurnInput): Pro
     env: buildChildEnv(profile as ClaudeCliProfile, apiKey),
     abortController,
     onStderr,
+    spawnProcess: processOwner.spawn,
     ...(executablePath !== undefined ? { executablePath } : {}),
     ...(toolBridge !== undefined
       ? {
@@ -516,6 +536,15 @@ export async function runClaudeAgentSdkTurn(input: ClaudeAgentSdkTurnInput): Pro
     ]);
   }
   if (reapTimer) clearTimeout(reapTimer);
+  // The SDK stopped reading; the harness is only gone once its process closed. Terminate what is
+  // still running (the whole tree on Windows) and wait for the exit, bounded like the reap above.
+  processOwner.terminate();
+  let exitTimer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    processOwner.exited(),
+    new Promise<void>(resolve => { exitTimer = setTimeout(resolve, reapTimeoutMs); }),
+  ]);
+  if (exitTimer) clearTimeout(exitTimer);
   // The harness is gone; nothing of the operator is left in there.
   await (deps.removeScratchDir ?? removeScratchDir)(scratchDir).catch(() => undefined);
 
