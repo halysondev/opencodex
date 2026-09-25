@@ -288,7 +288,7 @@ bounded legacy readers, but it is not an accuracy limit or tuning knob for `GET 
 A Codex-surface response includes an `accounts` breakdown keyed by stable non-PII `accountLogLabel`; cards join it to the management account DTO for 30-day tokens, API-equivalent cost and coverage. New main-pool rows use `main`; legacy bare `openai` rows remain ambiguous.
 A missing `usage.jsonl` returns a zeroed summary with 200 because a fresh install has no usage. Unmeasured requests remain distinct from measured zero through `measured / reported / unreported / unsupported / estimated` counts and their coverage totals.
 The Usage tab renders that shape and the main Dashboard shows its 30-day summary. The 200-entry in-memory `requestLog` is not the aggregation source; the JSONL ledger is.
-Ledger read failures instead return `500 { error: "read_failed" }`. The dashboard rejects that legacy HTTP-200 error envelope before cache publication, retaining the last valid report with stale/error state rather than fabricating zero totals.
+Ledger read failures instead return `500 { error: "read_failed" }`. Shared GUI usage admission reads that body before classifying HTTP failure and also rejects the legacy HTTP-200 envelope, so every shared cache retains its last valid report rather than fabricating zero totals.
 > Decision record: [ADR-0106](decisions/ADR-0106-usage-read-failure-contract.md)
 
 A row also records the upstream cost of its logical request. `logicalRequestId` names the turn

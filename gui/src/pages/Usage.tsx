@@ -1,7 +1,7 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useI18n, type TFn, type Locale } from "../i18n/shared";
-import { isUsageReadFailure, type UsageReadMetadata } from "../usage-summary-resource";
+import { readUsageResponseJson, UsageReadFailedError, type UsageReadMetadata } from "../usage-summary-resource";
 import { UsageIncompleteNotice } from "../components/usage-incomplete-notice";
 import { formatProviderDisplayName } from "../provider-icons";
 import { formatTokens } from "../format-tokens";
@@ -100,7 +100,6 @@ interface UsageProvider {
 }
 
 class UsageWindowMismatchError extends Error {}
-class UsageReadFailedError extends Error {}
 
 interface UsageResponse extends UsageReadMetadata {
   range: Range;
@@ -1091,11 +1090,7 @@ export default function Usage({ apiBase, connected = false, apiKeyId }: { apiBas
       query.set("until", String(until));
     }
     const response = await fetch(`${apiBase}/api/usage?${query}`, { signal });
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
-    const next = await response.json() as UsageResponse;
-    // Compatibility with older proxies that encoded a failed ledger read as a successful zero
-    // report. Reject before the held cache is written so a valid snapshot remains available.
-    if (isUsageReadFailure(next)) throw new UsageReadFailedError();
+    const next = await readUsageResponseJson<UsageResponse>(response);
     // HTTP 200 alone does not prove an older daemon honored the custom bounds.
     if (since !== undefined && (next?.customWindow !== true || next.since !== since || next.until !== until)) {
       throw new UsageWindowMismatchError();

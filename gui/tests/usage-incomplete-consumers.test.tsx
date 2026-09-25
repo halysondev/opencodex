@@ -5,7 +5,7 @@ import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
 import { clearClientResourceStoresForTests } from "../src/client-resource";
 import { readSessionListCache } from "../src/session-list-cache";
-import { isUsageReadFailure, readUsageMetadata } from "../src/usage-summary-resource";
+import { isUsageReadFailure, readUsageMetadata, readUsageResponseJson, UsageReadFailedError } from "../src/usage-summary-resource";
 import { DashboardOverviewHead } from "../src/pages/dashboard-overview-head";
 import ProviderWorkspaceShell from "../src/components/provider-workspace/ProviderWorkspaceShell";
 import AddProviderModal from "../src/components/AddProviderModal";
@@ -87,6 +87,15 @@ test("legacy successful error envelopes are not accepted as measured usage", () 
   for (const value of [null, {}, { error: "future_error" }, { error: true }]) {
     expect(isUsageReadFailure(value)).toBe(false);
   }
+});
+
+test("usage response admission classifies both current HTTP 500 and legacy HTTP 200 read failures", async () => {
+  for (const status of [200, 500]) {
+    await expect(readUsageResponseJson(Response.json({ error: "read_failed" }, { status })))
+      .rejects.toBeInstanceOf(UsageReadFailedError);
+  }
+  await expect(readUsageResponseJson(Response.json({ summary: { requests: 0 } })))
+    .resolves.toEqual({ summary: { requests: 0 } });
 });
 
 test("Dashboard warns even when no readable requests remain", async () => {
