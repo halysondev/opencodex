@@ -137,3 +137,8 @@ the catalog already had that width; the 980px reading in the first baseline was 
 scaling artefact. `gui/tests/models-status-toast.test.tsx` asserted the toast is the element
 directly above the workspace; it now asserts the toast is a shell sibling and the settings
 panel sits directly above the workspace, which is the same intent.
+
+wp4 CI correction: the repository rejects new lint suppressions (`new_suppression` in the
+`hygiene` and `enforce-target` gates). The quota bar now publishes a unitless
+`--ocx-sticky-top-h` and the rail applies the unit in CSS (`calc(var(--ocx-sticky-top-h, 0) * 1px ...)`),
+so no `px` literal needs a disable comment.

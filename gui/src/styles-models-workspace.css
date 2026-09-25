@@ -63,8 +63,8 @@
 
 /*
   Pinned under the sticky quota bar while the document scrolls the model list.
-  QuotaSummaryBar publishes its measured height as --ocx-sticky-top; without the bar
-  the rail pins to the viewport top. The list fills the rest of the viewport.
+  QuotaSummaryBar publishes its measured height as the unitless --ocx-sticky-top-h;
+  without the bar the rail pins to the viewport top. The list fills the rest of the viewport.
 */
 .models-workspace-rail {
   display: flex;
@@ -74,8 +74,8 @@
   padding-right: var(--space-3);
   min-width: 0;
   position: sticky;
-  top: calc(var(--ocx-sticky-top, 0px) + var(--space-3));
-  max-height: calc(100dvh - var(--ocx-sticky-top, 0px) - var(--space-6));
+  top: calc(var(--ocx-sticky-top-h, 0) * 1px + var(--space-3));
+  max-height: calc(100dvh - var(--ocx-sticky-top-h, 0) * 1px - var(--space-6));
 }
 
 .models-workspace-rail-header {
