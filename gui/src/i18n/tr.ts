@@ -3288,7 +3288,7 @@ export const tr: Record<TKey, string> = {
   "integrations.cursor.notFound": "Bulunamadı",
   "integrations.cursor.installerIntro": "Cursor Private Inference ayrı bir yerel mod derlemesidir. Cursor'un güncelleme kanalı bu derlemenin {version} sürümlü yükleyicisini sunuyor; yükleyin, ardından aşağıdaki Temel URL'yi ve API anahtarını Settings > Models > Gateway bölümüne yapıştırın.",
   "integrations.cursor.installerOpen": "Yükleyiciyi indir",
-  "integrations.cursor.installerUnavailable": "Normal Cursor özel uç noktaları Cursor sunucuları üzerinden yönlendirdiği için bu proxy'ye erişemez; bunun için ayrı Cursor Private Inference derlemesi gerekir. Bu bilgisayar için yükleyicisi Cursor'un güncelleme kanalından belirlenemedi. Aşağıdaki ağ geçidi değerleri, kurulduktan sonra geçerlidir.",
+  "integrations.cursor.installerUnavailable": "Normal Cursor özel uç noktaları Cursor sunucuları üzerinden yönlendirdiği için bu proxy'ye erişemez; bunun için ayrı Cursor Private Inference derlemesi gerekir. Cursor'un güncelleme kanalında bu bilgisayar için uygun bir yükleyici belirlenemedi. Aşağıdaki ağ geçidi değerleri, kurulduktan sonra geçerlidir.",
   "integrations.cursor.nothingFound": "Olağan konumlarda Cursor kurulumu bulunamadı. Başka bir yere yüklenmişse aşağıdaki değerler yine de geçerlidir.",
   "integrations.cursor.gateway": "Ağ geçidi değerleri",
   "integrations.cursor.gatewayHint": "Cursor Private Inference'da Settings > Models > Gateway bölümünü açın, bu iki değeri yapıştırın ve ardından Refresh model list düğmesine basın.",
