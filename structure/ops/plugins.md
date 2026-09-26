@@ -15,7 +15,10 @@ or signs them.
 - A plugin runs with the operator's credentials, so the loader refuses a plugin file or plugin
   directory that is a symbolic link (checked with `lstat`), is not a regular file/directory, is
   owned by another user, or is writable by group or others. This is the same trust boundary as
-  `config.json`. Owner and mode checks are POSIX-only; on Windows only the file type is checked.
+  `config.json`. Every ancestor of the resolved plugin directory up to `/` must be owned by the user
+  or root and not group/other-writable unless sticky (`pluginAncestorsTrustError`), so no other user
+  can swap a checked path before it is imported; files are imported through the resolved directory.
+  Owner and mode checks are POSIX-only; on Windows only the file type is checked.
 - A missing plugin directory means no plugins. Any other read failure (`EACCES`, `ENOTDIR`) is
   reported as a skipped `plugins directory` entry.
 - A plugin module default-exports `{ name?, setup(context) }`. An asynchronous `setup` has five
@@ -38,15 +41,18 @@ so the request path depends on it without depending on the loader.
 - It runs synchronously after the transport was chosen: HTTP in `sendWithConnectionPolicy`
   (`src/server/responses/fetch-helpers.ts`), including `Request` inputs, and the Codex WebSocket in
   `codexWsUpstreamFetch` (`src/server/responses/ws-upstream.ts`) once per exchange, before the pool
-  lookup. The dialled destination is part of the reuse identity (`codexWsReuseIdentity` in
-  `src/server/responses/codex-ws-pool.ts`), so a socket is never reused for another destination. Rewriting any earlier would
+  lookup. `planCodexWsDial` applies the rewrite and settles the proxy; the dialled destination, rewritten
+  headers and proxy are part of the reuse identity (`codexWsReuseIdentity` in
+  `src/server/responses/codex-ws-pool.ts`), so a socket is never reused for another destination or
+  with stale plugin headers. Rewriting any earlier would
   hide the ChatGPT origin from the WebSocket selection and push Codex turns onto HTTP. The target
   carries the URL, mutable headers and the transport (`http` or `websocket`).
 - `sendWithConnectionPolicy` can run twice for one send (an override handing back to the supplied
   executor). The outer pass rewrites and marks the init; the inner pass does not rewrite again.
 - A rewrite onto loopback dials directly on both transports: HTTP sends carry `proxy: false` and
   mark egress as decided; `rewriteWebSocketDial` drops the proxy the caller chose for the original
-  destination. Other rewrites follow egress resolved against the rewritten HTTP URL. The pre-dispatch
+  destination. Other rewrites resolve their route against the rewritten URL on both transports (a
+  WebSocket route that needs the SSE fallback falls back, as it would for the canonical URL). The pre-dispatch
   egress refusal in `providerFetch` still validates the provider's configured route against the
   original URL, so a misconfigured provider fails the same way with or without a plugin.
 - With no rewriter registered, the send is returned untouched and nothing is allocated.

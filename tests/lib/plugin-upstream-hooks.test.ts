@@ -8,6 +8,7 @@ import {
   rewriteWebSocketDial,
 } from "../../src/plugins/upstream-hooks";
 import { sendWithConnectionPolicy } from "../../src/server/responses/fetch-helpers";
+import { planCodexWsDial } from "../../src/server/responses/ws-upstream";
 import { codexWsReuseIdentity } from "../../src/server/responses/codex-ws-pool";
 import { CODEX_RESPONSES_HTTP_URL } from "../../src/server/responses/codex-ws-request";
 
@@ -155,6 +156,26 @@ test("the Codex WebSocket reuse identity changes with the dialled destination", 
   expect(direct).not.toBeNull();
   expect(local).not.toBeNull();
   expect(local?.key).not.toBe(direct?.key);
+});
+
+test("a Codex WebSocket dial resolves its proxy for the rewritten destination", () => {
+  const ws = "wss://chatgpt.com/backend-api/codex/responses";
+  const envProxy = { HTTPS_PROXY: "http://corp:3128", HTTP_PROXY: "http://plain:8080" };
+  expect(planCodexWsDial(ws, {}, "http://corp:3128", envProxy)?.proxy).toBe("http://corp:3128");
+
+  const off = registerUpstreamRewriter("remote-wss", target => { target.url = "wss://relay.example.net/backend-api/codex/responses"; });
+  expect(planCodexWsDial(ws, {}, "http://corp:3128", envProxy)?.proxy).toBe("http://corp:3128");
+  expect(planCodexWsDial(ws, {}, "http://corp:3128", { ...envProxy, NO_PROXY: "relay.example.net" })?.proxy).toBeUndefined();
+  off();
+
+  const offPlain = registerUpstreamRewriter("remote-ws", target => { target.url = "ws://relay.example.net/backend-api/codex/responses"; });
+  expect(planCodexWsDial(ws, {}, "http://corp:3128", envProxy)?.proxy).toBe("http://plain:8080");
+  offPlain();
+
+  registerUpstreamRewriter("loopback", target => { target.url = "ws://127.0.0.1:8787/backend-api/codex/responses"; });
+  expect(planCodexWsDial(ws, {}, "http://corp:3128", envProxy)).toEqual({
+    url: "ws://127.0.0.1:8787/backend-api/codex/responses", headers: {}, proxy: undefined,
+  });
 });
 
 test("unregistering removes the rewriter", () => {

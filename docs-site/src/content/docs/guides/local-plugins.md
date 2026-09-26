@@ -26,7 +26,10 @@ Put plugin files in `plugins/` inside the opencodex home (`~/.opencodex/plugins/
 - The directory is optional. Without it nothing is loaded.
 - A plugin runs inside the proxy with your credentials, so opencodex refuses a plugin file or a
   `plugins/` directory that is owned by another user or writable by group or others, and refuses
-  symbolic links. Fix permissions with `chmod go-w ~/.opencodex/plugins ~/.opencodex/plugins/*`.
+  symbolic links. Every directory above `plugins/`, up to `/`, must also be owned by you or root and
+  not writable by group or others, unless it is sticky like `/tmp`. Fix permissions with
+  `chmod go-w ~/.opencodex/plugins ~/.opencodex/plugins/*`; on systems whose default umask is
+  `002`, check the parent directories too.
 - On Windows these owner and permission checks are not performed; only regular files are loaded.
   Keep the `plugins/` directory writable by your account only.
 
@@ -80,10 +83,10 @@ small interfaces you need locally, as above.
   probes) in the background and read a cached result in the rewriter.
 - A send redirected to a loopback address (`127.0.0.1`, `::1`, `localhost`) connects directly, over
   HTTP and over the Codex WebSocket, ignoring provider proxies and `HTTP_PROXY`: a proxy elsewhere
-  cannot reach this machine's loopback. Any other destination follows the normal egress settings,
-  evaluated against the rewritten URL.
+  cannot reach this machine's loopback. Any other destination follows the normal egress settings
+  (including `NO_PROXY`), evaluated against the rewritten URL, on both transports.
 - The Codex WebSocket rewriter runs for every turn, before an idle pooled socket is reused, and a
-  socket is only reused for the same destination. A plugin that starts or stops redirecting takes
+  socket is only reused for the same destination and the same rewritten headers. A plugin that starts or stops redirecting takes
   effect on the next turn.
 - It runs after opencodex has chosen the provider, account and route, so it does not change routing,
   account selection, retries or request logs.

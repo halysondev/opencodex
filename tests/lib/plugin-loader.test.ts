@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { resetOptionalShutdownHooksForTests, runOptionalShutdownHooks } from "../../src/lib/optional-shutdown-hooks";
 import { loadOcxPlugins, pluginFileTrustError } from "../../src/plugins/loader";
 import {
@@ -11,6 +11,24 @@ import {
 } from "../../src/plugins/upstream-hooks";
 
 let dir: string;
+
+// The loader refuses a plugin directory with a group- or other-writable, non-sticky ancestor.
+// The test runner nests per-process temp roots and creates them with the caller's umask, which is
+// group-writable on user-private-group systems (umask 002). Those directories belong to this
+// test run, so drop group/other write on every ancestor this user owns. The root-owned sticky
+// `/tmp` above them is accepted as is, which also exercises the sticky exception.
+beforeAll(() => {
+  if (process.platform === "win32") return;
+  for (let current = realpathSync(tmpdir()); ; current = dirname(current)) {
+    try {
+      const stats = statSync(current);
+      if (stats.uid === process.getuid?.() && (stats.mode & 0o022) !== 0 && (stats.mode & 0o1000) === 0) {
+        chmodSync(current, stats.mode & 0o7755);
+      }
+    } catch { /* leave directories this run cannot inspect alone */ }
+    if (dirname(current) === current) break;
+  }
+});
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "ocx-plugins-"));
@@ -93,6 +111,20 @@ test.skipIf(process.platform === "win32")("a plugin directory writable by group 
     loaded: false,
     error: "refused: writable by group or others (chmod go-w)",
   }]);
+  expect(hasUpstreamRewriters()).toBe(false);
+});
+
+test.skipIf(process.platform === "win32")("a plugin directory under a group-writable, non-sticky parent is refused", async () => {
+  const parent = join(dir, "shared");
+  const nested = join(parent, "plugins");
+  mkdirSync(nested, { recursive: true, mode: 0o700 });
+  chmodSync(parent, 0o775);
+  writeFileSync(join(nested, "redirect.ts"), REDIRECT_PLUGIN);
+  chmodSync(join(nested, "redirect.ts"), 0o600);
+  const results = await loadOcxPlugins(nested);
+  expect(results).toHaveLength(1);
+  expect(results[0]?.loaded).toBe(false);
+  expect(results[0]?.error).toContain("is writable by group or others");
   expect(hasUpstreamRewriters()).toBe(false);
 });
 

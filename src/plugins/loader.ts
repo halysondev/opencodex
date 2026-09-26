@@ -17,8 +17,8 @@
  * run in the proxy's own thread, so synchronous work that never yields cannot be interrupted.
  */
 
-import { lstatSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { lstatSync, readdirSync, realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getConfigDir } from "../config/paths";
 import { registerOptionalShutdownHook } from "../lib/optional-shutdown-hooks";
@@ -110,6 +110,34 @@ export function pluginDirectoryTrustError(dir: string): string | null {
   return trustError(dir, "directory");
 }
 
+/**
+ * Every directory above the (resolved) plugin directory, up to `/`, must be owned by the user
+ * or root and not writable by group or others unless it is sticky (like `/tmp`), where others
+ * cannot rename or replace entries they do not own. With no writable component on the path, no
+ * other user can swap what the loader checked for something else before it is imported
+ * (OpenSSH StrictModes applies the same rule). POSIX only.
+ */
+export function pluginAncestorsTrustError(realDir: string): string | null {
+  if (process.platform === "win32") return null;
+  const uid = process.getuid?.();
+  let current = dirname(realDir);
+  for (;;) {
+    let stats: ReturnType<typeof lstatSync>;
+    try {
+      stats = lstatSync(current);
+    } catch (error) {
+      return `${current}: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (uid !== undefined && stats.uid !== uid && stats.uid !== 0) return `${current} is owned by another user`;
+    if ((stats.mode & 0o022) !== 0 && (stats.mode & 0o1000) === 0) {
+      return `${current} is writable by group or others`;
+    }
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 function isPlugin(value: unknown): value is OcxPlugin {
   return typeof value === "object" && value !== null && typeof (value as OcxPlugin).setup === "function";
 }
@@ -145,8 +173,17 @@ export async function loadOcxPlugins(
   if (files.length === 0) return [];
   const dirRefused = pluginDirectoryTrustError(dir);
   if (dirRefused) return [{ file: dir, name: "plugins directory", loaded: false, error: `refused: ${dirRefused}` }];
+  // Check and import through the resolved path, so both refer to the same components.
+  let realDir: string;
+  try {
+    realDir = realpathSync(dir);
+  } catch (error) {
+    return [{ file: dir, name: "plugins directory", loaded: false, error: error instanceof Error ? error.message : String(error) }];
+  }
+  const ancestorRefused = pluginAncestorsTrustError(realDir);
+  if (ancestorRefused) return [{ file: dir, name: "plugins directory", loaded: false, error: `refused: ${ancestorRefused}` }];
   const results: PluginLoadResult[] = [];
-  for (const file of files) {
+  for (const file of files.map(listed => join(realDir, basename(listed)))) {
     const fallbackName = basename(file).replace(/\.(ts|js|mjs)$/, "");
     const refused = pluginFileTrustError(file);
     if (refused) {
