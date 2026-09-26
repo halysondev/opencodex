@@ -178,6 +178,24 @@ test("a Codex WebSocket dial resolves its proxy for the rewritten destination", 
   });
 });
 
+test("a Codex WebSocket rewriter cannot change the per-turn headers carried in the frame", () => {
+  registerUpstreamRewriter("turn-headers", target => {
+    target.headers.set("x-codex-turn-state", "rewritten");
+    target.headers.set("x-codex-turn-metadata", "added");
+    target.headers.set("x-sidecar", "1");
+  });
+  const dial = planCodexWsDial(
+    "wss://chatgpt.com/backend-api/codex/responses",
+    { "x-codex-turn-state": "original", authorization: "Bearer t" },
+    undefined,
+    {},
+  );
+  expect(dial?.headers["x-codex-turn-state"]).toBe("original");
+  expect(Object.hasOwn(dial?.headers ?? {}, "x-codex-turn-metadata")).toBe(false);
+  expect(dial?.headers["x-sidecar"]).toBe("1");
+  expect(dial?.headers.authorization).toBe("Bearer t");
+});
+
 test("unregistering removes the rewriter", () => {
   const off = registerUpstreamRewriter("temp", target => { target.url = "http://changed/"; });
   off();

@@ -86,7 +86,9 @@ small interfaces you need locally, as above.
   cannot reach this machine's loopback. Any other destination follows the normal egress settings
   (including `NO_PROXY`), evaluated against the rewritten URL, on both transports.
 - The Codex WebSocket rewriter runs for every turn, before an idle pooled socket is reused, and a
-  socket is only reused for the same destination and the same rewritten headers. A plugin that starts or stops redirecting takes
+  socket is only reused for the same destination and the same rewritten headers. On that transport
+  `x-codex-turn-state` and `x-codex-turn-metadata` travel inside each request frame, so changes a
+  rewriter makes to those two headers are discarded. A plugin that starts or stops redirecting takes
   effect on the next turn.
 - It runs after opencodex has chosen the provider, account and route, so it does not change routing,
   account selection, retries or request logs.

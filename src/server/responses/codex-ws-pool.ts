@@ -1,13 +1,13 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { registerOptionalShutdownHook } from "../../lib/optional-shutdown-hooks";
-import { CODEX_RESPONSES_HTTP_URL } from "./codex-ws-request";
+import { CODEX_RESPONSES_HTTP_URL, CODEX_WS_FRAME_HEADERS } from "./codex-ws-request";
 import { CODEX_WS_ID_MAX_BYTES } from "./codex-ws-correlation";
 import { CodexWsSession } from "./codex-ws-session";
 
 export const CODEX_WS_POOL_MAX_SESSIONS = 32;
 export const CODEX_WS_POOL_IDLE_MS = 30_000;
 export const CODEX_WS_POOL_MAX_AGE_MS = 5 * 60_000;
-const MUTABLE_HEADERS = new Set(["x-codex-turn-state", "x-codex-turn-metadata"]);
+const MUTABLE_HEADERS = new Set<string>(CODEX_WS_FRAME_HEADERS);
 let processKey: Buffer | undefined;
 let poolSequence = 0;
 

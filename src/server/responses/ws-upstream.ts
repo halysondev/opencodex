@@ -18,7 +18,7 @@ import type { NativeResponseControl } from "./native-response-control";
 import { compareBunVersions } from "../../lib/bun-stream-caps";
 import { resolveProxyRoute, socks5ProxyFromEnv } from "../../lib/proxy-env";
 import type { CodexWsQuotaObserver } from "./codex-ws-metadata";
-import { CODEX_RESPONSES_HTTP_URL, CODEX_RESPONSES_WS_URL, prepareCodexHttpInit, prepareCodexWsRequest } from "./codex-ws-request";
+import { CODEX_RESPONSES_HTTP_URL, CODEX_RESPONSES_WS_URL, CODEX_WS_FRAME_HEADERS, prepareCodexHttpInit, prepareCodexWsRequest } from "./codex-ws-request";
 import { codexWsExchange } from "./codex-ws-exchange";
 import { CodexWsSession } from "./codex-ws-session";
 import { codexWsPool, codexWsReuseIdentity } from "./codex-ws-pool";
@@ -94,15 +94,24 @@ export function planCodexWsDial(
   proxy: string | undefined,
   env: Parameters<typeof resolveProxyRoute>[1] = process.env,
 ): { url: string; headers: Record<string, string>; proxy: string | undefined } | null {
-  const dial = rewriteWebSocketDial(wsUrl, headers, proxy);
+  const rewritten = rewriteWebSocketDial(wsUrl, headers, proxy);
+  // Per-turn headers ride in each frame's client_metadata, which was prepared before the rewrite
+  // and is authoritative; a pooled socket's upgrade copy is intentionally ignored. A rewriter
+  // therefore cannot change them here, and the upgrade keeps the values the frame carries.
+  const dialHeaders = { ...rewritten.headers };
+  for (const name of CODEX_WS_FRAME_HEADERS) {
+    if (Object.hasOwn(headers, name)) dialHeaders[name] = headers[name]!;
+    else delete dialHeaders[name];
+  }
+  const dial = { ...rewritten, headers: dialHeaders };
   if (dial.url === wsUrl || isLoopbackUrl(dial.url)) return dial;
-  let rewritten: URL;
+  let destination: URL;
   try {
-    rewritten = new URL(dial.url);
+    destination = new URL(dial.url);
   } catch {
     return null;
   }
-  const route = resolveProxyRoute(rewritten, env);
+  const route = resolveProxyRoute(destination, env);
   if (route.kind === "fallback") return null;
   return { ...dial, proxy: route.kind === "proxy" ? route.proxy : undefined };
 }

@@ -44,7 +44,10 @@ so the request path depends on it without depending on the loader.
   lookup. `planCodexWsDial` applies the rewrite and settles the proxy; the dialled destination, rewritten
   headers and proxy are part of the reuse identity (`codexWsReuseIdentity` in
   `src/server/responses/codex-ws-pool.ts`), so a socket is never reused for another destination or
-  with stale plugin headers. Rewriting any earlier would
+  with stale plugin headers. The per-turn headers in `CODEX_WS_FRAME_HEADERS`
+  (`src/server/responses/codex-ws-request.ts`) ride in each frame's `client_metadata`, prepared
+  before the rewrite and authoritative, so `planCodexWsDial` restores their original values and
+  they stay outside the reuse identity. Rewriting any earlier would
   hide the ChatGPT origin from the WebSocket selection and push Codex turns onto HTTP. The target
   carries the URL, mutable headers and the transport (`http` or `websocket`).
 - `sendWithConnectionPolicy` can run twice for one send (an override handing back to the supplied
