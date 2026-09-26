@@ -88,7 +88,7 @@ export function rewriteUpstreamRecord(
   return { url: result.url, headers: record };
 }
 
-function isLoopbackUrl(raw: string): boolean {
+export function isLoopbackUrl(raw: string): boolean {
   let host: string;
   try {
     host = new URL(raw).hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -99,9 +99,10 @@ function isLoopbackUrl(raw: string): boolean {
 }
 
 /**
- * WebSocket dial variant. The caller chose `proxy` for the original destination; a proxy
- * elsewhere on the network cannot reach this machine's loopback, so a rewrite onto a loopback
- * sidecar dials directly. Any other rewrite keeps the caller's proxy decision.
+ * WebSocket dial variant, run for every exchange before a pooled socket is chosen so the pool
+ * identity can include the rewritten destination. The caller chose `proxy` for the original
+ * destination; a proxy elsewhere on the network cannot reach this machine's loopback, so a
+ * rewrite onto a loopback sidecar dials directly. Any other rewrite keeps the caller's proxy.
  */
 export function rewriteWebSocketDial(
   url: string,

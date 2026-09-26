@@ -24,8 +24,11 @@ Put plugin files in `plugins/` inside the opencodex home (`~/.opencodex/plugins/
 - Names starting with `.` or `_`, and `*.d.ts`, are ignored — rename a plugin to `_my-sidecar.ts`
   to switch it off.
 - The directory is optional. Without it nothing is loaded.
-- A plugin runs inside the proxy with your credentials, so opencodex refuses a file owned by another
-  user or writable by group or others. Fix it with `chmod go-w ~/.opencodex/plugins/*`.
+- A plugin runs inside the proxy with your credentials, so opencodex refuses a plugin file or a
+  `plugins/` directory that is owned by another user or writable by group or others, and refuses
+  symbolic links. Fix permissions with `chmod go-w ~/.opencodex/plugins ~/.opencodex/plugins/*`.
+- On Windows these owner and permission checks are not performed; only regular files are loaded.
+  Keep the `plugins/` directory writable by your account only.
 
 Restart the proxy after adding, changing or removing a plugin (`ocx service restart`, or stop and
 start `ocx start`). Each loaded plugin prints a `Plugin loaded: <name>` line at startup; a skipped
@@ -37,7 +40,9 @@ To start once without plugins, set `OCX_PLUGINS=0`.
 
 A plugin default-exports an object with an optional `name` and a `setup` function. `setup` receives a
 context. An asynchronous `setup` has five seconds to finish; plugins run in the proxy's own thread, so
-a `setup` that blocks synchronously cannot be interrupted and delays startup until it returns.
+a `setup` that blocks synchronously cannot be interrupted and delays startup until it returns. A
+`setup` that times out is not stopped either: servers or timers it already started keep running, so
+start long-lived resources only after the work that can fail.
 
 ```ts
 interface UpstreamTarget {
@@ -73,15 +78,20 @@ small interfaces you need locally, as above.
 - The rewriter runs synchronously on every provider send over HTTP and on the Codex WebSocket
   connection, after opencodex has picked the transport. Keep it fast; do network checks (health
   probes) in the background and read a cached result in the rewriter.
-- Egress settings (proxy, `noProxy`) are applied to the rewritten HTTP destination. A Codex
-  WebSocket redirected to a loopback address connects directly instead of through a configured
-  proxy, which could not reach this machine's loopback.
+- A send redirected to a loopback address (`127.0.0.1`, `::1`, `localhost`) connects directly, over
+  HTTP and over the Codex WebSocket, ignoring provider proxies and `HTTP_PROXY`: a proxy elsewhere
+  cannot reach this machine's loopback. Any other destination follows the normal egress settings,
+  evaluated against the rewritten URL.
+- The Codex WebSocket rewriter runs for every turn, before an idle pooled socket is reused, and a
+  socket is only reused for the same destination. A plugin that starts or stops redirecting takes
+  effect on the next turn.
 - It runs after opencodex has chosen the provider, account and route, so it does not change routing,
   account selection, retries or request logs.
 - A redirected send goes to the host you chose. That host sees the request exactly as the provider
   would, credentials included.
-- If a rewriter throws, opencodex undoes its changes to that send, disables it for the rest of the
-  process and sends the request unmodified. If `setup` throws or times out, the plugin is skipped,
+- If a rewriter throws, opencodex undoes that rewriter's edits to the send and disables it for the
+  rest of the process. Edits made by rewriters that ran before it are kept, so the send goes out as
+  those left it (unmodified when it is the only plugin). If `setup` throws or times out, the plugin is skipped,
   anything it registered is removed, and later registration attempts from it are ignored; other
   plugins and the proxy start normally.
 - A plugin directory that exists but cannot be read (for example, wrong permissions) is reported at

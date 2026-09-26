@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resetOptionalShutdownHooksForTests, runOptionalShutdownHooks } from "../../src/lib/optional-shutdown-hooks";
@@ -67,6 +67,35 @@ test.skipIf(process.platform === "win32")("a group- or world-writable plugin is 
   expect(hasUpstreamRewriters()).toBe(false);
 });
 
+test.skipIf(process.platform === "win32")("a symbolic link is refused even when it points to a trusted file", async () => {
+  const outside = mkdtempSync(join(tmpdir(), "ocx-plugin-target-"));
+  try {
+    const target = join(outside, "real.ts");
+    writeFileSync(target, REDIRECT_PLUGIN);
+    chmodSync(target, 0o600);
+    symlinkSync(target, join(dir, "linked.ts"));
+    const [result] = await loadOcxPlugins(dir);
+    expect(result?.loaded).toBe(false);
+    expect(result?.error).toBe("refused: is a symbolic link");
+    expect(hasUpstreamRewriters()).toBe(false);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(process.platform === "win32")("a plugin directory writable by group or others is refused", async () => {
+  writePlugin("redirect.ts", REDIRECT_PLUGIN);
+  chmodSync(dir, 0o775);
+  const results = await loadOcxPlugins(dir);
+  expect(results).toEqual([{
+    file: dir,
+    name: "plugins directory",
+    loaded: false,
+    error: "refused: writable by group or others (chmod go-w)",
+  }]);
+  expect(hasUpstreamRewriters()).toBe(false);
+});
+
 test("a wrong export shape or a throwing setup is skipped and leaves no hooks behind", async () => {
   writePlugin("a-shape.ts", "export default { name: 'shape' };");
   writePlugin("b-throws.ts", `
@@ -114,6 +143,28 @@ export default {
     expect(results.map(result => result.loaded)).toEqual([true, true]);
     runOptionalShutdownHooks();
     expect(ran.sort()).toEqual(["a", "b"]);
+  } finally {
+    resetOptionalShutdownHooksForTests();
+    delete (globalThis as Record<string, unknown>)["__ocxTeardownLog"];
+  }
+});
+
+test("one plugin can register several shutdown teardowns", async () => {
+  const ran: string[] = [];
+  (globalThis as Record<string, unknown>)["__ocxTeardownLog"] = ran;
+  writePlugin("multi.ts", `
+export default {
+  setup(ctx) {
+    ctx.onShutdown(() => { globalThis.__ocxTeardownLog.push("first"); });
+    ctx.onShutdown(() => { globalThis.__ocxTeardownLog.push("second"); });
+  },
+};
+`);
+  resetOptionalShutdownHooksForTests();
+  try {
+    expect((await loadOcxPlugins(dir))[0]?.loaded).toBe(true);
+    runOptionalShutdownHooks();
+    expect(ran.sort()).toEqual(["first", "second"]);
   } finally {
     resetOptionalShutdownHooksForTests();
     delete (globalThis as Record<string, unknown>)["__ocxTeardownLog"];

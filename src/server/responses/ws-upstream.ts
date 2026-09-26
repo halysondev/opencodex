@@ -23,6 +23,7 @@ import { codexWsExchange } from "./codex-ws-exchange";
 import { CodexWsSession } from "./codex-ws-session";
 import { codexWsPool, codexWsReuseIdentity } from "./codex-ws-pool";
 import { codexWsCreateFrameExceedsLimit } from "./codex-ws-wire";
+import { rewriteWebSocketDial } from "../../plugins/upstream-hooks";
 export { CODEX_WS_LIVENESS_PING_INTERVAL_MS, CODEX_WS_RESPONSE_PRELUDE_TIMEOUT_MS, MAX_CODEX_WS_FRAME_BYTES, MAX_CODEX_WS_QUEUE_BYTES,
   MAX_CODEX_WS_CREATE_FRAME_BYTES, CODEX_WS_CREATE_FRAME_LIMIT_BYTES, codexWsCreateFrameExceedsLimit,
   isCodexWsQuotaObservedResponse, isCodexWsUpstreamResponse } from "./codex-ws-wire";
@@ -176,9 +177,12 @@ export function codexWsUpstreamFetch(
   try {
     // Steering keeps a private physical connection across successor responses; it
     // must never enter the idle-socket pool or move to a different credential.
-    const identity = control ? null : codexWsReuseIdentity(url, headers, frameText, proxy);
-    session = (identity ? codexWsPool.acquire(identity, wsUrl, headers, proxy) : null)
-      ?? new CodexWsSession(wsUrl, headers, false, undefined, proxy);
+    // Plugin rewrite runs per exchange, before the pool lookup, and the dialled destination is
+    // part of the reuse identity: a socket opened to one destination is never reused for another.
+    const dial = rewriteWebSocketDial(wsUrl, headers, proxy);
+    const identity = control ? null : codexWsReuseIdentity(url, headers, frameText, dial.proxy, dial.url);
+    session = (identity ? codexWsPool.acquire(identity, dial.url, dial.headers, dial.proxy) : null)
+      ?? new CodexWsSession(dial.url, dial.headers, false, undefined, dial.proxy);
     if (!session.busy && !session.reserve()) {
       session.dispose();
       return sseFallback(url, init);

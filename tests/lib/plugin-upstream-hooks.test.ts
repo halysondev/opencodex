@@ -8,6 +8,8 @@ import {
   rewriteWebSocketDial,
 } from "../../src/plugins/upstream-hooks";
 import { sendWithConnectionPolicy } from "../../src/server/responses/fetch-helpers";
+import { codexWsReuseIdentity } from "../../src/server/responses/codex-ws-pool";
+import { CODEX_RESPONSES_HTTP_URL } from "../../src/server/responses/codex-ws-request";
 
 afterEach(() => resetUpstreamRewritersForTests());
 
@@ -115,6 +117,44 @@ test("the physical HTTP send rewrites once, even through a nested override pass"
   await sendWithConnectionPolicy(inner, "https://api.example.com/v1/responses", { method: "POST" });
   expect(calls).toBe(1);
   expect(seen).toEqual([{ url: "http://127.0.0.1:8787/v1/responses", hop: "1" }]);
+});
+
+test("an HTTP send redirected to loopback dials directly, bypassing any proxy", async () => {
+  const seen: Array<{ url: string; proxy: unknown }> = [];
+  const physical = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    seen.push({ url: input instanceof Request ? input.url : String(input), proxy: (init as { proxy?: unknown }).proxy });
+    return new Response("ok");
+  }) as typeof fetch;
+  registerUpstreamRewriter("loopback", target => { target.url = target.url.replace("https://api.example.com", "http://127.0.0.1:8787"); });
+  await sendWithConnectionPolicy(physical, "https://api.example.com/v1/responses", { method: "POST" });
+  resetUpstreamRewritersForTests();
+  registerUpstreamRewriter("remote", target => { target.url = target.url.replace("https://api.example.com", "https://relay.example.net"); });
+  await sendWithConnectionPolicy(physical, "https://api.example.com/v1/responses", { method: "POST" });
+  expect(seen).toEqual([
+    { url: "http://127.0.0.1:8787/v1/responses", proxy: false },
+    { url: "https://relay.example.net/v1/responses", proxy: undefined },
+  ]);
+});
+
+test("a Request input is rewritten too", async () => {
+  let seenUrl = "";
+  const physical = (async (input: Parameters<typeof fetch>[0]) => {
+    seenUrl = input instanceof Request ? input.url : String(input);
+    return new Response("ok");
+  }) as typeof fetch;
+  registerUpstreamRewriter("loopback", target => { target.url = "http://127.0.0.1:8787/v1/messages"; });
+  await sendWithConnectionPolicy(physical, new Request("https://api.example.com/v1/messages", { method: "POST", body: "{}" }));
+  expect(seenUrl).toBe("http://127.0.0.1:8787/v1/messages");
+});
+
+test("the Codex WebSocket reuse identity changes with the dialled destination", () => {
+  const headers = { authorization: "Bearer t", "chatgpt-account-id": "acct", "thread-id": "th" };
+  const frame = JSON.stringify({ model: "gpt-x", client_metadata: { thread_id: "th", turn_id: "tu" } });
+  const direct = codexWsReuseIdentity(CODEX_RESPONSES_HTTP_URL, headers, frame, undefined, "wss://chatgpt.com/backend-api/codex/responses");
+  const local = codexWsReuseIdentity(CODEX_RESPONSES_HTTP_URL, headers, frame, undefined, "ws://127.0.0.1:8787/backend-api/codex/responses");
+  expect(direct).not.toBeNull();
+  expect(local).not.toBeNull();
+  expect(local?.key).not.toBe(direct?.key);
 });
 
 test("unregistering removes the rewriter", () => {

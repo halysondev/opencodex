@@ -12,40 +12,48 @@ or signs them.
 - The loader imports `*.ts`, `*.js` and `*.mjs` from `$OPENCODEX_HOME/plugins/`, sorted by name.
   Names starting with `.` or `_` and `*.d.ts` are ignored. A missing directory loads nothing.
 - `OCX_PLUGINS=0` disables loading for that process.
-- A plugin runs with the operator's credentials, so the loader refuses a file that is not a regular
-  file, is owned by another user, or is writable by group or others (POSIX). This is the same trust
-  boundary as `config.json`.
+- A plugin runs with the operator's credentials, so the loader refuses a plugin file or plugin
+  directory that is a symbolic link (checked with `lstat`), is not a regular file/directory, is
+  owned by another user, or is writable by group or others. This is the same trust boundary as
+  `config.json`. Owner and mode checks are POSIX-only; on Windows only the file type is checked.
 - A missing plugin directory means no plugins. Any other read failure (`EACCES`, `ENOTDIR`) is
   reported as a skipped `plugins directory` entry.
 - A plugin module default-exports `{ name?, setup(context) }`. An asynchronous `setup` has five
   seconds; plugins share the proxy thread, so a setup that blocks synchronously cannot be
   interrupted. A plugin that throws, times out or has the wrong shape is reported and skipped:
   its context is closed, every hook it registered is removed, and a setup that resumes after the
-  deadline cannot register again. The other plugins and the proxy start normally.
+  deadline cannot register again. A timed-out setup keeps running; resources it already opened
+  are not closed. The other plugins and the proxy start normally.
 - Plugins cannot import ocx modules: in a compiled binary they live inside `$bunfs`. Everything a
   plugin may use arrives through `OcxPluginContext` (`name`, `configDir`, `pluginDir`, `log`,
   `registerUpstreamRewriter`, `onShutdown`). `onShutdown` registers through
-  `src/lib/optional-shutdown-hooks.ts` under a per-file key, so plugins sharing a display name keep
-  separate teardowns.
+  `src/lib/optional-shutdown-hooks.ts` under a per-file, per-registration key, so plugins sharing a
+  display name, and several teardowns from one plugin, all run.
 
 ## Upstream rewrite slot
 
 `src/plugins/upstream-hooks.ts` is the only core-owned seam plugins attach to. It imports nothing,
 so the request path depends on it without depending on the loader.
 
-- It runs synchronously at the physical send, after the transport was chosen: HTTP in
-  `sendWithConnectionPolicy` (`src/server/responses/fetch-helpers.ts`), and the Codex WebSocket
-  dial in `CodexWsSession` (`src/server/responses/codex-ws-session.ts`). Rewriting any earlier would
+- It runs synchronously after the transport was chosen: HTTP in `sendWithConnectionPolicy`
+  (`src/server/responses/fetch-helpers.ts`), including `Request` inputs, and the Codex WebSocket in
+  `codexWsUpstreamFetch` (`src/server/responses/ws-upstream.ts`) once per exchange, before the pool
+  lookup. The dialled destination is part of the reuse identity (`codexWsReuseIdentity` in
+  `src/server/responses/codex-ws-pool.ts`), so a socket is never reused for another destination. Rewriting any earlier would
   hide the ChatGPT origin from the WebSocket selection and push Codex turns onto HTTP. The target
   carries the URL, mutable headers and the transport (`http` or `websocket`).
 - `sendWithConnectionPolicy` can run twice for one send (an override handing back to the supplied
   executor). The outer pass rewrites and marks the init; the inner pass does not rewrite again.
-- HTTP connection and egress decisions in `sendWithConnectionPolicy` follow the rewritten
-  destination. The WebSocket proxy is chosen by the caller for the original destination, so
-  `rewriteWebSocketDial` drops it when the rewrite targets loopback.
+- A rewrite onto loopback dials directly on both transports: HTTP sends carry `proxy: false` and
+  mark egress as decided; `rewriteWebSocketDial` drops the proxy the caller chose for the original
+  destination. Other rewrites follow egress resolved against the rewritten HTTP URL. The pre-dispatch
+  egress refusal in `providerFetch` still validates the provider's configured route against the
+  original URL, so a misconfigured provider fails the same way with or without a plugin.
 - With no rewriter registered, the send is returned untouched and nothing is allocated.
-- A rewriter that throws has its edits to that send undone, is disabled for the rest of the
-  process, and the send continues unmodified.
+- A rewriter that throws has its own edits to that send undone and is disabled for the rest of the
+  process. Rollback is per rewriter: edits from rewriters that ran before it are kept, and the send
+  continues with them. `onShutdown` keys are unique per registration (`plugin:<file>#<n>`), so a
+  plugin may register several teardowns.
 - Rewrites happen after the request is built, routed and paced, so they do not change routing,
   account selection, retry budgets or logging identity. A rewriter that moves a send
   to another host owns that host's behaviour; the core does not re-validate it.

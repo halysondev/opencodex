@@ -17,7 +17,7 @@
  * run in the proxy's own thread, so synchronous work that never yields cannot be interrupted.
  */
 
-import { readdirSync, statSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getConfigDir } from "../config/paths";
@@ -75,20 +75,39 @@ function listPluginFiles(dir: string): string[] {
     .map(entry => join(dir, entry));
 }
 
-/** Null when the file is safe to execute, otherwise the reason it is refused. */
-export function pluginFileTrustError(file: string): string | null {
-  let stats: ReturnType<typeof statSync>;
+/**
+ * Null when `path` is safe to trust, otherwise the reason it is refused. `lstat` is used so a
+ * symbolic link is judged as a link — and refused — rather than as the file it points to: a
+ * link to a file you own would otherwise pass the owner and mode checks. Windows has no
+ * POSIX owner or mode bits, so there only the file type is checked.
+ */
+function trustError(path: string, kind: "file" | "directory"): string | null {
+  let stats: ReturnType<typeof lstatSync>;
   try {
-    stats = statSync(file);
+    stats = lstatSync(path);
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
-  if (!stats.isFile()) return "not a regular file";
+  if (stats.isSymbolicLink()) return "is a symbolic link";
+  if (kind === "file" ? !stats.isFile() : !stats.isDirectory()) return `not a regular ${kind}`;
   if (process.platform === "win32") return null;
   const uid = process.getuid?.();
   if (uid !== undefined && stats.uid !== uid) return "owned by another user";
   if ((stats.mode & 0o022) !== 0) return "writable by group or others (chmod go-w)";
   return null;
+}
+
+/** Null when the file is safe to execute, otherwise the reason it is refused. */
+export function pluginFileTrustError(file: string): string | null {
+  return trustError(file, "file");
+}
+
+/**
+ * A directory another user can write lets them add or swap plugin files, so its owner and
+ * mode are checked like each file's.
+ */
+export function pluginDirectoryTrustError(dir: string): string | null {
+  return trustError(dir, "directory");
 }
 
 function isPlugin(value: unknown): value is OcxPlugin {
@@ -123,6 +142,9 @@ export async function loadOcxPlugins(
   } catch (error) {
     return [{ file: dir, name: "plugins directory", loaded: false, error: error instanceof Error ? error.message : String(error) }];
   }
+  if (files.length === 0) return [];
+  const dirRefused = pluginDirectoryTrustError(dir);
+  if (dirRefused) return [{ file: dir, name: "plugins directory", loaded: false, error: `refused: ${dirRefused}` }];
   const results: PluginLoadResult[] = [];
   for (const file of files) {
     const fallbackName = basename(file).replace(/\.(ts|js|mjs)$/, "");
@@ -134,6 +156,7 @@ export async function loadOcxPlugins(
     const unregister: Array<() => void> = [];
     // Closed when setup fails or times out: a setup that resumes later must not register.
     let active = true;
+    let shutdownCount = 0;
     const whileActive = (name: string, register: () => () => void): void => {
       if (!active) {
         console.error(`[plugin:${name}] registration after a failed setup was ignored`);
@@ -152,8 +175,9 @@ export async function loadOcxPlugins(
         pluginDir: dir,
         log: message => console.log(`[plugin:${name}] ${message}`),
         registerUpstreamRewriter: rewrite => whileActive(name, () => registerUpstreamRewriter(name, rewrite)),
-        // Keyed by file, not name: two plugins may share a display name.
-        onShutdown: teardown => whileActive(name, () => registerOptionalShutdownHook(`plugin:${file}`, teardown)),
+        // Keyed by file and registration, not name: two plugins may share a display name, and
+        // one plugin may register several teardowns.
+        onShutdown: teardown => whileActive(name, () => registerOptionalShutdownHook(`plugin:${file}#${++shutdownCount}`, teardown)),
       };
       const timeoutMs = options.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
       await withTimeout(Promise.resolve(plugin.setup(context)), timeoutMs, `plugin "${name}" setup`);

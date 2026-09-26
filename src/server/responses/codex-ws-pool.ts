@@ -25,7 +25,7 @@ function digest(input: unknown): string {
 }
 
 /** Identity comes from the selected outgoing request, never a model label or caller hint. */
-export function codexWsReuseIdentity(url: string, headers: Record<string, string>, frameText: string, proxy?: string): CodexWsReuseIdentity | null {
+export function codexWsReuseIdentity(url: string, headers: Record<string, string>, frameText: string, proxy?: string, dialUrl?: string): CodexWsReuseIdentity | null {
   if (url !== CODEX_RESPONSES_HTTP_URL) return null;
   let body: unknown;
   try { body = JSON.parse(frameText); } catch { return null; }
@@ -52,7 +52,8 @@ export function codexWsReuseIdentity(url: string, headers: Record<string, string
   const scope = digest([url, account, thread, turn]);
   const lite = metadata.ws_request_header_x_openai_internal_codex_responses_lite;
   if (lite !== undefined && lite !== "true" && lite !== "false") return null;
-  return { scope, key: digest([scope, authorization, body.model, body.service_tier ?? null, lite ?? null, immutable, proxy ?? null]) };
+  // `dialUrl` is the socket destination after plugin rewrites; absent means the canonical one.
+  return { scope, key: digest([scope, authorization, body.model, body.service_tier ?? null, lite ?? null, immutable, proxy ?? null, dialUrl ?? null]) };
 }
 
 interface Entry { identity: CodexWsReuseIdentity; session: CodexWsSession; createdAt: number; idleAt: number; retired: boolean }
