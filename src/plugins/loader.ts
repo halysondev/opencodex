@@ -11,8 +11,10 @@
  * Plugins cannot import ocx internals (a compiled binary keeps them inside `$bunfs`); they
  * receive everything they may use through `OcxPluginContext`.
  *
- * Every failure is contained: a plugin that throws, times out or has the wrong shape is
- * reported and skipped, and the remaining plugins and the proxy start normally.
+ * Failures are contained: a plugin that throws, times out or has the wrong shape is reported
+ * and skipped, its context stops accepting registrations, and the remaining plugins and the
+ * proxy start normally. The setup deadline bounds setup that yields to the event loop; plugins
+ * run in the proxy's own thread, so synchronous work that never yields cannot be interrupted.
  */
 
 import { readdirSync, statSync } from "node:fs";
@@ -57,12 +59,14 @@ export function pluginDirectory(): string {
   return join(getConfigDir(), "plugins");
 }
 
+/** A missing directory is "no plugins"; any other read failure propagates to be reported. */
 function listPluginFiles(dir: string): string[] {
   let entries: string[];
   try {
     entries = readdirSync(dir);
-  } catch {
-    return [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
   }
   return entries
     .filter(entry => !entry.startsWith(".") && !entry.startsWith("_") && !entry.endsWith(".d.ts"))
@@ -103,10 +107,24 @@ async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Prom
   }
 }
 
-export async function loadOcxPlugins(dir = pluginDirectory()): Promise<PluginLoadResult[]> {
+export interface LoadOcxPluginsOptions {
+  /** Deadline for a setup that yields; see the module comment. */
+  setupTimeoutMs?: number;
+}
+
+export async function loadOcxPlugins(
+  dir = pluginDirectory(),
+  options: LoadOcxPluginsOptions = {},
+): Promise<PluginLoadResult[]> {
   if (process.env["OCX_PLUGINS"] === "0") return [];
+  let files: string[];
+  try {
+    files = listPluginFiles(dir);
+  } catch (error) {
+    return [{ file: dir, name: "plugins directory", loaded: false, error: error instanceof Error ? error.message : String(error) }];
+  }
   const results: PluginLoadResult[] = [];
-  for (const file of listPluginFiles(dir)) {
+  for (const file of files) {
     const fallbackName = basename(file).replace(/\.(ts|js|mjs)$/, "");
     const refused = pluginFileTrustError(file);
     if (refused) {
@@ -114,6 +132,15 @@ export async function loadOcxPlugins(dir = pluginDirectory()): Promise<PluginLoa
       continue;
     }
     const unregister: Array<() => void> = [];
+    // Closed when setup fails or times out: a setup that resumes later must not register.
+    let active = true;
+    const whileActive = (name: string, register: () => () => void): void => {
+      if (!active) {
+        console.error(`[plugin:${name}] registration after a failed setup was ignored`);
+        return;
+      }
+      unregister.push(register());
+    };
     try {
       const module = await import(pathToFileURL(file).href) as { default?: unknown; plugin?: unknown };
       const plugin = module.default ?? module.plugin;
@@ -124,13 +151,16 @@ export async function loadOcxPlugins(dir = pluginDirectory()): Promise<PluginLoa
         configDir: getConfigDir(),
         pluginDir: dir,
         log: message => console.log(`[plugin:${name}] ${message}`),
-        registerUpstreamRewriter: rewrite => { unregister.push(registerUpstreamRewriter(name, rewrite)); },
-        onShutdown: teardown => { unregister.push(registerOptionalShutdownHook(`plugin:${name}`, teardown)); },
+        registerUpstreamRewriter: rewrite => whileActive(name, () => registerUpstreamRewriter(name, rewrite)),
+        // Keyed by file, not name: two plugins may share a display name.
+        onShutdown: teardown => whileActive(name, () => registerOptionalShutdownHook(`plugin:${file}`, teardown)),
       };
-      await withTimeout(Promise.resolve(plugin.setup(context)), SETUP_TIMEOUT_MS, `plugin "${name}" setup`);
+      const timeoutMs = options.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
+      await withTimeout(Promise.resolve(plugin.setup(context)), timeoutMs, `plugin "${name}" setup`);
       results.push({ file, name, loaded: true });
     } catch (error) {
-      // A half-initialised plugin must not leave hooks behind.
+      // A half-initialised plugin must not leave hooks behind, now or later.
+      active = false;
       for (const undo of unregister) undo();
       results.push({
         file,

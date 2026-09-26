@@ -36,7 +36,8 @@ To start once without plugins, set `OCX_PLUGINS=0`.
 ## Writing a plugin
 
 A plugin default-exports an object with an optional `name` and a `setup` function. `setup` receives a
-context and has five seconds to finish.
+context. An asynchronous `setup` has five seconds to finish; plugins run in the proxy's own thread, so
+a `setup` that blocks synchronously cannot be interrupted and delays startup until it returns.
 
 ```ts
 interface UpstreamTarget {
@@ -55,7 +56,7 @@ export default {
     ctx.registerUpstreamRewriter(target => {
       const upstream = new URL(target.url);
       if (!upstream.pathname.endsWith("/chat/completions")) return;
-      target.url = `http://127.0.0.1:9000${upstream.pathname}`;
+      target.url = `http://127.0.0.1:9000${upstream.pathname}${upstream.search}`;
       target.headers.set("x-original-origin", upstream.origin);
     });
   },
@@ -70,12 +71,18 @@ small interfaces you need locally, as above.
 ## How rewrites behave
 
 - The rewriter runs synchronously on every provider send over HTTP and on the Codex WebSocket
-  connection. Keep it fast; do network checks (health probes) in the background and read a cached
-  result in the rewriter.
+  connection, after opencodex has picked the transport. Keep it fast; do network checks (health
+  probes) in the background and read a cached result in the rewriter.
+- Egress settings (proxy, `noProxy`) are applied to the rewritten HTTP destination. A Codex
+  WebSocket redirected to a loopback address connects directly instead of through a configured
+  proxy, which could not reach this machine's loopback.
 - It runs after opencodex has chosen the provider, account and route, so it does not change routing,
   account selection, retries or request logs.
 - A redirected send goes to the host you chose. That host sees the request exactly as the provider
   would, credentials included.
-- If a rewriter throws, opencodex disables it for the rest of the process and sends the request
-  unmodified. If `setup` throws or times out, the plugin is skipped and anything it registered is
-  removed; other plugins and the proxy start normally.
+- If a rewriter throws, opencodex undoes its changes to that send, disables it for the rest of the
+  process and sends the request unmodified. If `setup` throws or times out, the plugin is skipped,
+  anything it registered is removed, and later registration attempts from it are ignored; other
+  plugins and the proxy start normally.
+- A plugin directory that exists but cannot be read (for example, wrong permissions) is reported at
+  startup rather than treated as empty.

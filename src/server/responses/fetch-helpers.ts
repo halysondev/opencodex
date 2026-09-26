@@ -35,6 +35,7 @@ const EGRESS_DOWNGRADE_NOTICE_LIMIT = 64;
  * `dispatchOverride` performs, and an unknown symbol on a `RequestInit` is inert at the wire.
  */
 const EGRESS_DECIDED = Symbol.for("opencodex.provider-egress.decided");
+const UPSTREAM_REWRITTEN = Symbol.for("opencodex.plugins.upstream-rewritten");
 
 /**
  * Announce once, per provider, that an explicit egress route moved this provider off the
@@ -144,11 +145,21 @@ export type ProviderFetch = typeof globalThis.fetch & PaceAwareFetch;
  */
 export function sendWithConnectionPolicy(
   physicalFetch: typeof globalThis.fetch,
-  input: Parameters<typeof globalThis.fetch>[0],
+  rawInput: Parameters<typeof globalThis.fetch>[0],
   init?: RequestInit,
   egress?: ProviderEgressBinding,
 ): Promise<Response> {
-  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  let input = rawInput;
+  let headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  // Plugin rewrites (src/plugins/upstream-hooks.ts) run here, after the caller chose between
+  // the Codex WebSocket and HTTP, and before the connection and egress decisions below so
+  // those follow the rewritten destination. Nested passes rewrite once, like the egress mark.
+  const rewriteDone = (init as Record<symbol, unknown> | undefined)?.[UPSTREAM_REWRITTEN] === true;
+  if (!rewriteDone && (typeof input === "string" || input instanceof URL)) {
+    const target = rewriteUpstream(String(input), headers, "http");
+    input = target.url;
+    headers = target.headers as Headers;
+  }
   const fresh = wantsFreshConnection(input);
   if (fresh) {
     headers.set("Connection", "close");
@@ -171,6 +182,7 @@ export function sendWithConnectionPolicy(
     ...(fresh ? { keepalive: false } : {}),
     ...egressInit,
     ...(decide ? { [EGRESS_DECIDED]: true } : {}),
+    ...{ [UPSTREAM_REWRITTEN]: true },
   });
 }
 
@@ -383,11 +395,10 @@ export async function fetchWithHeaderTimeout(
   if (preferIdentityEncoding && !headers.has("accept-encoding")) {
     headers.set("accept-encoding", "identity");
   }
-  const target = rewriteUpstream(url, headers, "http");
   try {
-    return await fetchExecutor(target.url, {
+    return await fetchExecutor(url, {
       ...init,
-      headers: target.headers,
+      headers,
       // Never replay provider credentials or request bodies to a redirect destination.
       // Preserve the 3xx for the owner's existing response/health policy (#914, #1471).
       redirect: "manual",

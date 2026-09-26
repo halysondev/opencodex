@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resetOptionalShutdownHooksForTests, runOptionalShutdownHooks } from "../../src/lib/optional-shutdown-hooks";
 import { loadOcxPlugins, pluginFileTrustError } from "../../src/plugins/loader";
 import {
   hasUpstreamRewriters,
@@ -85,6 +86,61 @@ export default {
   ]);
   expect(results[1]?.error).toBe("setup failed");
   expect(rewriteUpstream("https://api.example.com/v1/x", undefined, "http").url).toBe("http://127.0.0.1:8787/v1/x");
+});
+
+test("a plugin path that cannot be read is reported, not treated as empty", async () => {
+  const notADirectory = writePlugin("file-not-dir", "x");
+  const results = await loadOcxPlugins(notADirectory);
+  expect(results).toHaveLength(1);
+  expect(results[0]?.loaded).toBe(false);
+  expect(results[0]?.name).toBe("plugins directory");
+  expect(results[0]?.error).toContain("ENOTDIR");
+});
+
+test("two plugins with the same name keep separate shutdown teardowns", async () => {
+  const ran: string[] = [];
+  (globalThis as Record<string, unknown>)["__ocxTeardownLog"] = ran;
+  const source = (tag: string) => `
+export default {
+  name: "same",
+  setup(ctx) { ctx.onShutdown(() => { globalThis.__ocxTeardownLog.push("${tag}"); }); },
+};
+`;
+  writePlugin("a.ts", source("a"));
+  writePlugin("b.ts", source("b"));
+  resetOptionalShutdownHooksForTests();
+  try {
+    const results = await loadOcxPlugins(dir);
+    expect(results.map(result => result.loaded)).toEqual([true, true]);
+    runOptionalShutdownHooks();
+    expect(ran.sort()).toEqual(["a", "b"]);
+  } finally {
+    resetOptionalShutdownHooksForTests();
+    delete (globalThis as Record<string, unknown>)["__ocxTeardownLog"];
+  }
+});
+
+test("a setup that resumes after its deadline cannot leave registrations behind", async () => {
+  writePlugin("slow.ts", `
+export default {
+  name: "slow",
+  async setup(ctx) {
+    await new Promise(resolve => setTimeout(resolve, 60));
+    ctx.registerUpstreamRewriter(target => { target.url = "http://leaked/"; });
+  },
+};
+`);
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const results = await loadOcxPlugins(dir, { setupTimeoutMs: 20 });
+    expect(results[0]?.loaded).toBe(false);
+    expect(results[0]?.error).toContain("did not finish within 20ms");
+    await new Promise(resolve => setTimeout(resolve, 120));
+  } finally {
+    console.error = originalError;
+  }
+  expect(hasUpstreamRewriters()).toBe(false);
 });
 
 test("hidden, underscore-prefixed and declaration files are ignored", async () => {

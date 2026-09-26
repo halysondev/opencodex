@@ -1,4 +1,4 @@
-import { rewriteUpstreamRecord } from "../../plugins/upstream-hooks";
+import { rewriteWebSocketDial } from "../../plugins/upstream-hooks";
 
 export const MAX_CODEX_WS_SESSION_EXCHANGES = 32;
 
@@ -13,8 +13,8 @@ export class CodexWsSession {
 
   constructor(url: string, headers: Record<string, string>, readonly retainable = false,
     private readonly changed: () => void = () => {}, proxy?: string) {
-    const target = rewriteUpstreamRecord(url, headers, "websocket");
-    this.socket = new WebSocket(target.url, { headers: target.headers, ...(proxy ? { proxy } : {}) } as unknown as string[]);
+    const dial = rewriteWebSocketDial(url, headers, proxy);
+    this.socket = new WebSocket(dial.url, { headers: dial.headers, ...(dial.proxy ? { proxy: dial.proxy } : {}) } as unknown as string[]);
     this.socket.addEventListener("open", this.onOpen);
     this.socket.addEventListener("message", this.onIdleMessage);
     this.socket.addEventListener("close", this.onClose);
