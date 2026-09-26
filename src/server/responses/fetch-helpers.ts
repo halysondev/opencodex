@@ -12,6 +12,7 @@ import { waitForProviderRequestSlot } from "../../providers/request-pacing";
 import { withUpstreamHttpVersion } from "../../lib/upstream-http-version";
 import type { CodexWsQuotaObserver } from "./codex-ws-metadata";
 import { configuredOutboundFetch } from "../../lib/proxy-env";
+import { rewriteUpstream } from "../../plugins/upstream-hooks";
 import {
   describeProviderEgressForLog,
   markEgressTransparentExecutor,
@@ -382,10 +383,11 @@ export async function fetchWithHeaderTimeout(
   if (preferIdentityEncoding && !headers.has("accept-encoding")) {
     headers.set("accept-encoding", "identity");
   }
+  const target = rewriteUpstream(url, headers, "http");
   try {
-    return await fetchExecutor(url, {
+    return await fetchExecutor(target.url, {
       ...init,
-      headers,
+      headers: target.headers,
       // Never replay provider credentials or request bodies to a redirect destination.
       // Preserve the 3xx for the owner's existing response/health policy (#914, #1471).
       redirect: "manual",

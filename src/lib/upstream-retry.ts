@@ -17,6 +17,7 @@
  */
 import { clearableDeadline } from "./abort";
 import { redactSecretString } from "./redact";
+import { rewriteUpstream } from "../plugins/upstream-hooks";
 
 /**
  * Responses the origin may already be executing. RFC 9110 §9.2.2 forbids an intermediary
@@ -472,10 +473,11 @@ export async function fetchWithAttemptDeadline(
   if (preferIdentityEncoding && !headers.has("accept-encoding")) {
     headers.set("accept-encoding", "identity");
   }
+  const target = rewriteUpstream(url, headers, "http");
   try {
-    return await executor(url, {
+    return await executor(target.url, {
       ...init,
-      headers,
+      headers: target.headers,
       redirect: "manual",
       signal: attemptTimeout.signal,
     });
