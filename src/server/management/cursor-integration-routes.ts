@@ -38,11 +38,6 @@ export interface CursorIntegrationStatus {
     effortRows: string[];
     context: { defaultWindow: number; longWindow: number } | null;
   }>;
-  /**
-   * Resolved only when regular Cursor exists and Private Inference does not: the
-   * cursor-local installer the update channel advertises, surfaced read-only (#5679).
-   */
-  localInstaller: CursorLocalInstallerHint;
   guideUrl: string;
 }
 
@@ -114,11 +109,6 @@ export async function buildCursorIntegrationStatus(
     ? { source: "bundle" as const, version: table.version, families: table.families.length }
     : { source: "static" as const, version: null, families: null };
 
-  const localInstaller = await buildCursorLocalInstallerHint({
-    regularInstalled: regular !== undefined,
-    privateInferenceInstalled: privateInference !== undefined,
-  });
-
   return {
     privateInference: {
       installed: privateInference !== undefined,
@@ -134,15 +124,33 @@ export async function buildCursorIntegrationStatus(
     lastSeen: cursorLastSeen(),
     effortTable,
     models,
-    localInstaller,
     guideUrl: CURSOR_GUIDE_URL,
   };
+}
+
+/**
+ * The cursor-local installer the update channel advertises (#5679), resolved only on an explicit
+ * user action. The status route above is polled while the Cursor tab is open and must stay
+ * local, so the remote channel lookup lives behind its own route the dashboard calls from a
+ * button, never on page load.
+ */
+export function resolveCursorLocalInstaller(
+  installs: CursorInstall[] = detectCursorInstalls(),
+  deps?: Parameters<typeof buildCursorLocalInstallerHint>[1],
+): Promise<CursorLocalInstallerHint> {
+  return buildCursorLocalInstallerHint({
+    regularInstalled: pick(installs, "regular") !== undefined,
+    privateInferenceInstalled: pick(installs, "private-inference") !== undefined,
+  }, deps);
 }
 
 export async function handleCursorIntegrationRoutes(ctx: ManagementContext): Promise<Response | null> {
   const { req, url } = ctx;
   if (url.pathname === "/api/native-integrations/cursor" && req.method === "GET") {
     return jsonResponse(await buildCursorIntegrationStatus(ctx));
+  }
+  if (url.pathname === "/api/native-integrations/cursor/local-installer" && req.method === "GET") {
+    return jsonResponse(await resolveCursorLocalInstaller());
   }
   return null;
 }

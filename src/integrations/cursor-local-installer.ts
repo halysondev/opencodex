@@ -9,9 +9,10 @@
  * its failure degrades to `available: false` with the reason recorded — the update
  * endpoint is undocumented and can change shape or vanish without notice.
  *
- * The Cursor tab polls its status every 15 seconds, so the answer is cached per update host
- * and platform (successes for 30 minutes, failures for 5) and concurrent lookups share one
- * request: a slow or unreachable channel costs at most one bounded wait per failure window.
+ * The lookup runs only on an explicit dashboard action, never from the polled status route. The
+ * answer is cached per update host and platform (successes for 30 minutes, failures for 5) and
+ * concurrent lookups share one request: repeated presses against a slow or unreachable channel
+ * cost at most one bounded wait per failure window.
  */
 const DEFAULT_UPDATE_HOST = "https://api2.cursor.sh";
 

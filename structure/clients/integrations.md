@@ -82,14 +82,17 @@ Only a `https://downloads.cursor.com/local-mode/` URL with a version is accepted
 `.AppImage.zsync` delta-metadata URL is mapped to its sibling `.AppImage`); anything else
 resolves to `available: false` with reason `unreachable` or `unusable-response`, and nothing is
 requested when Private Inference is already installed or no regular install exists. The module never
-downloads or launches the installer: `buildCursorIntegrationStatus`
-(`src/server/management/cursor-integration-routes.ts`) returns it as `localInstaller`, and the
-dashboard only renders the link. The GUI treats a status body without `localInstaller` (a hub
-that predates the lookup) as the unavailable case. `tests/providers/cursor/cursor-local-installer.test.ts` covers the
+downloads or launches the installer, and the lookup is never part of the polled status:
+`GET /api/native-integrations/cursor` stays local, and `resolveCursorLocalInstaller` in
+`src/server/management/cursor-integration-routes.ts` answers only
+`GET /api/native-integrations/cursor/local-installer`, which the dashboard calls from an explicit
+button and then renders the link. A failed or missing route (a hub that predates it) renders as
+the unavailable case. `tests/providers/cursor/cursor-integration-status.test.ts` pins that a
+regular-only status makes no remote request. `tests/providers/cursor/cursor-local-installer.test.ts` covers the
 manifest shapes, failures, skip conditions, the OS/architecture mapping, blank versions, the cache
 windows and request sharing. Answers are cached per update host and platform (30 minutes after a
-success, 5 after a failure) and concurrent lookups share one request, because the Cursor tab polls
-its status every 15 seconds.
+success, 5 after a failure) and concurrent lookups share one request, so repeated presses cost at
+most one bounded wait per failure window.
 
 ## Data Flow
 

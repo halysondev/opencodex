@@ -105,10 +105,12 @@ bundle, so there is no switch to flip. What it does is hand you the values and s
 they took.
 
 - **Installed builds.** Whether Cursor Private Inference (with its path and version) and
-  regular Cursor (path only) are present. If only regular Cursor is found, the tab asks Cursor's
-  own update channel which local-mode installer it advertises for this platform and CPU (the
-  `cursor-local` channel on `api2.cursor.sh`) and shows that version with a link to the
-  `downloads.cursor.com/local-mode/` installer, then links back here. opencodex only displays the
+  regular Cursor (path only) are present. If only regular Cursor is found, the tab says so, links
+  back here, and offers a **Look up the Private Inference installer** button. Pressing it asks
+  Cursor's own update channel which local-mode installer it advertises for this platform and CPU
+  (the `cursor-local` channel on `api2.cursor.sh`) and shows that version with a link to the
+  `downloads.cursor.com/local-mode/` installer. Nothing is requested until you press the button:
+  opening the tab and its periodic refresh never contact Cursor's channel. opencodex only displays the
   link: it never downloads, launches or installs anything. The answer is cached for 30 minutes
   (5 after a failure). When the channel cannot be reached, answers with something unusable, or
   Cursor ships no build for this computer (only x64 and arm64 on Windows, macOS and Linux have

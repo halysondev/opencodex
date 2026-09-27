@@ -25,9 +25,6 @@ export interface CursorIntegrationStatus {
   lastSeen: CursorSeen | null;
   effortTable: { source: "bundle" | "static"; version: string | null; families: number | null };
   models: CursorModelExpectation[];
-  /** Resolved only when regular Cursor exists and Private Inference does not (#5679). */
-  /** Absent from hubs that predate the installer lookup; the page treats that as unavailable. */
-  localInstaller?: { available: boolean; url: string | null; version: string | null; reason: string | null };
   guideUrl: string;
 }
 
@@ -38,6 +35,31 @@ export async function loadCursorIntegrationStatus(apiBase: string, signal?: Abor
     if (!response.ok) return null;
     const body = await readJsonIfOk<CursorIntegrationStatus>(response);
     if (!body || typeof body !== "object" || !body.gateway || !body.privateInference) return null;
+    return body;
+  } catch {
+    return null;
+  }
+}
+
+/** The cursor-local installer Cursor's update channel advertises (#5679). */
+export interface CursorLocalInstaller {
+  available: boolean;
+  url: string | null;
+  version: string | null;
+  reason: string | null;
+}
+
+/**
+ * Asks the hub to look the installer up. This is a remote request on the hub's side, so the page
+ * only calls it from an explicit button, never on load or on the status poll. A failed read,
+ * including a hub that predates the route, is null and renders as "could not be resolved".
+ */
+export async function loadCursorLocalInstaller(apiBase: string, signal?: AbortSignal): Promise<CursorLocalInstaller | null> {
+  try {
+    const response = await fetch(`${apiBase}/api/native-integrations/cursor/local-installer`, { signal });
+    if (!response.ok) return null;
+    const body = await readJsonIfOk<CursorLocalInstaller>(response);
+    if (!body || typeof body !== "object" || typeof body.available !== "boolean") return null;
     return body;
   } catch {
     return null;
