@@ -79,6 +79,28 @@ describe("buildCursorLocalInstallerHint", () => {
     expect(hint).toEqual({ available: true, url: zsync.slice(0, -".zsync".length), version: "3.22.7", reason: null });
   });
 
+  for (const [arch, target] of [["arm64", "darwin-arm64"], ["x64", "darwin-x64"]] as const) {
+    test(`a darwin ${arch} manifest that carries the version only in name resolves the zip`, async () => {
+      const zip = `https://downloads.cursor.com/local-mode/37076c6c3f9e253c0fa2305197e45befd13a2268/darwin/${arch}/Cursor-darwin-${arch}.zip`;
+      const hint = await buildCursorLocalInstallerHint(
+        { regularInstalled: true, privateInferenceInstalled: false },
+        { platform: "darwin", arch, fetchJson: async (url: string) => {
+          expect(url).toContain(`/${target}/cursor-local/`);
+          return { url: zip, name: "3.22.7" };
+        } },
+      );
+      expect(hint).toEqual({ available: true, url: zip, version: "3.22.7", reason: null });
+    });
+  }
+
+  test("a blank name with no other version field is still unusable", async () => {
+    const hint = await buildCursorLocalInstallerHint(
+      { regularInstalled: true, privateInferenceInstalled: false },
+      { platform: "darwin", arch: "arm64", fetchJson: async () => ({ url: "https://downloads.cursor.com/local-mode/x/darwin/arm64/Cursor-darwin-arm64.zip", name: "  " }) },
+    );
+    expect(hint).toEqual({ available: false, url: null, version: null, reason: "unusable-response" });
+  });
+
   test("the channel platform follows the host architecture", () => {
     expect(platformForHost("win32", "x64")).toBe("win32-x64-user");
     expect(platformForHost("win32", "arm64")).toBe("win32-arm64-user");

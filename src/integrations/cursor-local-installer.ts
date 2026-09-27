@@ -42,6 +42,8 @@ interface CursorLocalManifest {
   version?: unknown;
   url?: unknown;
   productVersion?: unknown;
+  /** The macOS manifests carry the version only here. */
+  name?: unknown;
 }
 
 interface CursorLocalHintDeps {
@@ -86,7 +88,11 @@ function parseManifest(raw: unknown): { version: string; url: string } | null {
   if (typeof record.url !== "string" || !/^https:\/\/downloads\.cursor\.com\/local-mode\//.test(record.url)) {
     return null;
   }
-  const candidate = typeof record.version === "string" ? record.version : typeof record.productVersion === "string" ? record.productVersion : "";
+  // Windows and Linux manifests carry `version`/`productVersion`; the Darwin ones return only
+  // `{ url, name }`, with the version in `name`.
+  const candidate = typeof record.version === "string" ? record.version
+    : typeof record.productVersion === "string" ? record.productVersion
+      : typeof record.name === "string" ? record.name : "";
   const version = candidate.trim();
   if (version === "") return null;
   // The Linux channel advertises the AppImage's zsync delta metadata (what the in-app updater
