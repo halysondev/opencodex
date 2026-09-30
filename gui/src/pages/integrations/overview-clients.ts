@@ -16,6 +16,7 @@ import type { TKey } from "../../i18n/shared";
 import type { VisualIntegrationState } from "./IntegrationStateBadge";
 import {
   FILE_INTEGRATION_CLIENTS,
+  canDisableKiloWithCandidateIssue,
   type FileIntegrationClientId,
   type IntegrationJournalRow,
   type IntegrationStatus,
@@ -47,7 +48,7 @@ export type ApiKeyReadPhase = "checking" | "unavailable" | "settled";
  * six locales, which is exactly the claim a credential row must never make.
  */
 export interface ApiKeysOverviewRow {
-  hash: "integrations/keys";
+  hash: "api-keys";
   labelKey: TKey;
   state: "checking" | "unavailable" | "none-issued" | "issued";
   detailKey: TKey | null;
@@ -155,6 +156,8 @@ const FILE_LABEL_KEY: Record<FileIntegrationClientId, TKey> = {
   raycast: "integrations.tab.raycast",
   omo: "integrations.tab.omo",
   cline: "integrations.tab.cline",
+  kilo: "integrations.tab.kilo",
+  droid: "integrations.tab.droid",
 };
 
 /** A file client's block is in the file for both `current` and `stale`. */
@@ -269,8 +272,8 @@ function codexRow(
 /** API keys are issued or not; there is no config file to drift. */
 function keysRow(phase: ApiKeyReadPhase, count: number | null): ApiKeysOverviewRow {
   const base = {
-    hash: "integrations/keys" as const,
-    labelKey: "integrations.tab.keys" as TKey,
+    hash: "api-keys" as const,
+    labelKey: "nav.apiKeys" as TKey,
   };
   // Every branch names a detail key. The detail line is the ONLY state
   // expression — there is no badge — so a null one would render a row with no
@@ -519,7 +522,7 @@ function fileRow(status: IntegrationStatus): OverviewRow {
     // of its file state; do the same here so the grid and the count agree.
     state: status.installed ? status.state : "not-installed",
     installed: status.installed,
-    applied: status.installed && isAppliedState(status.state),
+    applied: status.installed && (isAppliedState(status.state) || canDisableKiloWithCandidateIssue(status)),
     detail: status.configPath,
     detailKey: null,
     detailVars: null,

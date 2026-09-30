@@ -1,4 +1,5 @@
 import type { GatewayInboundProtocol } from "../api-access-models";
+import { cachedNumberFormat } from "../intl-formatters";
 
 /**
  * Per-key usage as the server rolls it up. A discriminated union: when two config
@@ -9,6 +10,18 @@ export type ApiKeyUsage =
   | { ambiguous: true }
   | { ambiguous?: false; requests7d: number; totalRequests: number; lastUsedAt?: string };
 
+/** Configured spend limits. 0 is a real answer — it is how "unlimited" reports. */
+export interface ApiKeyQuota {
+  dailyUsd: number;
+  weeklyUsd: number;
+  monthlyUsd: number;
+}
+
+/** Rolling spend the server reports next to the limits, same windows. */
+export interface ApiKeySpend extends ApiKeyQuota {
+  unpricedRequests: number;
+}
+
 export interface ApiKeyEntry {
   id: string;
   name: string;
@@ -18,6 +31,61 @@ export interface ApiKeyEntry {
   /** Always present from the server; zeroes are a real answer. Whether anything
    *  is attributable at all is the response-level `attributionSince`. */
   usage: ApiKeyUsage;
+  /** Older servers and cached rows can predate the optional quota extension. */
+  quota?: ApiKeyQuota;
+  spend?: ApiKeySpend;
+  quotaResetAt?: string;
+  allowedModels?: string[];
+  allowedProviders?: string[];
+}
+
+export type ApiKeyQuotaEntry = ApiKeyEntry & { quota: ApiKeyQuota; spend: ApiKeySpend };
+
+/** Missing quota telemetry is unavailable, not evidence that a key spent zero. */
+export function hasApiKeyQuota(entry: ApiKeyEntry): entry is ApiKeyQuotaEntry {
+  const { quota, spend } = entry;
+  if (!quota || !spend) return false;
+  return [quota.dailyUsd, quota.weeklyUsd, quota.monthlyUsd,
+    spend.dailyUsd, spend.weeklyUsd, spend.monthlyUsd, spend.unpricedRequests]
+    .every(value => typeof value === "number" && Number.isFinite(value) && value >= 0);
+}
+
+/** A quota the GUI can render. Coercing a malformed one to zeroes would claim
+ *  "unlimited" about a limit we could not read — the one interpretation that
+ *  quietly widens access. */
+export function isApiKeyQuota(value: unknown): value is ApiKeyQuota {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const quota = value as Record<string, unknown>;
+  return [quota.dailyUsd, quota.weeklyUsd, quota.monthlyUsd].every(
+    n => typeof n === "number" && Number.isFinite(n) && n >= 0,
+  );
+}
+
+export function isApiKeySpend(value: unknown): value is ApiKeySpend {
+  if (!isApiKeyQuota(value)) return false;
+  const unpriced = (value as unknown as Record<string, unknown>).unpricedRequests;
+  return typeof unpriced === "number" && Number.isFinite(unpriced) && unpriced >= 0;
+}
+
+/** A string list of scope selectors, or absent for unrestricted. */
+export function isApiKeyScopeList(value: unknown): value is string[] | undefined {
+  return value === undefined || (Array.isArray(value) && value.every(item => typeof item === "string"));
+}
+
+/**
+ * USD amounts, locale-aware. Two decimals like any price — except a positive
+ * sub-cent amount, which would render as $0.00 and read as "costs nothing":
+ * that gets four decimals so real spend never displays as free.
+ */
+export function formatUsd(n: number, localeTag?: string): string {
+  if (!Number.isFinite(n)) return "—";
+  const digits = n > 0 && n < 0.01 ? 4 : 2;
+  return cachedNumberFormat(localeTag, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(n);
 }
 
 /**

@@ -119,7 +119,9 @@ const ZH_TW_KEEP_ENGLISH: ReadonlySet<string> = new Set([
   "api.clientConfig.clientOpencode",
   // Cline CLI is a product name, not untranslated interface copy.
   "integrations.tab.cline",
+  "integrations.tab.droid",
   "api.clientConfig.clientCline",
+  "api.clientConfig.clientDroid",
   "api.clientConfig.clientPi",
   "api.clientConfig.clientOmp",
   "api.clientConfig.clientHermes",
@@ -160,7 +162,11 @@ const ZH_TW_KEEP_ENGLISH: ReadonlySet<string> = new Set([
   "api.clientConfig.clientOmo",
   // Cline product name and CLI acronym are intentionally preserved.
   "integrations.tab.cline",
+  "integrations.tab.droid",
   "api.clientConfig.clientCline",
+  "integrations.tab.kilo",
+  "api.clientConfig.clientKilo",
+  "api.clientConfig.clientDroid",
   "integrations.codex.title",
   // Provider proper nouns kept in English
   "provider.name.commandCodeAuth",
@@ -199,6 +205,11 @@ const ZH_TW_KEEP_ENGLISH: ReadonlySet<string> = new Set([
   // untranslated `~$`); the templates are pure placeholders on purpose.
   "logs.cost.approximate",
   "logs.cost.lowerBound",
+  // "Headroom" is the sidecar's feature name; every locale keeps it verbatim, including
+  // the "Headroom URL" field label zh also ships in English.
+  "nav.headroom",
+  "headroom.title",
+  "headroom.baseUrl",
 ]);
 
 test("zh-TW ships no untranslated English placeholders beyond the intentional allowlist", async () => {

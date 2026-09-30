@@ -3,7 +3,9 @@ import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  detectClaudeCodeToken,
   detectGrokCliToken,
+  detectLocalClaudeIdentity,
   parseClaudeOauthPayload,
   readClaudeCredentialsFile,
   shouldAdoptGrokGeneration,
@@ -132,5 +134,61 @@ describe("shouldAdoptGrokGeneration with NaN/unknown expiries", () => {
   test("adopts a newer valid disk credential", () => {
     const disk = { ...stored, expires: Date.now() + 7200_000 };
     expect(shouldAdoptGrokGeneration(stored, disk, Date.now(), 60_000)).toBe(true);
+  });
+});
+
+describe("detectClaudeCodeToken freshest-pick + identity", () => {
+  test("returns the parsed credential from the credentials file", () => {
+    const dir = join(tmp, "claude-fresh");
+    mkdirSync(dir, { recursive: true });
+    const future = Date.now() + 3600_000;
+    writeFileSync(join(dir, ".credentials.json"), JSON.stringify({
+      claudeAiOauth: { accessToken: "at-fresh", refreshToken: "rt-fresh", expiresAt: future },
+    }));
+    process.env.CLAUDE_CONFIG_DIR = dir;
+
+    const creds = detectClaudeCodeToken();
+    // The OS-store candidate may hold a real credential on a dev machine; only
+    // assert shape/source when the file credential is the one that won.
+    expect(creds).not.toBeNull();
+    if (creds!.access === "at-fresh") {
+      expect(creds!.expires).toBe(future);
+      expect(creds!.source).toBe("local-cli");
+    }
+  });
+
+  test("detectLocalClaudeIdentity reads userID + oauthAccount.accountUuid", () => {
+    const dir = join(tmp, "claude-id");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".claude.json"), JSON.stringify({
+      userID: "dev-uuid-1",
+      oauthAccount: { accountUuid: "acc-uuid-1" },
+    }));
+    process.env.CLAUDE_CONFIG_DIR = dir;
+
+    const id = detectLocalClaudeIdentity();
+    expect(id).toEqual({ deviceId: "dev-uuid-1", accountUuid: "acc-uuid-1" });
+  });
+
+  test("detectLocalClaudeIdentity falls back to installId and top-level accountUuid", () => {
+    const dir = join(tmp, "claude-id2");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".claude.json"), JSON.stringify({
+      installId: "install-9",
+      accountUuid: "acc-top-9",
+    }));
+    process.env.CLAUDE_CONFIG_DIR = dir;
+
+    const id = detectLocalClaudeIdentity();
+    expect(id).toEqual({ deviceId: "install-9", accountUuid: "acc-top-9" });
+  });
+
+  test("detectLocalClaudeIdentity returns null without any identity fields", () => {
+    const dir = join(tmp, "claude-id3");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".claude.json"), JSON.stringify({ theme: "dark" }));
+    process.env.CLAUDE_CONFIG_DIR = dir;
+
+    expect(detectLocalClaudeIdentity()).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { handleManagementAPI } from "../../src/server/management-api";
+import { filterCatalogBodyForScope } from "../../src/server/index/scoped-catalog-filter";
 import { loadConfig, saveConfig } from "../../src/config";
 import { installIsolatedCodexHome, type IsolatedCodexHome } from "../helpers/isolated-codex-home";
 import { ManagementRequest, managementHeaders } from "../helpers/management-auth";
@@ -194,6 +195,67 @@ describe("GET|HEAD /v1/catalog least-privilege data-plane route (#809)", () => {
     } finally {
       await server.stop(true);
     }
+  });
+
+  test("a scoped key sees only the catalog rows its scope admits", async () => {
+    isolatedCodexHome = installIsolatedCodexHome("ocx-v1-catalog-scoped-");
+    const two = {
+      models: [
+        { slug: "mock/test-model", display_name: "Test", description: "d", priority: 1, visibility: "list", base_instructions: "i", input_modalities: ["text"] },
+        { slug: "mock/other-model", display_name: "Other", description: "d", priority: 2, visibility: "list", base_instructions: "i", input_modalities: ["text"] },
+      ],
+    };
+    writeFileSync(join(isolatedCodexHome.path, "opencodex-catalog.json"), JSON.stringify(two));
+    const config = dataPlaneConfig();
+    // Static catalog so the scope filter's public-id list needs no live /models fetch.
+    config.providers.mock = {
+      adapter: "openai-chat", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", allowPrivateNetwork: true,
+      models: ["test-model", "other-model"], liveModels: false,
+    };
+    config.apiKeys = [{
+      id: "scoped", name: "scoped", key: DATA_KEY, createdAt: "2026-08-30T00:00:00.000Z",
+      allowedModels: ["mock/test-model"],
+    }];
+    saveConfig(config);
+
+    const { startServer } = await import("../../src/server");
+    const server = startServer(0);
+    try {
+      const res = await fetch(new URL("/v1/catalog", server.url), {
+        headers: { "x-opencodex-api-key": DATA_KEY },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { models: Array<{ slug: string }> };
+      expect(body.models.map(m => m.slug)).toEqual(["mock/test-model"]);
+      // content-length tracks the filtered bytes, not the persisted file's.
+      expect(Number(res.headers.get("content-length"))).toBe(new TextEncoder().encode(JSON.stringify(body)).byteLength);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  // The scoped route maps this helper's undefined to 503 catalog_unfilterable.
+  // The 503 cannot be exercised end-to-end through a file fixture: a catalog
+  // that fails JSON.parse or lacks a models[] array is collapsed to a 404
+  // catalog_not_found by readCatalog before the scope filter ever sees it, so
+  // the refusal is unit-tested at the helper boundary it actually guards.
+  test("filterCatalogBodyForScope refuses an unfilterable body instead of failing open", () => {
+    const allowed = new Set(["mock/test-model"]);
+    expect(filterCatalogBodyForScope("{ not json", allowed)).toBeUndefined();
+    expect(filterCatalogBodyForScope(JSON.stringify({ models: "nope" }), allowed)).toBeUndefined();
+    expect(filterCatalogBodyForScope(JSON.stringify([1, 2]), allowed)).toBeUndefined();
+
+    const filtered = filterCatalogBodyForScope(JSON.stringify({
+      models: [
+        { slug: "mock/test-model", extra: "kept" },
+        { slug: "mock/other-model" },
+        { slug: 42 },
+        "junk",
+      ],
+    }), allowed);
+    expect(filtered).not.toBeUndefined();
+    expect(JSON.parse(filtered!.body)).toEqual({ models: [{ slug: "mock/test-model", extra: "kept" }] });
+    expect(filtered!.bytes).toBe(new TextEncoder().encode(filtered!.body).byteLength);
   });
 
   test("rejects a missing credential and never widens /api/* for a data credential", async () => {

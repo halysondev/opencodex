@@ -29,6 +29,8 @@ export interface CliHead {
 export function parseCliHead(argv: string[]): CliHead {
   const command = argv[0];
   const args = argv;
+  // RTK owns its complete argv, including help/version flags and command separators.
+  if (command === "rtk") return { kind: "command", command, args };
   if (command === "--version" || command === "-v" || command === "version") {
     return { kind: "version", command, args };
   }
@@ -104,6 +106,8 @@ export async function runCli(argv: string[]): Promise<CliHead> {
       return head;
     }
     case "command":
+      // A bundled command filter must not inspect or rewrite the user's Codex shim.
+      if (head.command === "rtk") return head;
       if (head.command === "stop" && !parseStopApproval(head.args.slice(1)).ok) {
         console.error("Usage: ocx stop [--json [--expect-pid <pid> --expect-port <port> --expect-hostname <host> --expect-config-home <home> --expect-cli-version <version> --expect-compatibility-token <hex>]]");
         process.exit(64);

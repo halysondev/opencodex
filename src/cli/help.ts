@@ -79,11 +79,13 @@ Usage:
   ocx usage [--range <today|1d|7d|30d|all>] [--provider <name>] [--model <id>]
                               Token and estimated-cost report (alias of ocx observe usage)
   ocx storage <sub>           Storage report, cleanup, trash, and the cleanup policy
+  ocx headroom <sub>          Optional sidecar status, statistics, and configuration
+  ocx rtk <args...>           Bundled RTK command-output filtering
   ocx memory [--json]         Alias of ocx observe memory
   ocx api-key <sub>           Alias of ocx access key
   ocx access <sub>            External API keys and endpoint information
   ocx api <sub>               Protocol paths: vocabulary, request-path preview, and policy
-  ocx export --client <id>    Print a client config wired to the running proxy (15 clients)
+  ocx export --client <id>    Print a client config wired to the running proxy (17 clients)
   ocx integration client <sub> Enable, disable, inspect or roll back a client integration
   ocx grok <sub>              Grok Build model selection and apply
   ocx system <sub>            Runtime settings, startup, sync, OpenCodex updates, and Codex CLI inspection

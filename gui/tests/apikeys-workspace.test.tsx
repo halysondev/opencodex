@@ -14,9 +14,13 @@ let testWindow: Window;
 
 const sampleKeys: ApiKeyEntry[] = [
   { id: "k1", name: "alpha", prefix: "ocx_data_aaaaaaaa...", createdAt: "2026-01-01T00:00:00.000Z",
-    usage: { requests7d: 2, totalRequests: 5, lastUsedAt: "2026-07-30T00:00:00.000Z" } },
+    usage: { requests7d: 2, totalRequests: 5, lastUsedAt: "2026-07-30T00:00:00.000Z" },
+    quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+    spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 } },
   { id: "k2", name: "beta", prefix: "ocx_data_bbbbbbbb...", createdAt: "2026-01-02T00:00:00.000Z",
-    usage: { requests7d: 0, totalRequests: 0 } },
+    usage: { requests7d: 0, totalRequests: 0 },
+    quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+    spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 } },
 ];
 
 const endpoints = {
@@ -84,6 +88,10 @@ async function mountWorkspace(
     onCopyKey: () => {},
     onDelete: async () => true,
     onRename: async () => true,
+    onUpdateQuota: async () => true,
+    onUpdateScope: async () => true,
+    onResetQuota: async () => true,
+    onResetAllQuotas: async () => true,
     onModelQueryChange: () => {},
     onRetryModels: () => {},
     onCopyModelId: () => {},

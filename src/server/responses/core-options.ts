@@ -1,5 +1,7 @@
 import type { NativeResponseControl } from "./native-response-control";
-import type { OcxUsage, OcxProviderContinuationState, OcxConfig } from "../../types";
+import type { AdapterEvent, OcxUsage, OcxProviderContinuationState, OcxConfig } from "../../types";
+import type { RouteResult } from "../../router";
+import type { SingleUseDispatchPermit } from "../../lib/request-execution-budget";
 import type { CodexAuthPolicyConfig, CodexAuthContext } from "../../codex/auth-context";
 import type { AdmissionLease } from "../../lib/admission";
 import type { DataPlaneAdmission } from "../auth-cors";
@@ -16,12 +18,15 @@ import type { TranslatorBudget } from "../../lib/translator-budget";
 import type { TransientSendBudget } from "../../lib/upstream-retry";
 import type { RequestLogContext } from "../request-log";
 import type { UpstreamHostAdmissionLease } from "../../codex/upstream-host-health";
+import type { AccountLease } from "../../oauth/kiro-account-load";
 
 export interface ConsumedComboFailure {
   response: Response;
   classificationText: string;
   /** Structured upstream `error.code` when present in the failure body. */
   upstreamCode?: string;
+  /** Complete structured provider type, retained for conservative recovery classification. */
+  upstreamType?: string;
   /** Valid numeric/date value used only for cooldown calculation. */
   retryAfter?: string;
   /** Upstream Codex quota-window reset timestamps used for combo cooldowns. */
@@ -52,6 +57,16 @@ export interface ClientEncoderOption {
 }
 
 export interface HandleResponsesOptions {
+  /** Internal routed-compaction recovery: one logical request, one emergency target. */
+  compactionRecoveryAttempted?: boolean;
+  compactionRecoveryPermit?: SingleUseDispatchPermit;
+  compactionRecoveryKind?: "compaction-v1" | "compaction-v2";
+  onCompactionRecoveryRoute?: (route: RouteResult) => void;
+  onCompactionRecoveryAdapterEvent?: (event: AdapterEvent) => void;
+  /** Physical-send reports already delivered to the shared used setter, including booking settlement. */
+  onCompactionRecoverySendsReported?: (count: number) => void;
+  /** Private holder for the Kiro serving-account lease. */
+  accountLoad?: { lease: AccountLease | null };
   /** Internal Claude replay identity; consumed only by the final canonical Go transport. */
   claudeGoAffinity?: { sessionLane?: string };
   /** Validated Claude metadata identity; projected only into final canonical attempt headers. */
@@ -106,6 +121,24 @@ export interface HandleResponsesOptions {
    * it. Omitted means a genuine Responses inbound.
    */
   inboundWire?: InboundWire;
+  /**
+   * Anthropic inbound only: the client's ORIGINAL Messages body, before translation.
+   * The anthropic OAuth path rebuilds the upstream request from it so genuine
+   * Claude Code bodies keep their system/tool/field shape (dario parity).
+   */
+  anthropicSourceBody?: unknown;
+  /**
+   * Anthropic inbound only: the client's own CC-identity headers, pre-filtered to
+   * the forwardable set (src/claude/cc-fingerprint.ts). Forwarded verbatim on the
+   * genuine-CC path — the client is the authentic article.
+   */
+  anthropicClientHeaders?: Record<string, string>;
+  /**
+   * Anthropic inbound only: the client's raw `anthropic-beta` header. Merge input
+   * for the computed Claude Code beta set — never forwarded verbatim (dario merges
+   * client betas AFTER the computed set, deduped).
+   */
+  anthropicClientBeta?: string;
   /** PF-07: the Chat source a combo child may send natively; set only by the Chat ingress. */
   protocolSource?: import("./core-combo-native").ComboProtocolSource;
   /** Internal transport identity for route-scoped upstream compatibility policy. */
@@ -130,6 +163,8 @@ export interface HandleResponsesOptions {
   comboAttempt?: boolean;
   /** Internal handoff: this combo was selected by shadow-call interception. */
   shadowCallIntercepted?: boolean;
+  /** Internal handoff: the memory phase this turn belongs to, so combo children keep its routing. */
+  memoryModelPhase?: "extract" | "consolidation";
   compactionRoutingOverride?: CompactionRoutingOverride | null;
   /** Internal combo handoff for one parent-validated continuation snapshot. */
   comboReplaySnapshot?: {

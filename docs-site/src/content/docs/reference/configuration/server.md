@@ -12,19 +12,19 @@ runs helper features around provider requests.
 | --- | --- | --- | --- |
 | `port` | `number` | `10100` | Proxy listen port. |
 | `hostname?` | `string` | `"127.0.0.1"` | Bind address. A non-loopback bind requires a data-admission token, resolved from `OPENCODEX_API_AUTH_TOKEN`, then `OCX_API_TOKEN_FILE`, then the installed owner-only `service-api-token` — nothing has to be exported by hand. See [Remote access](#remote-access). |
-| `proxy?` | `string` | — | Outbound HTTP(S) or SOCKS5 proxy URL (`socks5://host:port`), `${ENV_VAR}`, or `"auto"`. HTTP URLs apply to `HTTP_PROXY` / `HTTPS_PROXY` when those are unset. SOCKS5 URLs use OpenCodex's real SOCKS5 transport and are also exposed through `ALL_PROXY` (`ocx start --socks5`); inherited `HTTP(S)_PROXY` is cleared in this process. Loopback stays in `NO_PROXY`. `"auto"` reads the Windows system proxy (WinINET `ProxyEnable`/`ProxyServer`) once at process start, preserves distinct `http=` and `https=` entries, and logs the hosts it chose. A bare `ProxyServer` value applies to both schemes. On other platforms, or when the system proxy is off, SOCKS-only, or unreadable, it uses direct egress and says so. PAC/WPAD and live proxy changes are not followed; restart the service after changing the system proxy. |
+| `proxy?` | `string` | — | Outbound HTTP(S) or SOCKS5 proxy URL (`socks5://host:port`), `${ENV_VAR}`, or `"auto"`. HTTP URLs apply to `HTTP_PROXY` / `HTTPS_PROXY` when those are unset. SOCKS5 URLs use OpenCodex's real SOCKS5 transport and are also exposed through `ALL_PROXY` (`ocx start --socks5`); inherited `HTTP(S)_PROXY` is cleared in this process. Loopback stays in `NO_PROXY`. `"auto"` reads Windows WinINET or macOS static HTTP/HTTPS settings once at startup. Inherited HTTP(S) proxy variables skip discovery; on macOS, inherited `ALL_PROXY`/`all_proxy` also skips it. Windows keeps separate `http=` and `https=` entries; a bare `ProxyServer` applies to both. macOS translates IP literals, `*`, and a valid `*.<domain>` glob to Bun's `.<domain>` bypass. That glob also bypasses the bare apex `<domain>`. The exact link-local ranges `169.254/16`, `169.254.0.0/16`, and `fe80::/10` are omitted with a diagnostic: link-local IP literals use the proxy. Other CIDRs, globs, and simple-host exceptions refuse discovery without changing the proxy environment. Disabled, malformed, PAC/WPAD, SOCKS-only, and live changes are not followed. Restart after changing system settings. |
 | `noProxy?` | `string \| string[]` | — | Hosts that bypass `proxy`, merged with inherited `NO_PROXY` and loopback entries. A string may use comma-separated `NO_PROXY` syntax or `${ENV_VAR}`. |
 | `emptyCompletionRetry?` | `boolean` | `false` | Opt in to one identical Responses retry when a turn has no text or tool call, including a stream that ends before a terminal event. The retry may be billable. `OCX_EMPTY_COMPLETION_RETRY=0` disables it without changing config; combo and routed-compaction turns remain excluded. |
 | `dropCodexSafetyBuffering?` | `boolean` | `false` | Remove optional client-facing hints from canonical Codex Responses passthrough: the two `x-codex-safety-buffering-enabled` / `x-codex-safety-buffering-faster-model` response headers, `response.metadata` events whose metadata type is `safety_buffering`, and top-level `safety_buffering` fields. Other headers, response data, policy refusals and failures are preserved. This does not disable provider safety enforcement or upstream buffering. Native `codex.response.metadata.headers` WebSocket metadata and `/responses/compact` are outside this filter. |
-| `stallTimeoutSec?` | `number` | `300` | Seconds without meaningful upstream progress (Responses and native Chat). Minimum 1. |
+| `stallTimeoutSec?` | `number` | `300` (public) / disabled (local) | Seconds without meaningful upstream progress (Responses and native Chat) before the stream is cut. Unset, a **local** upstream (loopback, private, or a `.local`/`.lan` name) defaults to disabled and a public upstream to 300 s; a positive value applies to both (minimum 1 s); `0` disables the silence watchdog everywhere. Disabled leaves a silent-but-healthy local model connected (keep-alives still flow). Canonical ChatGPT Responses folded from SSE into non-streaming JSON retain a separate 15-minute whole-turn ceiling even when the silence watchdog is disabled. Pending `/v1/responses/compact` body reads share this budget but default to 300 s even for a local upstream — the route buffers the complete body while holding an active-turn lease — and an explicit value, including `0`, still wins. |
 | `oauthOpenBrowser?` | `boolean` | `true` | Whether a login may open a browser on the machine running the proxy. Absent and `true` both open, so an existing install is unchanged; only an explicit `false` declines. Decline when you need the authorization link in a different browser profile, or when the dashboard is not on the proxy's machine — the login still starts and the URL is still returned and displayed. `POST /api/oauth/login` and `POST /api/codex-auth/login` accept a per-request `openBrowser` boolean that overrides this, and the dashboard exposes the same choice beside the login button. Device-code flows never open a browser either way. |
 | `connectTimeoutMs?` | `number` | `200000` | Per-attempt DNS/TCP/TLS/final-header deadline; it ends before body generation. |
-| `shutdownTimeoutMs?` | `number` | `5000` | Graceful drain deadline before active turns are aborted. |
+| `shutdownTimeoutMs?` | `number` | `90000` | Graceful drain deadline before active turns are aborted. The service manager's stop timeout must be longer. |
 | `websockets?` | `boolean` | `false` | Advertise and admit the client-facing Responses WebSocket path. False keeps clients on HTTP/SSE; it does not disable an eligible canonical ChatGPT upstream WS optimization. Complete-input requests may reuse an upstream connection within the same selected credential, account, thread and turn; changed handshake policy or missing identity keeps requests on separate connections. This does not trim HTTP input or create previous-response IDs. |
 | `codexNativeSteering?` | `boolean` | `false` | Experimental, native-only mid-turn steering on the Responses WebSocket endpoint. Requires `websockets: true`, a compatible upstream/client, and a pinned account/model/tool surface. Validated generation settings can change in explicit saved-result continuations. Does not enable translated models or HTTP fallback. See [native steering](/guides/codex-integration/#experimental-native-mid-turn-steering). |
 | `codexNativeInjection?` | `boolean` | `false` | Experimental saved function-result injection on compatible native multi-agent WebSocket turns. Requires `websockets: true`, explicit `multi_agent.enabled`, and an eligible provider. Separate from steering; no automatic tool rerun or recovery create. See [native injection](/guides/codex-integration/#experimental-native-function-result-injection). |
 | `corsAllowOrigins?` | `string[]` | `[]` | Additional exact origins allowed by CORS. Loopback origins are always allowed. Authority-based browser extension origins such as `chrome-extension://<extension-id>` are supported; `*` is not a wildcard. Firefox and Safari regenerate the extension UUID (per install / per browser launch), so update the entry when the origin changes. |
-| `apiKeys?` | `OcxApiKey[]` | `[]` | Generated `ocx_…` data-plane admission credentials on non-loopback binds. They do not authorize management APIs; management access uses the separate credential documented in the [management reference](/reference/management-api/). Dashboard-managed. |
+| `apiKeys?` | `OcxApiKey[]` | `[]` | Generated `ocx_data_…` data-plane admission credentials on non-loopback binds. Each entry carries `id`, `name`, `key`, `createdAt`, optional `quota` (`dailyUsd` / `weeklyUsd` / `monthlyUsd`), optional `quotaResetAt`, and optional `allowedProviders` / `allowedModels` scope lists — see [API keys](#api-keys). They do not authorize management APIs; management access uses the separate credential documented in the [management reference](/reference/management-api/). Dashboard-managed. |
 | `storageCleanupPolicy?` | `StorageCleanupPolicy` | disabled | Opt-in archived-session cleanup policy. Never enabled implicitly. |
 | `usageLedgerMaxBytes?` | `number` | unset | Opt-in ceiling in bytes for `usage.jsonl`. Absent means the request history grows without limit, which stays the default. See [usage history size](#usage-history-size). |
 | `appOwnedMemoryBudgetMb?` | `number` | `256` | Cap in MiB for evictable app-owned logs, caches, blobs, and continuation payloads. Range 64–4096; not an RSS cap. |
@@ -41,6 +41,7 @@ runs helper features around provider requests.
 | `resetCreditAutoRedeem?` | `{ enabled?: boolean; leadTimeMinutes?: number }` | off | Opt-in: redeem the main Codex account's soonest-expiring reset credit `leadTimeMinutes` (1–60, default 10) before it expires. Every attempt re-reads the upstream credit list first and skips when the credit is gone (for example, redeemed by hand); the `redeem_request_id` is journaled in `$OPENCODEX_HOME/reset-credit-auto-redeem.json` before the call so a crash replays the same idempotent request instead of spending a second credit. Servers sharing this configuration directory coordinate reservations and settlements so one process does not replace another's request record. Logs carry a hashed account key only. |
 | `syncResumeHistory?` | `boolean` | `true` | Reversible Codex App history compatibility. Original metadata is backed up and restored by `ocx stop` / `ocx restore`. |
 | `shadowCallIntercept?` | `{ enabled?: boolean; model?: string; sourceModels?: string[] }` | off | Redirect recognized Codex helper/shadow calls to a chosen model while preserving the request's configured reasoning effort. The default source prefixes are `gpt-6-luna` and `gpt-5.6-luna`; older clients through 0.144.x used `gpt-5.4-mini`, which `sourceModels` can restore. |
+| `memoryModels?` | `{ extract?: { model: string; reasoningEffort?: string }; consolidation?: { model: string; reasoningEffort?: string } }` | off | Route Codex's two memory phases to a chosen model, with an optional reasoning effort per phase. See [Memory routing](#memory-routing). |
 | `webSearchSidecar?` | `OcxWebSearchSidecarConfig` | on when usable | Web-search sidecar options. |
 | `visionSidecar?` | `OcxVisionSidecarConfig` | on when usable | Image-description sidecar options. |
 | `images?` | `OcxImagesConfig` | automatic OpenAI selection | Standalone Images relay options for Codex `image_gen`. |
@@ -90,6 +91,11 @@ refusal returns as soon as that grant is spent, the leg has no send left, or a r
 for any other reason. A request that already emitted output or a tool call keeps the refusal
 regardless. A caller that cancels mid-replacement gets the cancellation, not the refusal.
 
+For WebSocket recovery, “before the first Responses event” is stricter than “before the
+first text”: even `response.created`, a tool event or a usage-bearing response closes the
+replacement window. Ping/pong and quota metadata alone do not. A later socket close cannot
+turn an already settled cancellation or connect/silence timeout into an HTTP retry.
+
 `noProxy` accepts either a comma-separated string or an array. Both forms add entries without
 replacing an inherited `NO_PROXY`:
 
@@ -116,7 +122,7 @@ history; review the full-scope warning in the lifecycle reference before running
 
 ### Native Chat timeouts and completion
 
-Native Chat also uses `stallTimeoutSec` while waiting for upstream output. Nonempty text, reasoning, refusal, tool updates, and finish frames renew the allowance; keepalive comments, role-only frames, and usage alone do not. Waiting for a slow client to read pauses the allowance. A stall produces `upstream_stall_timeout`: an error frame for streaming clients, or HTTP 502 for non-streaming clients. Cancellation before a terminal result returns a cancellation error instead of a successful partial answer. Buffered Chat results accept both LF and CRLF SSE framing, including multiline data.
+Native Chat also uses `stallTimeoutSec` while waiting for upstream output, with the same local-vs-public default: an unset budget is disabled for a local upstream and 300 s for a public one, and `0` disables it everywhere. Nonempty text, reasoning, refusal, tool updates, and finish frames renew the allowance; keepalive comments, role-only frames, and usage alone do not. Waiting for a slow client to read pauses the allowance. A stall produces `upstream_stall_timeout`: an error frame for streaming clients, or HTTP 502 for non-streaming clients. Cancellation before a terminal result returns a cancellation error instead of a successful partial answer. Buffered Chat results accept both LF and CRLF SSE framing, including multiline data.
 
 ## Codex quota network diagnostics
 
@@ -159,8 +165,14 @@ terminal does not update an already running service.
 
 An unset `proxy` leaves inherited proxy variables unchanged. An explicit HTTP(S)
 proxy URL fills `HTTP_PROXY` and `HTTPS_PROXY` only where they are unset.
-`"proxy": "auto"` reads the Windows static WinINET proxy once at startup; existing
-proxy environment variables take precedence. Auto discovery does not resolve
+`"proxy": "auto"` reads Windows static WinINET or macOS static HTTP/HTTPS
+settings once at startup. Existing proxy environment variables take precedence;
+macOS discovery also skips inherited `ALL_PROXY`/`all_proxy`. A macOS `*.<domain>`
+exception becomes `.<domain>`: `foo.local` bypasses for `*.local`, `xlocal`
+does not, and the bare `local` apex also bypasses. Exact link-local CIDRs
+are dropped with a warning, so link-local IP literals use the proxy. Other
+unrepresentable exceptions refuse discovery without changing proxy variables.
+Auto discovery does not resolve
 PAC/WPAD, SOCKS-only settings or live proxy changes. Use a supported static HTTP
 proxy setting or an explicit HTTP(S) proxy URL when needed.
 
@@ -244,6 +256,50 @@ Any proxy admission secret placed in those provider headers is removed before fo
 A `0.0.0.0` bind exposes the proxy and configured provider access to the LAN. Use it only on trusted
 networks with a strong token.
 :::
+
+### API keys
+
+The **API keys** sidebar page issues and manages `apiKeys[]` entries — per-key names, USD spend
+quotas, model access scopes, and revocation. A generated key is a data-plane credential only: it
+never authorizes `/api/*` management routes, which keep their own admin credential.
+
+Each `apiKeys[]` entry supports:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id`, `name`, `key`, `createdAt` | string | Identity and the `ocx_data_…` secret, returned in full only once at creation. |
+| `quota.dailyUsd?` | number | Estimated-cost ceiling over the rolling last 24 hours. |
+| `quota.weeklyUsd?` | number | Estimated-cost ceiling over the rolling last 7 days. |
+| `quota.monthlyUsd?` | number | Estimated-cost ceiling over the rolling last 30 days. |
+| `quotaResetAt?` | string | ISO timestamp written by a quota reset; spend before it does not count. |
+| `allowedProviders?` | string[] | Restrict the key to the listed providers. |
+| `allowedModels?` | string[] | Restrict the key to the listed `provider/modelId` values. |
+
+Quota values are USD amounts estimated from the configured model pricing; `0`, an absent field, or
+an absent `quota` object all mean **unlimited**, and values above `1000000` are rejected. A request
+that crosses a limit still completes — the *next* request is refused with HTTP 429:
+
+```json
+{ "error": { "type": "api_key_quota_exceeded", "window": "daily", "limitUsd": 5, "spentUsd": 5.13 } }
+```
+
+`window` is `daily`, `weekly`, or `monthly` (checked in that order), and the response carries a
+`Retry-After` header estimating when enough spend ages out of the window. Requests for models with
+no configured price count as one request but contribute `$0`. Spend is rebuilt from `usage.jsonl`
+on startup, so history survives restarts — an aggressive
+[`usageLedgerMaxBytes`](#usage-history-size) cap can shorten the reconstructable window. The
+environment token and loopback requests never consume a configured key's quota.
+
+Reset one key's recorded spend with `POST /api/keys/quota/reset {"id": "…"}` or every key's with
+`{"all": true}` — both stamp `quotaResetAt` and leave the configured limits in place. The page also
+offers a reset-all action.
+
+Scope lists filter what the key can see and call: `GET /v1/models` and `GET /v1/catalog` return only
+the allowed entries for a scoped key, and inference requests for anything outside the lists are
+refused. When both lists are set a request must match **both** — the provider list and the model
+list intersect rather than union. A scoped catalog that cannot be filtered is refused with a 503
+`catalog_unfilterable` rather than served unfiltered. Combos are authorized by their member models:
+a key that may call every member may call the combo.
 
 ### Local clients that cannot receive the token
 
@@ -653,6 +709,55 @@ caller's credential does not cross to the other provider. The selected model mus
 input size and content. Restart the proxy after editing
 `config.json` by hand. Dashboard saves apply immediately.
 
+## Memory routing
+
+In **Dashboard → Overview → Memory routing**, choose a model and an optional reasoning effort for
+each of Codex's two memory phases, then click **Save**. Select **Off** and save to
+remove the override. Changes apply to the next memory request without restarting the proxy.
+
+Set `memoryModels` in OpenCodex `config.json` to route those requests. With the block omitted,
+both phases keep their existing route. The phases are independent: configuring one leaves the
+other alone.
+
+```json
+{
+  "memoryModels": {
+    "extract": { "model": "provider/model-id", "reasoningEffort": "low" },
+    "consolidation": { "model": "provider/model-id", "reasoningEffort": "medium" }
+  }
+}
+```
+
+`extract` is the pass that summarizes one finished session into a raw memory; `consolidation` is the
+single agent run that merges those raw memories into the files under `$CODEX_HOME/memories`.
+`model` accepts native model IDs, provider-qualified model IDs, and configured combos.
+`reasoningEffort` is optional; omit it to keep the effort Codex asked for. Supported declarations are
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`. Codex hard-codes `low` for
+extract and `medium` for consolidation, so a configured effort replaces that value.
+
+OpenCodex recognizes these requests from Codex's own turn metadata: `request_kind: "memory"` in
+the `x-codex-turn-metadata` header marks an extract pass, and `thread_source:
+"memory_consolidation"` marks the consolidation thread. On HTTP, a request whose
+`x-openai-subagent` header names `memory_consolidation` counts as a consolidation pass only when
+turn metadata is absent. Explicit non-memory metadata wins over that fallback. The model id is
+deliberately not a signal: the extract pass runs on the same helper model
+Codex uses for titles and commit messages, so a model-based rule would also capture ordinary
+helper calls. Missing, malformed, or conflicting metadata does not activate the override; when
+several copies of the metadata are supplied they must name the same phase. WebSocket requests use
+each frame's metadata rather than the connection's earlier handshake metadata — the bridge
+re-attaches the handshake's `x-openai-subagent` header to every frame, so that header names the
+connection, not the current pass, and is not a websocket signal.
+
+A configured phase wins when `shadowCallIntercept` would match the same request. A phase left off
+keeps its current routing, including any existing shadow-call rule that matches its model. The
+selected model's provider receives the session text Codex summarizes for memory, including
+sessions that normally run on another provider; the dashboard panel states this next to the model
+pickers. A phase whose target stopped resolving — the provider is
+disabled or deleted, or its combo no longer exists — fails that memory call with `409` and error code
+`memory_model_target_unavailable` instead of falling back to the default provider. The request log
+names the phase (`memory-extract` or `memory-consolidation`) as the routing reason. Restart the
+proxy after editing `config.json` by hand. Dashboard saves apply immediately.
+
 ## Shadow calls
 
 Codex uses small helper models for tasks such as titles and commit messages. Enable
@@ -756,6 +861,27 @@ Remote `https:` images and failed or empty descriptions are not cached.
 Anthropic OAuth sidecars reuse opencodex's existing Claude Code OAuth fingerprint. Soak-test the
 intended account and workload.
 
+### `headroom` (`OcxHeadroomConfig`)
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled?` | `boolean` | `false` | Master switch for the Headroom sidecar redirect. |
+| `baseUrl?` | `string` | `http://127.0.0.1:8787` | Base URL of a locally running Headroom proxy. Must be an `http:` or `https:` URL; writes through the management API are validated and normalized to origin plus path. |
+
+When enabled, opencodex rewrites compressible upstream requests — OpenAI Responses and Chat
+Completions, Anthropic Messages, and Gemini `generateContent` — to the Headroom listener instead of
+the provider origin, passing the original destination in `x-headroom-base-url` and the original path
+in `x-headroom-original-path`. Headroom compresses the request, forwards it upstream, and records
+token savings itself; opencodex keeps owning provider credentials and routing. Requests on
+unsupported paths, WebSocket upgrades, and any send attempted while Headroom is unreachable go
+directly to the provider — the integration fails open and never blocks a turn. Headroom reports
+per-response savings in `x-headroom-tokens-before` / `x-headroom-tokens-after` /
+`x-headroom-tokens-saved` headers.
+
+Headroom is expected on loopback and requires no provider credentials of its own for this mode. The
+Dashboard **Headroom** page toggles the switch, edits `baseUrl`, and shows reachability plus the
+sidecar's compression metrics; `GET /api/headroom` and `PUT /api/headroom` expose the same state.
+
 ## Remote Hub keys and defaults
 
 `runtimeRole` defaults to `standalone`. A hub uses `hub.managementPublicOrigin`, loopback-only `hub.managementIngress` (`enabled:false` when absent), and exact `remoteGui.allowedTailscaleUsers` (empty when absent). A client data key lives in `service-api-token`, never `config.json`; rotation may temporarily create `service-api-token.prev`. Usage stores are not mirrored.
@@ -797,3 +923,7 @@ WebSocket control paths. See the canonical guide for
 [supported steering routes and settings](/guides/codex-integration/#steering-continuation-settings),
 [typed result and approval continuations](/guides/codex-integration/#rich-tool-results-and-explicit-approvals-after-response-completion),
 and [confirmation deadlines and retained context](/guides/codex-integration/#steering-confirmation-deadlines-and-retained-context).
+
+### Headroom CLI
+
+`ocx headroom status --json` reads the optional sidecar status and savings ledger. `ocx headroom stats --json` reads its statistics. `ocx headroom config` reads settings without writing; pass `--enabled true|false` or `--base-url <url>` to explicitly update them.

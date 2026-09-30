@@ -8,19 +8,21 @@ import Logs from "./pages/Logs";
 import Usage from "./pages/Usage";
 import Storage from "./pages/Storage";
 import CodexSet from "./pages/CodexSet";
+import ApiKeysPage from "./pages/ApiKeysPage";
 import Integrations from "./pages/Integrations";
 import Startup from "./pages/Startup";
 import RemoteWorkspace from "./pages/RemoteWorkspace";
+import Headroom from "./pages/Headroom";
 import RemoteLink from "./pages/RemoteLink";
 import ErrorBoundary from "./components/ErrorBoundary";
 import QuotaSummaryBar from "./components/quota-summary-bar/QuotaSummaryBar";
 import { SidebarGithubRow } from "./components/sidebar-github-row";
 import { DesktopStarOnboarding } from "./components/desktop-star-onboarding";
-import { IconGrid, IconServer, IconBoxes, IconBot, IconList, IconActivity, IconHardDrive, IconCodex, IconMenu, IconSun, IconMoon, IconMonitor, IconGlobe, IconPower, IconX, IconRefresh} from "./icons";
+import { IconGrid, IconServer, IconBoxes, IconBot, IconList, IconActivity, IconHardDrive, IconCodex, IconMenu, IconSun, IconMoon, IconMonitor, IconGlobe, IconPower, IconX, IconRefresh, IconFilter, IconKey } from "./icons";
 import { useI18n, useT, LOCALES, localeDisplayName, type Locale, type TKey } from "./i18n/shared";
 import { Notice, Select, ToastNotice, type NoticeTone } from "./ui";
 import { configureApiTargets, hasApiSession, installApiAuthFetch, installApiSessionFromHtml, logoutApiSession, SESSION_UNAVAILABLE_EVENT } from "./api";
-import { apiBaseForPlane, discoverApiTargets, isConnectedRuntime, standaloneApiTargets, type ApiTargets } from "./api-targets";
+import { adminTokenPromptAllowed, apiBaseForPlane, discoverApiTargets, isConnectedRuntime, runtimeRoleFromDocument, standaloneApiTargets, type ApiTargets } from "./api-targets";
 import { ConnectPairingForm } from "./connect-pairing";
 import { type Page } from "./app-routing";
 import { readModelsTab, type ModelsTab } from "./pages/models-tab";
@@ -28,7 +30,10 @@ import { useAppRouteState } from "./use-app-route-state";
 import { requestProxyStop } from "./stop-proxy";
 import { useCodexRestart } from "./use-codex-restart";
 import { confirmAction } from "./action-dialogs";
-import { isDesktopShell, isExternalLink, openDesktopUpdatePage } from "./lib/desktop-shell";
+import { hostOs, isDesktopShell, isExternalLink, openDesktopUpdatePage } from "./lib/desktop-shell";
+import { useSidebarCollapse } from "./use-sidebar-collapse";
+import { MainTopStrip, SidebarTopStrip } from "./components/app-titlebar";
+import { watchMacTitlebarMetrics, windowChromeHandlers } from "./lib/window-chrome";
 
 type Theme = "light" | "dark" | "system";
 
@@ -42,8 +47,10 @@ const PAGE_TKEY: Record<Page, TKey> = {
   usage: "nav.usage",
   storage: "nav.storage",
   remote: "nav.remote",
+  headroom: "nav.headroom",
   "remote-workspace": "nav.remoteWorkspace",
   "codex-set": "nav.codexSet",
+  "api-keys": "nav.apiKeys",
   integrations: "nav.integrations",
 };
 
@@ -78,6 +85,8 @@ const NAV: NavEntry[] = [
   { id: "storage", tkey: "nav.storage", Icon: IconHardDrive },
   { id: "remote", tkey: "nav.remote", Icon: IconMonitor },
   { id: "remote-workspace", tkey: "nav.remoteWorkspace", Icon: IconMonitor },
+  { id: "headroom", tkey: "nav.headroom", Icon: IconFilter },
+  { id: "api-keys", tkey: "nav.apiKeys", Icon: IconKey },
   { id: "integrations", tkey: "nav.integrations", Icon: IconGlobe },
 ];
 
@@ -200,9 +209,23 @@ export default function App() {
     return () => controller.abort();
   }, [page, sharedSessionReady, sharedBase]);
   const remoteWorkspaceAvailable = sharedSessionReady && remoteWorkspaceAvailableState;
+  // A standalone/hub dashboard exposed through an authenticated non-loopback origin can need a
+  // consent-bearing GUI session even though it is not a connected client. Remote Link requires
+  // that stronger principal, so offer the existing one-time pairing flow instead of a dead-end
+  // "sign in" warning. Other pages keep their ordinary admin-token flow unchanged.
+  const remotePairingRequired = page === "remote" && !sharedSessionReady
+    && runtimeRoleFromDocument() === "hub" && adminTokenPromptAllowed();
 
   // Narrow screens: the sidebar becomes an off-canvas drawer behind a hamburger toggle.
   const [navOpen, setNavOpen] = useState(false);
+  // Codex-style rail collapse on wide screens, persisted; Cmd/Ctrl+B toggles too.
+  const desktopShell = isDesktopShell();
+  const { collapsed: navCollapsed, toggle: toggleNavCollapse } = useSidebarCollapse({ shortcut: desktopShell });
+  const desktopMac = desktopShell && hostOs() === "macos";
+  const appRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (desktopMac && appRef.current) return watchMacTitlebarMetrics(appRef.current);
+  }, [desktopMac]);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const navWasOpen = useRef(false);
@@ -368,8 +391,14 @@ export default function App() {
     </button>
   );
 
+  const quotaSummary = targetsSettled && page !== "startup" && (!targets.connected || sharedSessionReady) && (
+    <ErrorBoundary key={sharedBase} pageName={t("quotaSummary.aria")} title={t("errorBoundary.title")} message={t("errorBoundary.message")} detailsLabel={t("errorBoundary.details")} reloadLabel={t("errorBoundary.reload")}>
+      <QuotaSummaryBar apiBase={sharedBase} />
+    </ErrorBoundary>
+  );
+
   return (
-    <div className="app">
+    <div ref={appRef} className={`app${desktopShell ? " app--desktop" : ""}${desktopMac ? " app--macos" : ""}${navCollapsed ? " app--nav-collapsed" : ""}`}>
       <DesktopStarOnboarding apiBase={sharedBase} enabled={targetsSettled && !targets.connected} />
       {actionFeedback && (
         <ToastNotice tone={actionFeedback.tone} onDismiss={() => setActionFeedback(null)} dismissLabel={t("common.close")}>
@@ -377,7 +406,9 @@ export default function App() {
         </ToastNotice>
       )}
       {/* inert while the drawer is open: keeps focus and assistive tech inside the drawer */}
-      <header className="mobile-topbar" inert={navOpen}>
+      {/* At narrow widths the sidebar strip is hidden and the main strip scrolls away, so in
+          the desktop shell the sticky header is the window's drag surface. */}
+      <header className="mobile-topbar" inert={navOpen} {...(desktopShell ? windowChromeHandlers() : {})}>
         <button ref={menuBtnRef} type="button" className="menu-toggle" onClick={() => setNavOpen(o => !o)}
           aria-expanded={navOpen} aria-controls="app-sidebar"
           aria-label={t(navOpen ? "nav.closeMenu" : "nav.openMenu")} title={t(navOpen ? "nav.closeMenu" : "nav.openMenu")}>
@@ -403,6 +434,9 @@ export default function App() {
         </div>
       </header>
       {navOpen && <div className="drawer-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      {/* Fixed to the window's top-left; kept outside .sidebar so the sidebar's
+         backdrop-filter containing block can't clip it to 0 width when collapsed. */}
+      <SidebarTopStrip collapsed={navCollapsed} onToggle={toggleNavCollapse} />
       <aside id="app-sidebar" className={`sidebar${navOpen ? " open" : ""}`} ref={sidebarRef} tabIndex={-1}>
         <div className="drawer-head">
           {brand}
@@ -496,11 +530,11 @@ export default function App() {
       </aside>
 
       <main className="main" inert={navOpen}>
-        {targetsSettled && page !== "startup" && (!targets.connected || sharedSessionReady) && (
-          <ErrorBoundary key={sharedBase} pageName={t("quotaSummary.aria")} title={t("errorBoundary.title")} message={t("errorBoundary.message")} detailsLabel={t("errorBoundary.details")} reloadLabel={t("errorBoundary.reload")}>
-            <QuotaSummaryBar apiBase={sharedBase} />
-          </ErrorBoundary>
-        )}
+        {/* Inside the desktop shell the strip is the integrated title bar's right half —
+            draggable, at the very top of the window, level with the traffic lights — so it
+            exists even while the bar inside it does not. The browser dashboard keeps the
+            bar as it was: no strip, no reserved row. */}
+        {desktopShell ? <MainTopStrip>{quotaSummary}</MainTopStrip> : quotaSummary}
         {/*
           Combos is full-bleed, unlike every other surface, and it is reachable only as
           a Models tab. `.main-inner` is App's element, so App is the only place that
@@ -530,7 +564,7 @@ export default function App() {
                 {targetError && (
                   <div className="alert alert-err" role="alert">{t("connection.machineUnavailable")}</div>
                 )}
-                {targets.connected && !sharedSessionReady && (
+                {((targets.connected && !sharedSessionReady) || remotePairingRequired) && (
                   <ConnectPairingForm key={`${targets.shared.serverOrigin}:${targets.shared.bootstrapPath}`} target={targets.shared} onConnected={() => {
                     setSharedSessionReady(true);
                     setSharedSessionEpoch(epoch => epoch + 1);
@@ -545,9 +579,11 @@ export default function App() {
                 {page === "logs" && <Logs apiBase={sharedBase} />}
                 {page === "usage" && <Usage apiBase={sharedBase} connected={targets.connected} apiKeyId={targets.apiKeyId} />}
                 {page === "storage" && <Storage apiBase={sharedBase} />}
-                {page === "remote" && <RemoteLink apiBase={sharedBase} sessionReady={sharedSessionReady} workspaceAvailable={remoteWorkspaceAvailable} onOpenWorkspace={() => navigateToPage("remote-workspace")} />}
+                {page === "remote" && !remotePairingRequired && <RemoteLink apiBase={sharedBase} sessionReady={sharedSessionReady} workspaceAvailable={remoteWorkspaceAvailable} onOpenWorkspace={() => navigateToPage("remote-workspace")} />}
                 {page === "remote-workspace" && <RemoteWorkspaceRoute available={remoteWorkspaceAvailable} apiBase={sharedBase} hubOrigin={targets.shared.serverOrigin} onOpenRemoteLink={() => navigateToPage("remote")} />}
+                {page === "headroom" && <Headroom apiBase={sharedBase} />}
                 {page === "codex-set" && <CodexSet apiBase={sharedBase} />}
+                {page === "api-keys" && <ApiKeysPage apiBase={sharedBase} />}
                 {page === "integrations" && <Integrations apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />}
               </>
             )}

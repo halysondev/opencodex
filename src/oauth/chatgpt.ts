@@ -14,6 +14,24 @@ const CALLBACK_PORT = 1455;
 const CALLBACK_PATH = "/auth/callback";
 const ORIGINATOR = "opencodex";
 
+/**
+ * Credential-surface identity (auth.openai.com token exchange/refresh). Real
+ * Codex CLI sends its own client tag here (`codex-rs login/default_client.rs`
+ * default_headers): `originator` + `User-Agent`, no `version` — the version
+ * gate lives only on the /backend-api/codex inference surface. Mirrors the
+ * shape sub2api's OpenAI refresher sends.
+ */
+export const CHATGPT_REFRESH_ORIGINATOR = "codex-tui";
+export const CHATGPT_REFRESH_USER_AGENT = "codex-tui/0.155.1 (Ubuntu 22.4.0; x86_64) xterm-256color";
+
+/**
+ * Scope sent on refresh_token grants by Codex-shaped clients: the login scope
+ * minus `offline_access` (and the connector scopes, which are grant-time only).
+ * Omitting it has historically produced shorter-lived/less-privileged access
+ * tokens on some auth deployments.
+ */
+export const CHATGPT_REFRESH_SCOPE = "openid profile email";
+
 export function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
   const parts = token.split(".");
   if (parts.length !== 3 || !parts[1]) return undefined;
@@ -259,11 +277,16 @@ export async function refreshChatGPTToken(
 ): Promise<OAuthCredentials> {
   const resp = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": CHATGPT_REFRESH_USER_AGENT,
+      "originator": CHATGPT_REFRESH_ORIGINATOR,
+    },
     body: new URLSearchParams({
       grant_type: "refresh_token",
       client_id: CLIENT_ID,
       refresh_token: refreshToken,
+      scope: CHATGPT_REFRESH_SCOPE,
     }).toString(),
     signal: options.signal,
   });

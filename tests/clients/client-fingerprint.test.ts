@@ -1,3 +1,4 @@
+import { claudeStaticHeaders, detectClaudeCliVersion } from "../../src/claude/cc-fingerprint";
 import { describe, expect, test } from "bun:test";
 import {
   ANTIGRAVITY_IDE_VERSION,
@@ -79,58 +80,63 @@ describe("client fingerprint — anthropic OAuth headers", () => {
   const oauthProvider = { adapter: "anthropic", authMode: "oauth", baseUrl: "https://api.anthropic.com", apiKey: "oauth-tok-123" } as unknown as OcxProviderConfig;
   const apiKeyProvider = { adapter: "anthropic", baseUrl: "https://api.anthropic.com", apiKey: "sk-ant-123" } as unknown as OcxProviderConfig;
 
-  test("OAuth request carries the full Claude Code header set", async () => {
+  test("OAuth request carries the captured Claude CLI header set regardless of header casing", async () => {
     const { headers } = await createAnthropicAdapter(oauthProvider).buildRequest(parsed());
-    expect(headers["X-App"]).toBe("cli");
-    expect(headers["X-Stainless-Runtime"]).toBe("node");
-    expect(headers["X-Stainless-Lang"]).toBe("js");
-    expect(headers["X-Stainless-Retry-Count"]).toBe("0");
-    expect(headers["X-Stainless-Timeout"]).toBe("600");
-    expect(headers["anthropic-beta"]).toBeDefined();
-    expect(headers["X-Claude-Code-Session-Id"]).toMatch(/^[0-9a-f]{8}-/);
-    expect(headers["x-client-request-id"]).toMatch(/^[0-9a-f]{8}-/);
+    const actual = new Headers(headers);
+    expect(actual.get("x-app")).toBe("cli");
+    expect(actual.get("x-stainless-runtime")).toBe("node");
+    expect(actual.get("x-stainless-lang")).toBe("js");
+    for (const [name, value] of Object.entries(claudeStaticHeaders(detectClaudeCliVersion()))) expect(actual.get(name)).toBe(value);
+    expect(actual.get("anthropic-beta")).not.toBeNull();
+    expect(actual.get("x-claude-code-session-id")).toMatch(/^[0-9a-f]{8}-/);
+    expect(actual.get("x-client-request-id")).toMatch(/^[0-9a-f]{8}-/);
   });
 
-  test("session id is stable across requests with the same OAuth token", async () => {
-    const a = (await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers["X-Claude-Code-Session-Id"];
-    const b = (await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers["X-Claude-Code-Session-Id"];
+  test("session id is present and stable across requests with the same OAuth account", async () => {
+    const a = new Headers((await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers).get("x-claude-code-session-id");
+    const b = new Headers((await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers).get("x-claude-code-session-id");
+    expect(a).toMatch(/^[0-9a-f]{8}-/);
     expect(a).toBe(b);
   });
 
   test("outgoing session-id header never echoes the raw OAuth token", async () => {
     const secretProvider = { adapter: "anthropic", authMode: "oauth", baseUrl: "https://api.anthropic.com", apiKey: "oauth-super-secret-xyz" } as unknown as OcxProviderConfig;
     const { headers } = await createAnthropicAdapter(secretProvider).buildRequest(parsed());
-    expect(headers["X-Claude-Code-Session-Id"]).not.toContain("oauth-super-secret-xyz");
-    expect(headers["X-Claude-Code-Session-Id"]).not.toContain("super-secret");
+    const session = new Headers(headers).get("x-claude-code-session-id");
+    expect(session).toMatch(/^[0-9a-f]{8}-/);
+    expect(session).not.toContain("oauth-super-secret-xyz");
+    expect(session).not.toContain("super-secret");
   });
 
   test("per-request id differs between requests", async () => {
-    const a = (await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers["x-client-request-id"];
-    const b = (await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers["x-client-request-id"];
+    const a = new Headers((await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers).get("x-client-request-id");
+    const b = new Headers((await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers).get("x-client-request-id");
+    expect(a).toMatch(/^[0-9a-f]{8}-/);
     expect(a).not.toBe(b);
   });
 
   test("API-key mode does NOT get the Claude Code CLI headers", async () => {
-    const { headers } = await createAnthropicAdapter(apiKeyProvider).buildRequest(parsed());
-    expect(headers["x-api-key"]).toBe("sk-ant-123");
-    expect(headers["X-App"]).toBeUndefined();
-    expect(headers["X-Claude-Code-Session-Id"]).toBeUndefined();
+    const headers = new Headers((await createAnthropicAdapter(apiKeyProvider).buildRequest(parsed())).headers);
+    expect(headers.get("x-api-key")).toBe("sk-ant-123");
+    expect(headers.get("x-app")).toBeNull();
+    expect(headers.get("x-claude-code-session-id")).toBeNull();
   });
 
-  test("Accept + User-Agent fingerprint headers are sent on both OAuth and API-key paths", async () => {
-    const oauth = (await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers;
-    const apiKey = (await createAnthropicAdapter(apiKeyProvider).buildRequest(parsed())).headers;
-    for (const headers of [oauth, apiKey]) {
-      // Non-stream request advertises a JSON Accept and the pinned first-party SDK UA.
-      expect(headers["Accept"]).toBe("application/json");
-      expect(headers["User-Agent"]).toBe("@anthropic-ai/sdk/0.74.0");
-    }
+  test("OAuth keeps its captured Accept and User-Agent while API-key requests use the SDK template", async () => {
+    const oauth = new Headers((await createAnthropicAdapter(oauthProvider).buildRequest(parsed())).headers);
+    const apiKey = new Headers((await createAnthropicAdapter(apiKeyProvider).buildRequest(parsed())).headers);
+    const captured = new Headers(claudeStaticHeaders(detectClaudeCliVersion()));
+    expect(oauth.get("accept")).toBe(captured.get("accept"));
+    expect(oauth.get("user-agent")).toBe(captured.get("user-agent"));
+    expect(apiKey.get("accept")).toBe("application/json");
+    expect(apiKey.get("user-agent")).toBe("@anthropic-ai/sdk/0.74.0");
   });
 
-  test("Accept negotiates SSE for a streaming request", async () => {
+  test("streaming retains the OAuth template and negotiates SSE on the API-key path", async () => {
     const streaming = { ...parsed(), stream: true } as OcxParsedRequest;
-    const { headers } = await createAnthropicAdapter(oauthProvider).buildRequest(streaming);
-    expect(headers["Accept"]).toBe("text/event-stream");
-    expect(headers["User-Agent"]).toBe("@anthropic-ai/sdk/0.74.0");
+    const oauth = new Headers((await createAnthropicAdapter(oauthProvider).buildRequest(streaming)).headers);
+    const apiKey = new Headers((await createAnthropicAdapter(apiKeyProvider).buildRequest(streaming)).headers);
+    expect(oauth.get("accept")).toBe(new Headers(claudeStaticHeaders(detectClaudeCliVersion())).get("accept"));
+    expect(apiKey.get("accept")).toBe("text/event-stream");
   });
 });

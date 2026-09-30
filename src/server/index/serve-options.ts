@@ -26,7 +26,6 @@ import {
 import { remoteWorkspaceEnabled } from "../../remote-control/workspace-activation";
 import { isClaudeInterceptedPath } from "../../claude/intercept/listener";
 import { markActivity } from "../../lib/sidecar-tracker";
-import { knownModelIdsForProvider } from "../../router";
 import {
   buildWarmupCompletionFrames,
   buildWsErrorFrame,
@@ -39,19 +38,6 @@ import {
 } from "../ws-bridge";
 import { websocketsEnabled } from "../../config";
 import { metricsExportEnabled } from "../../config/feature-flags";
-import { grokDefaultReasoningEffort } from "../../grok/effort";
-import { OPENAI_CODEX_PROVIDER_ID } from "../../providers/openai-tiers";
-import { providerCodexAccountMode } from "../../providers/registry";
-import {
-  codexAccountNamespaceEntries,
-  isMainCodexAccountTarget,
-} from "../../codex/account-namespaces";
-import { MAIN_CODEX_ACCOUNT_ID } from "../../codex/main-account";
-import {
-  availableAccountGatedNativeModels,
-  codexModelEntitlementStateForAccount,
-} from "../../codex/model-entitlements";
-import { resolveAdmittedCodexModelEntitlements } from "../../codex/model-entitlement-admission";
 import { CatalogGatherBusyError } from "../../codex/catalog/provider-fetch";
 import {
   registerCodexWebSocket,
@@ -87,6 +73,7 @@ import {
 import { sessionLaneIdFromRequest } from "../request-log-conversation";
 import { responseWithDeferredRequestLog } from "../relay";
 import { createRequestMetricsOwner } from "../request-metrics";
+import { cachedKiroQuotaMetricRows } from "../../providers/kiro-quota-metrics";
 import {
   corsHeaders,
   managementCorsHeaders,
@@ -98,10 +85,18 @@ import {
   admissionFields,
   resolveApiAuth,
   resolveResponsesApiAuth,
+  type DataPlaneAdmission,
   type RequestPolicyView,
   withCors,
   withManagementCors,
 } from "../auth-cors";
+import { apiKeyQuotaDenial, warmApiKeyQuotaIfConfigured } from "../api-key-quota";
+import {
+  buildPublicModelRows,
+  listPublicModelRows,
+  loadPublicModelUniverse,
+} from "./public-model-list";
+import { filterCatalogBodyForScope } from "./scoped-catalog-filter";
 import { managementSessionIssuance } from "../management-auth";
 import { resolveAdmissionModelScope, routeAllowedByScope } from "../admission-model-scope";
 import {
@@ -119,7 +114,6 @@ import {
   buildDesktop3pRegistry,
   generateDesktop3pModels,
 } from "../../claude/desktop-3p";
-import { buildDesktopDiscoveryInputs } from "../../claude/desktop-discovery-inputs";
 import { handleImages } from "../images";
 import {
   handleLive,
@@ -151,7 +145,6 @@ import {
   contextRelayActivated,
 } from "../../codex/context-compat";
 import {
-  fetchAllModels,
   handleManagementAPI,
   VERSION,
   type ManagementApiDeps,
@@ -169,6 +162,7 @@ import {
   createLocalAttestationProof,
 } from "../../lib/local-management-attestation";
 import { SYSTEM_RESTART_CAPABILITY_VERSION } from "../../lib/system-restart-contract";
+import { LOCAL_MANAGEMENT_NONCE_HEADER } from "../../lib/local-management-capability";
 import { LOCAL_PROVIDER_RELOAD_CAPABILITY_VERSION } from "../../lib/local-provider-reload-contract";
 import { LOCAL_ASIDE_SYNC_CAPABILITY_VERSION } from "../../lib/local-aside-sync-contract";
 import {
@@ -182,23 +176,12 @@ import {
   createGuiPairingGrant,
 } from "../gui-session";
 import { recordCursorSeen } from "../../integrations/cursor-seen";
-import { detectCursorInstalls } from "../../integrations/cursor-detect";
-import { loadCursorEffortTable } from "../../integrations/cursor-effort-table";
-import {
-  expandCursorEffortRow,
-  knownEffortRowIds,
-} from "../effort-row";
-import {
-  catalogFastRowEligible,
-  expandFastRow,
-} from "../fast-row";
 import type { OcxConfig } from "../../types";
 import type { PackageTreeIntegrityGuard } from "../../lib/package-tree-integrity";
 import type { ReadinessGate } from "../readiness";
 import type { WorkflowRefusalLog } from "../workflow-refusal";
 
 import { readyProtocolMetadata } from "../../remote/protocol";
-import { modelCapabilityFields } from "../models-capabilities";
 import { createWebsocketHandler } from "./websocket-handler";
 
 export type ServerIngress = "public" | "unauthenticated-loopback" | "hub-management" | "claude-intercept" | "hub-link";
@@ -292,7 +275,14 @@ export function createServeOptions(ctx: ServeOptionsContext) {
     port,
   } = ctx;
   void port;
-  const requestMetrics = metricsExportEnabled(config) ? createRequestMetricsOwner() : undefined;
+  // Data-key quotas need ledger history before the first denial can fire.
+  // Kicking warm-up here — synchronously, fire-and-forget — registers the
+  // usage-entry observer during startup rather than on the first request, so
+  // a row appended between listen and the first quota check is never missed.
+  // A config with no non-zero limit short-circuits out of this immediately.
+  warmApiKeyQuotaIfConfigured(config);
+  const requestMetrics = metricsExportEnabled(config)
+    ? createRequestMetricsOwner(Date.now() / 1000, cachedKiroQuotaMetricRows) : undefined;
   const requestMetricsLogContext = requestMetrics ? { requestMetricsRecorder: requestMetrics } : {};
   const requestManagementApiDeps: ManagementApiDeps = requestMetrics
     ? { ...managementApiDeps, requestMetrics: { snapshot: () => requestMetrics.snapshot() } }
@@ -363,6 +353,16 @@ export function createServeOptions(ctx: ServeOptionsContext) {
       const url = requestUrl;
       const admissionOptions = { linkIngress: policy.linkIngress?.allowedKeyIds };
       markActivity(`${req.method} ${url.pathname}`);
+
+      // Data-key spend quotas gate at admission, after auth + origin and before any
+      // upstream or lifecycle work: a denied request never reads a body, never takes
+      // a turn slot, and never writes a usage row. Environment and loopback
+      // admissions are returned by the same call — the tracker only knows
+      // configured keys, and this stays free for them.
+      const apiKeyQuotaGate = async (admission: DataPlaneAdmission | null): Promise<Response | null> => {
+        const denial = await apiKeyQuotaDenial(config, admission ?? undefined);
+        return denial ? withCors(denial, req, policy) : null;
+      };
 
       // Readiness is exact-GET on the literal /readyz path. Compare the DECODED
       // pathname so an encoded variant like /readyz%2F (which decodes to
@@ -571,6 +571,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "WebSocket upgrade blocked: non-local Origin"), req, policy);
         }
+        const responsesWsQuotaDenial = await apiKeyQuotaGate(admission);
+        if (responsesWsQuotaDenial) return responsesWsQuotaDenial;
         // WS transport gate: Codex's built-in `openai` provider hardcodes supports_websockets=true,
         // so under Design B it always tries the WS transport first. When the feature is off, reject
         // the upgrade with 426 — codex-rs maps a connect-time UPGRADE_REQUIRED to a clean
@@ -695,6 +697,17 @@ export function createServeOptions(ctx: ServeOptionsContext) {
           trustedLoopback: trustedLoopbackForIngress(ingress, config.hostname ?? "127.0.0.1"),
           guiSessionIssuance: managementSessionIssuance(req, managementAuth),
         });
+        // A local read capability authenticates the request; sign its single-use nonce so the
+        // caller can tell this answer came from this process and not from whoever holds the port.
+        const readNonce = principal === "local-read-capability" ? req.headers.get(LOCAL_MANAGEMENT_NONCE_HEADER) : null;
+        const readProof = readNonce
+          ? createLocalAttestationProof(localAttestationSecret, readNonce, process.pid, localManagementAuth.port) : null;
+        if (mgmtResponse && readProof) {
+          const headers = new Headers(mgmtResponse.headers);
+          headers.set(LOCAL_ATTESTATION_PROOF_HEADER, readProof);
+          const signed = new Response(mgmtResponse.body, { status: mgmtResponse.status, statusText: mgmtResponse.statusText, headers });
+          return withManagementCors(signed, req, config);
+        }
         if (mgmtResponse) return withManagementCors(mgmtResponse, req, config);
         return withManagementCors(formatErrorResponse(404, "not_found", `Unknown endpoint: ${req.method} ${url.pathname}`), req, config);
       }
@@ -748,6 +761,40 @@ export function createServeOptions(ctx: ServeOptionsContext) {
             policy,
           );
         }
+        // A scoped key sees only the catalog rows its scope admits. Persisted
+        // `models[].slug` is the same public id /v1/models lists, so the
+        // allowlist is exactly that endpoint's id set for this admission.
+        // Unscoped requests keep the serialized bytes untouched.
+        let catalogBody = serialized.body;
+        let catalogBytes = serialized.bytes;
+        if (resolveAdmissionModelScope(config, admission)) {
+          let publicRows;
+          try {
+            publicRows = await listPublicModelRows(config, admission, {
+              loadCursorEffortTable: deps.managementApi?.loadCursorEffortTable,
+            });
+          } catch (error) {
+            if (error instanceof CatalogGatherBusyError) {
+              return withCors(new Response(JSON.stringify({ error: { type: "server_error", code: "catalog_busy", message: error.message } }), {
+                status: 503,
+                headers: { "content-type": "application/json", "Retry-After": "1" },
+              }), req, policy);
+            }
+            throw error;
+          }
+          const allowedSlugs = new Set(publicRows.map(entry => entry.row.id as string));
+          // A scoped key must never receive the unfiltered body: a catalog that
+          // does not parse to an object with a models[] array cannot be narrowed,
+          // so the request fails instead of leaking rows the scope excludes.
+          const filtered = filterCatalogBodyForScope(catalogBody, allowedSlugs);
+          if (!filtered) {
+            return withCors(new Response(JSON.stringify({
+              error: { type: "server_error", code: "catalog_unfilterable", message: "catalog could not be filtered for this API key" },
+            }), { status: 503, headers: { "content-type": "application/json" } }), req, policy);
+          }
+          catalogBody = filtered.body;
+          catalogBytes = filtered.bytes;
+        }
         const headers: Record<string, string> = {
           "content-type": "application/json",
           // Identity-varying content behind a credential: never let a shared cache keep it,
@@ -769,11 +816,11 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         // No conditional handling: with no validator emitted, an If-None-Match on this route
         // can only have been guessed or copied from elsewhere, and honoring it would
         // reintroduce the cross-identity path above. Every request gets the full body.
-        if (serialized.bytes !== undefined) headers["content-length"] = String(serialized.bytes);
+        if (catalogBytes !== undefined) headers["content-length"] = String(catalogBytes);
         // HEAD returns identical status and headers with no body.
         return withRemoteCatalogKeyId(
           withCors(
-            new Response(req.method === "HEAD" ? null : serialized.body, { status: 200, headers }),
+            new Response(req.method === "HEAD" ? null : catalogBody, { status: 200, headers }),
             req,
             policy,
           ),
@@ -882,22 +929,12 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         // The Integrations page reports whether a Cursor client has reached this proxy; the
         // recorder keeps only a bounded User-Agent value and a timestamp, in memory.
         recordCursorSeen(req.headers);
-        let goModels;
-        let modelEntitlements;
+        let universe;
         try {
-          [goModels, modelEntitlements] = await Promise.all([
-            fetchAllModels(config),
-            // Codex sends its own client_version on this request, and upstream filters the
-            // entitlement roster by it. Passing it through is what stops an entitled account
-            // being told it cannot use models a newer client can (#2886).
-            // The request signal fences the credential phase too: a client that has already
-            // gone away must not keep a native-main token refresh alive, and its late result
-            // must not commit on behalf of a request that no longer exists.
-            resolveAdmittedCodexModelEntitlements(config, {
-              clientVersion: url.searchParams.get("client_version"),
-              signal: req.signal,
-            }),
-          ]);
+          universe = await loadPublicModelUniverse(config, {
+            clientVersion: url.searchParams.get("client_version"),
+            signal: req.signal,
+          });
         } catch (error) {
           if (error instanceof CatalogGatherBusyError) {
             return withCors(new Response(JSON.stringify({ error: { type: "server_error", code: "catalog_busy", message: error.message } }), {
@@ -907,62 +944,12 @@ export function createServeOptions(ctx: ServeOptionsContext) {
           }
           throw error;
         }
-        const { accountBoundNativeOpenAiSlugsBySelector, applyNativeVisibility, buildCatalogEntries, configuredNativeAliasSlugs, desktopAllowlistSuppressedNativeSlugs, disabledNativeSlugs, exactComboCatalogSlugs, loadCatalogTemplate, NATIVE_OPENAI_MODELS, nativeContextLimits, nativeInputModalities, nativeOpenAiContextWindow, nativeOpenAiMaxOutputTokens, nativeOpenAiContextTier, nativeOpenAiSlugs, nativeReasoningEfforts, nativeDefaultReasoningEffort, shouldIncludeAccountBoundNativeOpenAi, shouldIncludeNativeOpenAi, uniqueCatalogModelsForRawPublicList, visibleCodexAccountSelectors, visibleNativeSlugs, desktopVisibleNativeSlugs } = await import("../../codex/catalog");
-        const { ACCOUNT_GATED_NATIVE_OPENAI_MODELS } = await import("../../codex/catalog/native-models");
-        const includeNativeOpenAi = shouldIncludeNativeOpenAi(config);
-        const includeAccountBoundNativeOpenAi = shouldIncludeAccountBoundNativeOpenAi(config);
-        const bareEligibleAccountIds = providerCodexAccountMode(
-          OPENAI_CODEX_PROVIDER_ID,
-          config.providers[OPENAI_CODEX_PROVIDER_ID],
-        ) === "direct" ? new Set([MAIN_CODEX_ACCOUNT_ID]) : undefined;
-        const availableBareGatedNativeSlugs = availableAccountGatedNativeModels(
-          modelEntitlements,
-          bareEligibleAccountIds,
-        );
-        const availableAccountGatedNativeSlugs = availableAccountGatedNativeModels(modelEntitlements);
-        const availableBareNativeSlugs = NATIVE_OPENAI_MODELS.filter(slug => (
-          !ACCOUNT_GATED_NATIVE_OPENAI_MODELS.has(slug) || availableBareGatedNativeSlugs.has(slug)
-        ));
-        const availableAccountNativeSlugs = NATIVE_OPENAI_MODELS.filter(slug => (
-          !ACCOUNT_GATED_NATIVE_OPENAI_MODELS.has(slug) || availableAccountGatedNativeSlugs.has(slug)
-        ));
-        const nativeSlugs = includeNativeOpenAi
-          ? nativeOpenAiSlugs().filter(slug => (
-              !ACCOUNT_GATED_NATIVE_OPENAI_MODELS.has(slug) || availableBareGatedNativeSlugs.has(slug)
-            ))
-          : [];
-        const disabledNatives = disabledNativeSlugs(config);
-        const disabledModels = new Set(config.disabledModels ?? []);
-        const exactComboSlugs = exactComboCatalogSlugs(config);
-        const shadowedNativeSlugs = configuredNativeAliasSlugs(config);
-        const suppressedBareNativeSlugs = new Set([
-          ...desktopAllowlistSuppressedNativeSlugs(config),
-          ...[...ACCOUNT_GATED_NATIVE_OPENAI_MODELS].filter(slug => !availableBareGatedNativeSlugs.has(slug)),
-        ]);
-        const accountSelectors = includeAccountBoundNativeOpenAi
-          ? visibleCodexAccountSelectors(config)
-          : [];
-        const accountTargets = new Map(codexAccountNamespaceEntries(config));
-        const accountNativeSlugsBySelector = includeAccountBoundNativeOpenAi
-          ? new Map([...accountBoundNativeOpenAiSlugsBySelector(config)].map(([selector, slugs]) => {
-            const target = accountTargets.get(selector);
-            const accountId = target && isMainCodexAccountTarget(target) ? MAIN_CODEX_ACCOUNT_ID : target;
-            return [selector, slugs.filter(slug => (
-              !ACCOUNT_GATED_NATIVE_OPENAI_MODELS.has(slug)
-              || (accountId !== undefined
-                && codexModelEntitlementStateForAccount(modelEntitlements, accountId, slug) === "granted")
-            ))] as const;
-          }))
-          : new Map<string, readonly string[]>();
-        const accountNativeSlugs = [...new Set(
-          [...accountNativeSlugsBySelector.values()].flatMap(slugs => [...slugs]),
-        )];
-        const desktopInputs = buildDesktopDiscoveryInputs({
-          config, models: goModels, modelEntitlements,
-          desktopNativeCandidates: desktopVisibleNativeSlugs(config),
-        });
-        const desktopNativeSlugs = desktopInputs.nativeSlugs;
-        const goOrdered = desktopInputs.routedModels;
+        const {
+          desktopInputs, desktopNativeSlugs, goOrdered, nativeSlugs, disabledModels,
+          exactComboSlugs, suppressedBareNativeSlugs, accountSelectors, accountNativeSlugs,
+          accountNativeSlugsBySelector, availableAccountNativeSlugs,
+          nativeFastEligible, catalogRowFastEligible,
+        } = universe;
         // Claude Code / Claude Desktop gateway model discovery (GET /v1/models with
         // Anthropic-style headers; 003 G1-G8 + devlog 131). Entries use the official
         // ModelInfo shape incl. capabilities (effort ladder / thinking) — Desktop 3P can
@@ -973,36 +960,6 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         // Codex catalog (client_version) and the OpenAI list shape below stay byte-identical.
         const wantsAnthropicList = wantsDesktopConfig || req.headers.get("anthropic-version") !== null
           || url.searchParams.get("flavor") === "anthropic";
-        /**
-         * Whether a NATIVE slug may carry a Fast sibling.
-         *
-         * Both halves are required. Upstream asserts the tier per model — the same
-         * `additional_speed_tiers` the Codex picker's own toggle is built from — but an
-         * operator capability override or the final wire resolution can still make the
-         * route ineligible, and `decideTier` would then drop the tier the row advertised.
-         *
-         * Declared here, above the Claude discovery call, because that call reads it while
-         * the raw OpenAI mapper further down does too; defining it there would leave this
-         * use in its temporal dead zone.
-         */
-        const nativeFastEligible = (metadataId: string): boolean =>
-          catalogFastRowEligible(config, { provider: OPENAI_CODEX_PROVIDER_ID, id: metadataId, native: true });
-
-        /**
-         * Whether a routed catalog row may carry a Fast sibling.
-         *
-         * A combo is its own namespace with no `config.providers` entry — declaring a
-         * provider named `combo` is rejected (combos/types.ts:191) — so provider lookup
-         * cannot classify it. Its aggregated `supportsServiceTier` is already true only
-         * when EVERY member supports the tier (aggregation.ts:201), which is the right
-         * rule for a row that fans out to all of them.
-         *
-         * Declared beside nativeFastEligible, above the Claude discovery call that reads
-         * both; defining it near the raw OpenAI mapper below would leave that use in its
-         * temporal dead zone.
-         */
-        const catalogRowFastEligible = (m: { provider: string; id: string; supportsServiceTier?: boolean }): boolean =>
-          catalogFastRowEligible(config, m);
 
         if (wantsAnthropicList && !url.searchParams.has("client_version")) {
           if (wantsDesktopConfig) {
@@ -1060,6 +1017,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
           // Pass the subagent picks so featured models lead by priority (matches the on-disk file).
           // Disabled natives stay in the catalog shape with visibility "hide" (mirrors the
           // on-disk sync; codex-rs keeps them out of the picker itself).
+          const { applyNativeVisibility, buildCatalogEntries, loadCatalogTemplate, nativeContextLimits } = await import("../../codex/catalog");
           const maMode = config.multiAgentMode === "v1" || config.multiAgentMode === "v2" ? config.multiAgentMode : "default";
           // Account rows use the same hidden-inclusive supported set as on-disk sync. This lets a
           // newly re-enabled native reappear under each selector before the next sync, while the
@@ -1106,179 +1064,10 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         // default uses the same canonical fallback as the Codex catalog resolver
         // (configured default, then medium, then high, then the first tier). Extra fields
         // are ignored by plain OpenAI clients.
-        const grokEffortOption = (value: string, isDefault: boolean) => ({
-          value,
-          label: `${value[0].toUpperCase()}${value.slice(1)} Effort`,
-          ...(isDefault ? { default: true } : {}),
+        const rows = await buildPublicModelRows(config, admission, universe, {
+          loadCursorEffortTable: deps.managementApi?.loadCursorEffortTable,
         });
-        const grokEffortFields = (efforts: string[], configuredDefault?: string) => {
-          const defaultEffort = grokDefaultReasoningEffort(efforts, configuredDefault);
-          if (defaultEffort === undefined) return {};
-          return {
-            supports_reasoning_effort: true,
-            reasoning_effort: defaultEffort,
-            reasoning_efforts: efforts.map(effort => grokEffortOption(effort, effort === defaultEffort)),
-          };
-        };
-        // Cursor's local-agent runtime (Private Inference build) reads api_types + capabilities
-        // to enable its effort control; every other consumer ignores them. See
-        // src/server/models-capabilities.ts.
-        const nativeLimits = nativeContextLimits(config);
-        const nativeContextInput = (metadataId: string) => {
-          const tier = nativeOpenAiContextTier(metadataId, nativeLimits);
-          return tier
-            ? { contextWindow: tier.defaultWindow, longContextWindow: tier.longWindow }
-            : { contextWindow: nativeOpenAiContextWindow(metadataId, nativeLimits) };
-        };
-        const nativeModelRow = (id: string, metadataId = id) => ({
-            id,
-            object: "model",
-            created: 0,
-            owned_by: "openai",
-            ...grokEffortFields(
-              nativeReasoningEfforts(metadataId),
-              nativeDefaultReasoningEffort(metadataId),
-            ),
-            ...modelCapabilityFields({
-              reasoningEfforts: nativeReasoningEfforts(metadataId),
-              // Cursor "Max Mode": advertise the family's default/long pair (272k/922k for
-              // GPT-5.6) so the client can pick per request; without a tier, the effective
-              // window is the only value.
-              ...nativeContextInput(metadataId),
-              maxOutputTokens: nativeOpenAiMaxOutputTokens(metadataId),
-              inputModalities: nativeInputModalities(metadataId),
-            }),
-          });
-        // Resolved once per request, not per model: the global fast switch offers the fast
-        // identity to clients that have no Fast toggle of their own. Null when the switch is
-        // off, so the row mapper does no work and loads no adapter module.
-        const cursorFastIdForListing = config.fastMode === true
-          ? await (async () => {
-            const { cursorFastIdFor } = await import("../../adapters/cursor/catalog");
-            return (modelId: string, provider = "cursor") => provider === "cursor" ? cursorFastIdFor(modelId) : undefined;
-          })()
-          : null;
-        // Selector-active discovery follows the same complete supported set as the Codex catalog
-        // for both bare and qualified rows. Without selectors, the live catalog continues to own
-        // bare availability.
-        const selectorNativeSlugs = accountSelectors.length > 0
-          ? availableBareNativeSlugs.filter(slug => !disabledNatives.has(slug))
-          : [];
-        const bareSelectorNativeSlugs = accountSelectors.length > 0
-          ? selectorNativeSlugs
-          : [];
-        const visibleNatives = includeNativeOpenAi
-          ? accountSelectors.length > 0
-            ? bareSelectorNativeSlugs.filter(slug => !shadowedNativeSlugs.has(slug))
-            : visibleNativeSlugs(config)
-          : [];
-        const visibleAccountNatives = accountSelectors.flatMap(selector =>
-          (accountNativeSlugsBySelector.get(selector) ?? []).filter(metadataId => !disabledNatives.has(metadataId)).flatMap(metadataId => {
-            const id = `${selector}/${metadataId}`;
-            return disabledModels.has(id) ? [] : [{ id, metadataId }];
-          })
-        );
-        // What a scoped key may see, filtered by the same predicate that refuses
-        // it on the data plane, so the catalog and the send path cannot disagree.
-        // This is a convenience, never the boundary: hiding a row only stops a
-        // client that reads the catalog first, which is why the refusal lives on
-        // the request path and this filter reuses it rather than replacing it.
-        // Filtering happens where the resolved provider and model are still in
-        // hand -- a published id is a selector, and re-resolving one here would
-        // re-run combo selection just to render a list.
-        const listScope = resolveAdmissionModelScope(config, admission);
-        const listAllows = (providerName: string, modelId: string): boolean =>
-          routeAllowedByScope(listScope, { providerName, modelId });
-        // The projection is opt-in. Keep the default path free of Cursor install detection,
-        // and resolve the bundle table once for the whole list rather than once per row.
-        const effortRowsEnabled = config.cursorEffortRows === true;
-        // Explicit opt-out skips policy resolution and additional rows.
-        const fastRowsEnabled = config.fastRows !== false;
-        // One inventory serves both grammars; building it twice would double the work on a
-        // hot path for no benefit.
-        const effortRowKnownIds = effortRowsEnabled || fastRowsEnabled
-          ? knownEffortRowIds(config)
-          : undefined;
-        const privateInference = effortRowsEnabled
-          ? detectCursorInstalls().find(install => install.build === "private-inference")
-          : undefined;
-        const cursorEffortTable = effortRowsEnabled
-          ? (deps.managementApi?.loadCursorEffortTable ?? loadCursorEffortTable)(privateInference)
-          : null;
-        const expandedNativeModelRow = (id: string, metadataId = id) => {
-          const reasoningEfforts = nativeReasoningEfforts(metadataId);
-          return expandCursorEffortRow(nativeModelRow(id, metadataId), reasoningEfforts, config, {
-            knownIds: effortRowKnownIds,
-            table: cursorEffortTable,
-            supportsReasoning: reasoningEfforts.length > 0,
-          }).flatMap(row => expandFastRow(
-            row,
-            // Only the BASE row earns a fast sibling. An effort row already spent the
-            // grammar, and the parser requires the stripped base to be routable, so
-            // `<base>--<effort>--fast` would publish a row no ingress can resolve.
-            row.id === id && nativeFastEligible(metadataId),
-            config,
-            effortRowKnownIds,
-          ));
-        };
-        const routedRows = await Promise.all(uniqueCatalogModelsForRawPublicList(goOrdered)
-          .filter(m => listAllows(m.provider, m.id))
-          .map(async m => {
-          // Same rule as the anthropic branch: with the global fast switch on, a client
-          // that has no Fast toggle is offered the fast identity directly. An operator
-          // alias is an explicit decision and still wins.
-          const fastModelId = cursorFastIdForListing?.(m.id, m.provider);
-          const publicId = m.alias ?? `${m.provider}/${fastModelId ?? m.id}`;
-          const isCombo = m.provider === "combo" && exactComboSlugs.has(publicId);
-          const provider = config.providers[m.provider];
-          const effective = provider
-            ? (await import("../../providers/default-aliases")).effectiveModelAliases(
-                config,
-                provider,
-                knownModelIdsForProvider(m.provider, provider, config),
-              ).get(m.id)
-            : undefined;
-          const row = {
-            id: publicId,
-            object: "model",
-            created: 0,
-            // This endpoint is an OpenAI-compatible inbound contract. Some clients use
-            // owned_by as an adapter selector, so a virtual combo must name that wire
-            // adapter rather than the internal catalog authority marker.
-            owned_by: isCombo ? "openai" : (m.owned_by ?? m.provider),
-            ...(isCombo ? { is_combo: true } : {}),
-            ...(effective ? { alias_of: `${provider?.alias || m.provider}/${effective.alias}` } : {}),
-            ...grokEffortFields(m.reasoningEfforts ?? [], m.defaultReasoningEffort),
-            ...modelCapabilityFields({
-              reasoningEfforts: m.reasoningEfforts,
-              // contextWindow is already the post-cap effective value; contextCap is the raw
-              // operator knob and over-reports models whose real window sits below it.
-              contextWindow: m.contextWindow,
-              maxOutputTokens: m.maxOutputTokens,
-              inputModalities: m.inputModalities,
-            }),
-          };
-          return expandCursorEffortRow(row, m.reasoningEfforts, config, {
-            knownIds: effortRowKnownIds,
-            table: cursorEffortTable,
-            supportsReasoning: (m.reasoningEfforts ?? []).length > 0,
-          }).flatMap(expanded => expandFastRow(
-            expanded,
-            expanded.id === row.id && catalogRowFastEligible(m),
-            config,
-            effortRowKnownIds,
-          ));
-        }));
-        const data = [
-          ...visibleNatives
-            .filter(id => listAllows(OPENAI_CODEX_PROVIDER_ID, id))
-            .flatMap(id => expandedNativeModelRow(id)),
-          ...visibleAccountNatives
-            .filter(({ metadataId }) => listAllows(OPENAI_CODEX_PROVIDER_ID, metadataId))
-            .flatMap(({ id, metadataId }) => expandedNativeModelRow(id, metadataId)),
-          ...routedRows.flat(),
-        ];
-        return jsonResponse({ object: "list", data }, 200, req, policy);
+        return jsonResponse({ object: "list", data: rows.map(entry => entry.row) }, 200, req, policy);
       }
 
       // Remote compaction v1 (codex-rs with Feature::RemoteCompactionV2 off — the default).
@@ -1293,6 +1082,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin data-plane request blocked"), req, policy);
         }
+        const compactQuotaDenial = await apiKeyQuotaGate(admission);
+        if (compactQuotaDenial) return compactQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1330,6 +1121,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin data-plane request blocked"), req, policy);
         }
+        const imagesQuotaDenial = await apiKeyQuotaGate(admission);
+        if (imagesQuotaDenial) return imagesQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1398,7 +1191,7 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         };
         return runAdmittedHttpTurn(req, policy, async turnAdmissionLease => {
           const response = await handleContextHistory(req, config, logCtx, contextEndpoint(url.pathname)!,
-            turnAdmissionLease, admission, () => resolveApiAuth(req, policy));
+            turnAdmissionLease, admission, () => resolveApiAuth(req, ingress === "hub-link" ? linkPolicy() : policy));
           addFinalRequestLog(requestId, start, logCtx, response.status,
             response.status === 499 ? { closeReason: "client_cancel" } : undefined);
           return withCors(response, req, policy);
@@ -1415,6 +1208,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin data-plane request blocked"), req, policy);
         }
+        const searchQuotaDenial = await apiKeyQuotaGate(admission);
+        if (searchQuotaDenial) return searchQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1440,6 +1235,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin data-plane request blocked"), req, policy);
         }
+        const responsesQuotaDenial = await apiKeyQuotaGate(admission);
+        if (responsesQuotaDenial) return responsesQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1527,6 +1324,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(anthropicErrorResponse(403, "cross-origin data-plane request blocked", "permission_error"), req, policy);
         }
+        const messagesQuotaDenial = await apiKeyQuotaGate(admission);
+        if (messagesQuotaDenial) return messagesQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1557,6 +1356,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin data-plane request blocked"), req, policy);
         }
+        const chatQuotaDenial = await apiKeyQuotaGate(admission);
+        if (chatQuotaDenial) return chatQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1584,6 +1385,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin audio request blocked"), req, policy);
         }
+        const transcriptionQuotaDenial = await apiKeyQuotaGate(admission);
+        if (transcriptionQuotaDenial) return transcriptionQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1617,6 +1420,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "cross-origin data-plane request blocked"), req, policy);
         }
+        const liveQuotaDenial = await apiKeyQuotaGate(admission);
+        if (liveQuotaDenial) return liveQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {
@@ -1665,6 +1470,8 @@ export function createServeOptions(ctx: ServeOptionsContext) {
         if (!isAllowedRequestOrigin(req, policy)) {
           return withCors(formatErrorResponse(403, "origin_rejected", "WebSocket upgrade blocked: non-local Origin"), req, policy);
         }
+        const liveWsQuotaDenial = await apiKeyQuotaGate(admission);
+        if (liveWsQuotaDenial) return liveWsQuotaDenial;
         const start = Date.now();
         const requestId = nextRequestLogId(start);
         const logCtx: RequestLogContext = {

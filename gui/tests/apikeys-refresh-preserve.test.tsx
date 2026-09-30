@@ -57,6 +57,8 @@ const EXISTING_KEY = {
   prefix: "ocx_data_12345678...",
   createdAt: "2026-01-15T12:00:00.000Z",
   usage: { requests7d: 3, totalRequests: 8, lastUsedAt: "2026-07-30T12:00:00.000Z" },
+  quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+  spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 },
 };
 
 const KEYS_OK = {

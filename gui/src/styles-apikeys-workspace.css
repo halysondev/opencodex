@@ -830,6 +830,193 @@
   .apikeys-workspace-shell .awi-section-anchor { scroll-margin-top: 108px; }
 }
 
+/* ── Quota + model access editors ───────────────────────── */
+
+.awi-keylist-spend {
+  display: block;
+  padding-top: 2px;
+}
+
+.awi-detail-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+}
+
+.awi-quota-editor,
+.awi-access-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.awi-quota-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.awi-quota-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem;
+  gap: var(--space-3, 12px);
+  align-items: center;
+}
+
+.awi-quota-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  font-size: var(--text-label, 12px);
+}
+
+.awi-progressbar {
+  display: block;
+  height: 6px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.awi-progressbar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+}
+
+.awi-quota-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+}
+
+.awi-quota-input {
+  width: 8rem;
+  text-align: right;
+}
+
+.awi-quota-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  flex-wrap: wrap;
+}
+
+.awi-quota-error,
+.awi-access-error {
+  color: var(--red, #c44);
+  font-size: var(--text-label, 12px);
+  margin: 0;
+}
+
+.awi-quota-disclosure {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+}
+
+.awi-quota-disclosure summary {
+  cursor: pointer;
+  font-size: var(--text-label, 12px);
+  font-weight: var(--weight-semibold, 600);
+}
+
+.awi-quota-create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3, 12px);
+}
+
+.awi-quota-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+  font-size: var(--text-label, 12px);
+}
+
+.awi-quota-create-field .input {
+  width: 9rem;
+}
+
+.awi-access-modes {
+  display: flex;
+  gap: var(--space-3, 12px);
+  font-size: var(--text-label, 12px);
+}
+
+.awi-access-hint {
+  color: var(--muted);
+  font-size: var(--text-label, 12px);
+  margin: 0;
+}
+
+.awi-access-search {
+  max-width: 20rem;
+}
+
+.awi-access-provider-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  font-size: var(--text-label, 12px);
+  margin: var(--space-2, 8px) 0 2px;
+}
+
+.awi-access-provider-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: var(--weight-semibold, 600);
+}
+
+.awi-access-entries {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 2px var(--space-3, 12px);
+}
+
+.awi-access-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--text-label, 12px);
+  min-width: 0;
+}
+
+.awi-access-entry-label {
+  overflow-wrap: anywhere;
+}
+
+.awi-access-entry code {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.awi-access-confirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+.awi-access-error {
+  color: var(--muted);
+}
+
+.awi-access-error.muted {
+  color: var(--muted);
+}
+
+@container apikeys-workspace (max-width: 560px) {
+  .awi-quota-row { grid-template-columns: minmax(0, 1fr); }
+  .awi-quota-input { width: 100%; }
+}
+
 /* Request path preview (components/protocols). Delivery mode badges carry their label as
    text, so colour only repeats what the words already say. */
 .protocol-plan-form {

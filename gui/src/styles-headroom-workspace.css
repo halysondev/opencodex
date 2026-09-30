@@ -1,0 +1,13 @@
+.headroom-page { display: grid; gap: 14px; align-content: start; }
+.headroom-page .panel { padding: 14px; display: grid; gap: 10px; align-content: start; }
+.headroom-controls { display: flex; align-items: center; gap: 10px; }
+.headroom-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.headroom-metric { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.headroom-metric strong { font-size: var(--text-section); }
+.headroom-metric-sub { font-size: var(--text-caption); color: var(--muted); }
+.headroom-usage-note { margin: 0; font-size: var(--text-caption); color: var(--muted); }
+.headroom-savings-block { display: grid; gap: 6px; }
+.headroom-savings-block h4 { margin: 0; font-size: var(--text-label); font-weight: 600; }
+.headroom-savings-table { display: grid; gap: 4px; }
+.headroom-savings-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--text-body); }
+.headroom-savings-row > span:last-child { color: var(--muted); white-space: nowrap; }

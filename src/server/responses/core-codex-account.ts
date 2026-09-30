@@ -17,6 +17,7 @@ import {
   resetUpstreamHostHealth,
 } from "../../codex/upstream-host-health";
 import { safeOriginLabel, fetchWithHeaderTimeout, providerFetch } from "./fetch-helpers";
+import { applyHeadroomRoute } from "../../headroom";
 import { classifyPoolRecoveryDispatch } from "../../routing/probe-lease";
 import { formatErrorResponse } from "../../bridge";
 import { readBoundedResponseBody } from "../../lib/bounded-body";
@@ -395,6 +396,8 @@ export interface CodexPoolAccountRetryArgs {
   connectMs: number;
   passthroughEstimate?: number;
   stream: boolean;
+  /** Keep a buffered canonical client on HTTP/SSE after moving to another Pool account. */
+  httpOnly?: boolean;
   onResponse?: (
     response: Response,
     authCtx: CodexAuthContext,
@@ -535,7 +538,7 @@ export async function retryCodexPoolOnAlternateAccount(
 ): Promise<CodexPoolAccountRetryResult> {
   const {
     callerAuthHeaders, config, route, parsed, logCtx, options, firstAuthCtx, firstResponse,
-    outcomeStatus, upstream, connectMs, passthroughEstimate, stream,
+    outcomeStatus, upstream, connectMs, passthroughEstimate, stream, httpOnly,
   } = args;
   const inboundWire = options.inboundWire ?? "responses";
   const entitlementResolver = options.resolveCodexModelEntitlements ?? resolveCodexModelEntitlements;
@@ -777,8 +780,10 @@ export async function retryCodexPoolOnAlternateAccount(
   }
   const request = await retryAdapter.buildRequest(parsed, {
     headers: retryHeaders,
+    providerName: route.providerName,
     translatorBudget: options.translatorBudget,
   });
+  await applyHeadroomRoute(request, config);
   recordAdapterReasoning(logCtx, request);
   recordAdapterTier(logCtx, request);
 
@@ -876,6 +881,7 @@ export async function retryCodexPoolOnAlternateAccount(
           connectMs,
           stream,
           providerFetch(route.provider, options.codexWsRuntimeIdentity, {
+            httpOnly,
             providerName: route.providerName,
             modelId: route.modelId,
             onCodexWsQuota: codexWsQuotaObserver(retryAuthCtx, route.provider, route.modelId),

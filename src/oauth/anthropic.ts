@@ -5,10 +5,15 @@ import type { LocalTokenImportMode, OAuthController, OAuthCredentials } from "./
 
 const CLIENT_ID = atob("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl");
 const AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
-const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
+// Claude Code's PROD token endpoint (dario cc-oauth-detect): the binary ships
+// `https://platform.claude.com/v1/oauth/token`, distinct from the api.anthropic.com
+// host the API itself lives on. Both accept the same grant; CC's own is canonical.
+const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 const CALLBACK_PORT = 54545;
 const CALLBACK_PATH = "/callback";
-const SCOPES = "org:create_api_key user:profile user:inference";
+// The 6-scope set Claude Code sends on /login (CC v2.1.116+, dario#71): the
+// authorize endpoint rejects any other list for this client_id.
+const SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 
 // ── OAuth-request requirements applied by the anthropic adapter when authMode==="oauth" ──
 export const ANTHROPIC_OAUTH_BETA = "claude-code-20250219,oauth-2025-04-20";
@@ -159,14 +164,19 @@ export async function loginAnthropic(
     const local = detectClaudeCodeToken();
     if (local) {
       ctrl.onProgress?.("Found Claude Code token, importing automatically");
-      if (local.expires >= Date.now() + 60_000) return local;
-      try {
-        return { ...(await refreshAnthropicToken(local.refresh)), source: "local-cli" };
-      } catch (error) {
-        if (importLocal === "only") {
-          throw new Error(`Claude Code token expired and could not be refreshed: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
+      const imported = local.expires >= Date.now() + 60_000
+        ? local
+        : await (async () => {
+            try {
+              return { ...(await refreshAnthropicToken(local.refresh)), source: "local-cli" as const };
+            } catch (error) {
+              if (importLocal === "only") {
+                throw new Error(`Claude Code token expired and could not be refreshed: ${error instanceof Error ? error.message : String(error)}`);
+              }
+              return null;
+            }
+          })();
+      if (imported) return await withClaudeCodeIdentity(imported, "local-cli");
     } else if (importLocal === "only") {
       throw new Error(
         process.platform === "darwin"
@@ -175,7 +185,34 @@ export async function loginAnthropic(
       );
     }
   }
-  return new AnthropicOAuthFlow(ctrl).login();
+  const cred = await new AnthropicOAuthFlow(ctrl).login();
+  return await withClaudeCodeIdentity(cred, cred.source ?? "oauth");
+}
+
+/**
+ * Attach the Claude Code client identity to a freshly obtained credential —
+ * profile fetch + per-account identity choice, exactly as the automatic import
+ * does (src/oauth/anthropic-import.ts). Dynamic import keeps this module a leaf:
+ * anthropic-import pulls upsertOAuthProvider from ./index, which imports us.
+ */
+async function withClaudeCodeIdentity(
+  cred: OAuthCredentials,
+  source: OAuthCredentials["source"],
+): Promise<OAuthCredentials> {
+  try {
+    const { getAccountSet } = await import("./store");
+    const { anthropicCredentialFromLocal, fetchAnthropicOAuthProfile } = await import("./anthropic-import");
+    const profile = cred.expires > Date.now() ? await fetchAnthropicOAuthProfile(cred.access) : null;
+    const built = anthropicCredentialFromLocal(
+      cred,
+      getAccountSet("anthropic")?.accounts ?? [],
+      profile,
+    );
+    return { ...built, source: source ?? built.source };
+  } catch {
+    // Identity enrichment is a nicety on a grant that already succeeded.
+    return { ...cred, source: source ?? cred.source };
+  }
 }
 
 export async function refreshAnthropicToken(refreshToken: string): Promise<OAuthCredentials> {

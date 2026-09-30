@@ -579,6 +579,7 @@ function normalizeUsageValue(usage: OcxUsage | undefined): OcxUsage | undefined 
     ...(typeof usage.cacheReadInputTokens === "number" ? { cacheReadInputTokens: usage.cacheReadInputTokens } : {}),
     ...(typeof usage.cacheCreationInputTokens === "number" ? { cacheCreationInputTokens: usage.cacheCreationInputTokens } : {}),
     ...(typeof usage.reasoningOutputTokens === "number" ? { reasoningOutputTokens: usage.reasoningOutputTokens } : {}),
+    ...(isNonNegativeFiniteNumber(usage.providerCredits) ? { providerCredits: usage.providerCredits } : {}),
     ...(usage.estimated ? { estimated: true } : {}),
   };
 }
@@ -622,6 +623,7 @@ function normalizeAttemptUsage(raw: unknown): OcxUsage | null {
     "cacheReadInputTokens",
     "cacheCreationInputTokens",
     "reasoningOutputTokens",
+    "providerCredits",
   ] as const) {
     if (key in usage && !isNonNegativeFiniteNumber(usage[key])) return null;
   }
@@ -654,6 +656,7 @@ function normalizeAttemptTierOutcome(raw: unknown): AttemptTierOutcome | null {
   if ("callerFastSuppressedByConfig" in outcome
     && typeof outcome.callerFastSuppressedByConfig !== "boolean") return null;
   if ("responseServiceTier" in outcome && typeof outcome.responseServiceTier !== "string") return null;
+  if ("responseTierAuthoritative" in outcome && typeof outcome.responseTierAuthoritative !== "boolean") return null;
   const wireValue = sanitizeLogMetadataString(outcome.wireValue);
   const responseServiceTier = sanitizeLogMetadataString(outcome.responseServiceTier);
   return {
@@ -676,6 +679,9 @@ function normalizeAttemptTierOutcome(raw: unknown): AttemptTierOutcome | null {
       ? { callerFastSuppressedByConfig: outcome.callerFastSuppressedByConfig }
       : {}),
     confirmation: outcome.confirmation as AttemptTierOutcome["confirmation"],
+    ...(typeof outcome.responseTierAuthoritative === "boolean"
+      ? { responseTierAuthoritative: outcome.responseTierAuthoritative }
+      : {}),
     ...(responseServiceTier ? { responseServiceTier } : {}),
   };
 }
@@ -1100,8 +1106,32 @@ export function setUsageLedgerAppendHook(hook: (() => void) | null): void {
   afterUsageLedgerAppend = hook;
 }
 
+/**
+ * Single consumer slot for the normalized row that just landed on disk.
+ *
+ * Same slot pattern as `afterUsageLedgerAppend`: the quota tracker needs every
+ * appended row but importing it here would be a cycle. The observer runs after
+ * a SUCCESSFUL append only, inside the synchronous call stack, and its own
+ * exceptions are swallowed so it can never break the append path.
+ */
+let usageEntryObserver: ((entry: PersistedUsageEntry) => void) | null = null;
+
+export function setUsageEntryObserver(observer: ((entry: PersistedUsageEntry) => void) | null): void {
+  usageEntryObserver = observer;
+}
+
+function notifyUsageEntryObserver(entry: PersistedUsageEntry): void {
+  if (!usageEntryObserver) return;
+  try {
+    usageEntryObserver(entry);
+  } catch {
+    /* an observer must never break the append path */
+  }
+}
+
 export function appendUsageEntry(entry: PersistedUsageEntry): void {
-  const line = `${JSON.stringify(normalizeUsageEntry(entry))}\n`;
+  const normalized = normalizeUsageEntry(entry);
+  const line = `${JSON.stringify(normalized)}\n`;
   const path = usageLogPath();
   const now = Date.now();
   const doAppend = (): void => {
@@ -1116,16 +1146,13 @@ export function appendUsageEntry(entry: PersistedUsageEntry): void {
   try {
     doAppend();
   } catch (error: any) {
-    if (error?.code === "ENOENT") {
-      ensuredUsageLogDir = null;
-      ensuredUsageLogFile = null;
-      doAppend();
-      afterUsageLedgerAppend?.();
-      return;
-    }
-    throw error;
+    if (error?.code !== "ENOENT") throw error;
+    ensuredUsageLogDir = null;
+    ensuredUsageLogFile = null;
+    doAppend();
   }
   afterUsageLedgerAppend?.();
+  notifyUsageEntryObserver(normalized);
 }
 
 export type UsageLogRevision = {

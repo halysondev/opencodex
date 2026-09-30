@@ -236,6 +236,75 @@ describe("Anthropic cooldown honours the stated window", () => {
     );
     expect(getAnthropicAccountHealthSnapshot(ids[0]!, start)?.cooldownUntil).toBe(start + 120_000);
   });
+
+  test("a rejected model bucket parks only that family and survives other-family responses", async () => {
+    const start = Date.now();
+    const ids = await seed(2);
+    const reset = Math.floor((start + 3 * 24 * 60 * 60_000) / 1000);
+    const headers = new Headers({
+      "anthropic-ratelimit-unified-status": "rejected",
+      "anthropic-ratelimit-unified-5h-status": "allowed_warning",
+      "anthropic-ratelimit-unified-5h-reset": String(reset),
+      "anthropic-ratelimit-unified-5h-utilization": "0.03",
+      "anthropic-ratelimit-unified-7d-status": "allowed_warning",
+      "anthropic-ratelimit-unified-7d-reset": String(reset),
+      "anthropic-ratelimit-unified-7d-utilization": "0.83",
+      "anthropic-ratelimit-unified-7d_oi-status": "rejected",
+      "anthropic-ratelimit-unified-7d_oi-utilization": "1.02",
+      "anthropic-ratelimit-unified-representative-claim": "seven_day_overage_included",
+    });
+
+    expect(rotateAnthropicAccountOn429(poolEnabled(), ids[0]!, "30", null, start, headers, "claude-fable-5")).toBe(ids[1]);
+    expect(getAnthropicAccountHealthSnapshot(ids[0]!, start)).toBeNull();
+    expect(getAnthropicAccountHealthSnapshot(ids[0]!, start, "claude-fable-5")).toEqual({
+      cooldownUntil: reset * 1000,
+      cooldownSource: "reset-derived",
+    });
+    expect(getAnthropicAccountHealthSnapshot(ids[0]!, start, "claude-opus-5")).toBeNull();
+    await setActiveAccount("anthropic", ids[0]!);
+    const reactiveOnly = { ...poolEnabled(), anthropicAccountPool: { enabled: false } } as OcxConfig;
+    expect(resolveAnthropicAccountForSession("reactive-fable", reactiveOnly, start, "claude-fable-5").accountId).toBe(ids[1]);
+    expect(resolveAnthropicAccountForSession("reactive-opus", reactiveOnly, start, "claude-opus-5").accountId).toBe(ids[0]);
+    expect(resolveAnthropicAccountForSession("fable-session", poolEnabled(), start, "claude-fable-5").accountId).toBe(ids[1]);
+    expect(resolveAnthropicAccountForSession("opus-session", poolEnabled(), start, "claude-opus-5").accountId).toBe(ids[0]);
+
+    recordAnthropicAccountQuotaFromHeaders(ids[0]!, new Headers({
+      "anthropic-ratelimit-unified-7d-status": "allowed_warning",
+      "anthropic-ratelimit-unified-7d-utilization": "0.83",
+    }), 0);
+    expect(getAnthropicAccountHealthSnapshot(ids[0]!, start, "claude-fable-5")?.cooldownUntil).toBe(reset * 1000);
+    expect(resolveAnthropicAccountForSession("opus-session-2", poolEnabled(), start, "claude-opus-5").accountId).toBe(ids[0]);
+  });
+});
+
+describe("Anthropic family quota selection", () => {
+  test("model-scoped usage steers only its matching family", async () => {
+    const start = Date.now();
+    const ids = await seed(2);
+    await setActiveAccount("anthropic", ids[0]!);
+    resetAnthropicRoutingForManualSelection(ids[0]!);
+    setCachedProviderAccountQuotaForTests("anthropic", ids[0]!, {
+      fiveHourPercent: 10,
+      weeklyPercent: 10,
+      customWindows: [
+        { label: "Fable", percent: 100 },
+        { label: "Opus", percent: 10 },
+      ],
+      updatedAt: start,
+    });
+    setCachedProviderAccountQuotaForTests("anthropic", ids[1]!, {
+      fiveHourPercent: 90,
+      weeklyPercent: 90,
+      customWindows: [
+        { label: "Fable", percent: 20 },
+        { label: "Opus", percent: 90 },
+      ],
+      updatedAt: start,
+    });
+    const config = poolEnabled();
+    expect(resolveAnthropicAccountForSession("fable", config, start, "claude-fable-5").accountId).toBe(ids[1]);
+    expect(resolveAnthropicAccountForSession("opus", config, start, "claude-opus-5").accountId).toBe(ids[0]);
+  });
 });
 
 describe("Anthropic rate-limit headers feed the routing cache", () => {
@@ -417,7 +486,7 @@ describe("Anthropic observation and probe clocks", () => {
       const saved = { fiveHourPercent: 41, customWindows: [{ label: "Opus", percent: 63 }], updatedAt };
       writeFileSync(join(home, "provider-account-quota-cache.json"), JSON.stringify({
         version: 1,
-        rows: { [`anthropic\u0000${id}`]: saved, "kiro\u0000other": { monthlyPercent: 17, updatedAt } },
+        rows: { [`anthropic\u0000${id}`]: saved, "zai\u0000other": { monthlyPercent: 17, updatedAt } },
       }));
       clearAccountQuotaCache();
       // Cover both dashboard-first and response-first hydration after restart.
@@ -427,7 +496,7 @@ describe("Anthropic observation and probe clocks", () => {
       const [row] = await fetchProviderAccountQuotas("anthropic");
       expect(calls).toBe(1);
       expect(row?.quota).toMatchObject({ fiveHourPercent: observeAfterRestart ? 52 : 41, customWindows: saved.customWindows });
-      expect(getCachedProviderAccountQuota("kiro", "other")?.monthlyPercent).toBe(17);
+      expect(getCachedProviderAccountQuota("zai", "other")?.monthlyPercent).toBe(17);
       expect(row?.unavailable).toBe(true);
     });
   }
@@ -668,7 +737,7 @@ describe("Anthropic known-reset expiry", () => {
     const [id] = await seed(1);
     const quota = { customWindows: [{ label: "Opus", percent: 100, resetAt: start + 60_000 }], updatedAt: start };
     setCachedProviderAccountQuotaForTests("anthropic", id!, quota);
-    setCachedProviderAccountQuotaForTests("kiro", "untouched", quota);
+    setCachedProviderAccountQuotaForTests("zai", "untouched", quota);
     const candidate = { provider: "anthropic", model: "claude-opus-4-6", accountRef: id! };
     now += 59_999;
     expect(getCachedProviderAccountQuota("anthropic", id!)).toEqual(quota);
@@ -679,7 +748,7 @@ describe("Anthropic known-reset expiry", () => {
     const [row] = await fetchProviderAccountQuotas("anthropic");
     expect(row?.quota).toBeNull();
     expect(row?.unavailable).toBeUndefined();
-    expect(getCachedProviderAccountQuota("kiro", "untouched")).toBe(quota);
+    expect(getCachedProviderAccountQuota("zai", "untouched")).toBe(quota);
   });
 
   test("expired Opus evidence stops suppressing an otherwise healthy manual selection", async () => {
@@ -758,7 +827,7 @@ describe("Anthropic known-reset expiry", () => {
       const [id] = await seed(1);
       writeFileSync(join(home, "provider-account-quota-cache.json"), JSON.stringify({ version: 1, rows: {
         [`anthropic\u0000${id}`]: { customWindows: malformed, updatedAt: now },
-        "kiro\u0000untouched": { monthlyPercent: 17, updatedAt: now },
+        "zai\u0000untouched": { monthlyPercent: 17, updatedAt: now },
       } }));
       clearAccountQuotaCache();
       let calls = 0;
@@ -767,7 +836,7 @@ describe("Anthropic known-reset expiry", () => {
       expect(calls).toBe(1);
       expect(row?.quota).toBeNull();
       expect(row?.unavailable).toBe(true);
-      expect(getCachedProviderAccountQuota("kiro", "untouched")).toEqual({ monthlyPercent: 17, updatedAt: now });
+      expect(getCachedProviderAccountQuota("zai", "untouched")).toEqual({ monthlyPercent: 17, updatedAt: now });
     });
   }
 
@@ -802,7 +871,7 @@ describe("Anthropic known-reset expiry", () => {
     const [id] = await seed(1);
     const saved = { weeklyPercent: 100, weeklyResetAt: start + 60_000, updatedAt: start };
     setCachedProviderAccountQuotaForTests("anthropic", id!, saved);
-    setCachedProviderAccountQuotaForTests("kiro", "untouched", saved);
+    setCachedProviderAccountQuotaForTests("zai", "untouched", saved);
     let flush!: () => void;
     const timer = spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void) => {
       flush = callback;
@@ -813,6 +882,6 @@ describe("Anthropic known-reset expiry", () => {
     flush();
     const disk = JSON.parse(readFileSync(join(home, "provider-account-quota-cache.json"), "utf8"));
     expect(disk.rows[`anthropic\u0000${id}`]).toEqual({ fiveHourPercent: 41, updatedAt: start });
-    expect(disk.rows["kiro\u0000untouched"]).toEqual(saved);
+    expect(disk.rows["zai\u0000untouched"]).toEqual(saved);
   });
 });

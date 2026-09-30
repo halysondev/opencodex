@@ -22,6 +22,7 @@ export function ApiKeysManagePanel({
   keysLoading = false,
   keysLoadFailed,
   newName,
+  newQuota,
   creating,
   newKey,
   copied,
@@ -29,6 +30,7 @@ export function ApiKeysManagePanel({
   localeTag,
   showKeyList = true,
   onNewNameChange,
+  onNewQuotaChange,
   onCreate,
   onDismissNewKey,
   onCopyKey,
@@ -40,6 +42,8 @@ export function ApiKeysManagePanel({
   keysLoading?: boolean;
   keysLoadFailed: boolean;
   newName: string;
+  /** Optional create-form quota inputs as raw strings ("" = no limit). */
+  newQuota?: Record<"dailyUsd" | "weeklyUsd" | "monthlyUsd", string>;
   creating: boolean;
   newKey: string | null;
   copied: boolean;
@@ -48,6 +52,7 @@ export function ApiKeysManagePanel({
   /** When false, only generate / reveal-new-key UI is shown (workspace rail owns the list). */
   showKeyList?: boolean;
   onNewNameChange: (value: string) => void;
+  onNewQuotaChange?: (value: Record<"dailyUsd" | "weeklyUsd" | "monthlyUsd", string>) => void;
   onCreate: () => void;
   onDismissNewKey: () => void;
   onCopyKey: () => void;
@@ -92,6 +97,30 @@ export function ApiKeysManagePanel({
             <IconPlus /> {creating ? t("api.generating") : t("api.generate")}
           </button>
         </div>
+        {newQuota && onNewQuotaChange && (
+          <details className="awi-quota-disclosure">
+            <summary>{t("api.quota.optionalTitle")}</summary>
+            <p className="muted small">{t("api.quota.unlimitedHelp")}</p>
+            <div className="awi-quota-create">
+              {(["dailyUsd", "weeklyUsd", "monthlyUsd"] as const).map(field => (
+                <label key={field} className="awi-quota-create-field">
+                  <span>{t(field === "dailyUsd" ? "api.quota.daily" : field === "weeklyUsd" ? "api.quota.weekly" : "api.quota.monthly")}</span>
+                  <input
+                    type="number"
+                    className="input"
+                    min={0}
+                    step={0.01}
+                    inputMode="decimal"
+                    placeholder={t("api.quota.unlimitedPlaceholder")}
+                    value={newQuota[field]}
+                    disabled={creating}
+                    onChange={event => onNewQuotaChange({ ...newQuota, [field]: event.target.value })}
+                  />
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
       </div>
 
       {showKeyList && (

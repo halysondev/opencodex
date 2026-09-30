@@ -1,4 +1,6 @@
 import * as z from "zod/v4";
+import { compactionRecoverySchema } from "./compaction-recovery";
+import { blockedModelRedirectsSchema } from "./blocked-model-redirects";
 import {
   agentTaskRecoverySchema,
   catalogAutoRefreshSchema,
@@ -15,6 +17,7 @@ import {
   remoteGuiConfigSchema,
   runtimeRoleSchema,
   spendSchema,
+  skillsConfigSchema,
   configuredCodexPoolAccountIds,
   apiKeyEntrySchema,
   asideProfileSyncSchema,
@@ -23,6 +26,8 @@ import {
   codexAccountNamespacesSchema,
   modelPinnedEffortsSchema,
   compactionRoutingSchema,
+  memoryModelSettingSchema,
+  memoryModelsSchema,
   modelPreferHostedToolsConfigError,
   providerModelCostsConfigError,
   providerRelativeSendPathConfigError,
@@ -77,8 +82,15 @@ export const configSchema = z.object({
   // A malformed privacy block must never be read as "unmask": .catch(undefined) drops it and
   // emailMaskingEnabled then falls back to masked, which is also what an absent block means.
   privacy: z.object({ maskEmails: z.boolean().optional() }).strict().optional().catch(undefined),
+  skills: skillsConfigSchema.optional().catch(undefined),
   // Malformed hand edits disable this opt-in exporter. Live writes reject them in diagnostics.ts.
   metricsExport: z.object({ enabled: z.boolean().optional() }).strict().optional().catch(undefined),
+  // Malformed hand edits disable the opt-in Headroom sidecar redirect; the
+  // request path then simply keeps sending to provider origins.
+  headroom: z.object({
+    enabled: z.boolean().optional().catch(false),
+    baseUrl: z.string().optional().catch(undefined),
+  }).strict().optional().catch(undefined),
   // Kept raw on purpose: `.catch(undefined)` would turn a mistyped `enabled` into "inherit",
   // which can reopen a surface the operator meant to close. src/protocols/settings.ts parses it
   // and fails closed instead.
@@ -156,6 +168,18 @@ export const configSchema = z.object({
   providers: z.record(z.string(), providerConfigSchema),
   modelPinnedEfforts: modelPinnedEffortsSchema.optional(),
   compactionRouting: compactionRoutingSchema.optional().catch(undefined),
+  compactionRecovery: compactionRecoverySchema.optional().catch(undefined),
+  // A hand-edited malformed phase disables only that phase instead of rejecting
+  // providers/apiKeys, matching the load-time degradation notice; the management write
+  // boundary (validateConfigCandidate) still refuses the bad value through the shared,
+  // catch-free memoryModelsSchema.
+  memoryModels: z
+    .object({
+      extract: memoryModelSettingSchema.optional().catch(undefined),
+      consolidation: memoryModelSettingSchema.optional().catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
   defaultProvider: z.string().min(1).default("openai"),
   defaultModelAliases: z.boolean().optional(),
   // Malformed hand edits disable this opt-in projection without rejecting providers.
@@ -267,7 +291,9 @@ export const configSchema = z.object({
   // parse: a hand-edited typo must never trip the backup-and-defaults repair
   // path below and wipe providers/pool accounts. Warning emitted in loadConfig.
   streamMode: z.enum(["auto", "legacy-tee", "eager-relay"]).optional().catch(undefined),
-  blockedModelRedirects: z.record(z.string(), z.string()).optional().catch(undefined),
+  blockedModelRedirects: blockedModelRedirectsSchema.optional().catch(undefined),
+  // Preserve malformed hand edits for a local routing error; candidate writes use the shared parser.
+  anthropicAccountPool: z.unknown().optional(),
   // Same degrade-don't-reject rationale as the fields above: a hand-edited
   // non-string must not trip the backup-and-defaults repair path. Unset then
   // takes the canonical sideband path (src/server/live.ts normalizeSidebandRoot).

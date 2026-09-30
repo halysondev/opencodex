@@ -67,6 +67,8 @@ async function mount(props: Partial<ApiKeysWorkspaceProps>): Promise<HTMLDivElem
       prefix: "ocx_data_aaaaaaaa...",
       createdAt: "2026-01-01T00:00:00.000Z",
       usage: { requests7d: 0, totalRequests: 0 },
+      quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+      spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 },
     }],
     attributionSince: "2026-07-01T00:00:00.000Z",
     authMatrix: [...AUTH_MATRIX],
@@ -93,6 +95,10 @@ async function mount(props: Partial<ApiKeysWorkspaceProps>): Promise<HTMLDivElem
     onCopyKey: () => {},
     onDelete: async () => true,
     onRename: async () => true,
+    onUpdateQuota: async () => true,
+    onUpdateScope: async () => true,
+    onResetQuota: async () => true,
+    onResetAllQuotas: async () => true,
     onModelQueryChange: () => {},
     onRetryModels: () => {},
     onCopyModelId: () => {},
@@ -280,6 +286,8 @@ test("rotation start, one-time secret, commit, and abort stay explicit", async (
         expiresAt: "2026-08-28T00:10:00.000Z",
       },
       usage: { requests7d: 0, totalRequests: 0 },
+      quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+      spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 },
     }],
     rotationSecret: { id: "k1", key: "ocx_data_shown_once", rotationId: "rotation-1" },
     onRotationCommit: async (id, rotationId) => { calls.push(`commit:${id}:${rotationId}`); return true; },
@@ -480,9 +488,13 @@ test("a failed delete reports beside the key, and the error does not follow the 
   const container = await mount({
     keys: [
       { id: "k1", name: "alpha", prefix: "ocx_data_aaaaaaaa...", createdAt: "2026-01-01T00:00:00.000Z",
-        usage: { requests7d: 0, totalRequests: 0 } },
+        usage: { requests7d: 0, totalRequests: 0 },
+        quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+        spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 } },
       { id: "k2", name: "beta", prefix: "ocx_data_bbbbbbbb...", createdAt: "2026-01-02T00:00:00.000Z",
-        usage: { requests7d: 0, totalRequests: 0 } },
+        usage: { requests7d: 0, totalRequests: 0 },
+        quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+        spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 } },
     ],
     onDelete: async () => false,
   });
@@ -514,9 +526,13 @@ test("a pending mutation cannot land its result on another key", async () => {
   const container = await mount({
     keys: [
       { id: "k1", name: "alpha", prefix: "ocx_data_aaaaaaaa...", createdAt: "2026-01-01T00:00:00.000Z",
-        usage: { requests7d: 0, totalRequests: 0 } },
+        usage: { requests7d: 0, totalRequests: 0 },
+        quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+        spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 } },
       { id: "k2", name: "beta", prefix: "ocx_data_bbbbbbbb...", createdAt: "2026-01-02T00:00:00.000Z",
-        usage: { requests7d: 0, totalRequests: 0 } },
+        usage: { requests7d: 0, totalRequests: 0 },
+        quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+        spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 } },
     ],
     onDelete: () => new Promise<boolean>(resolve => { settle = resolve; }),
   });
@@ -568,6 +584,8 @@ test("a duplicate-id key reports ambiguity instead of a number", async () => {
       prefix: "ocx_data_dddddddd...",
       createdAt: "2026-01-01T00:00:00.000Z",
       usage: { ambiguous: true },
+      quota: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 },
+      spend: { dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 },
     }],
   });
   await openKey(container);

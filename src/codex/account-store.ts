@@ -17,6 +17,11 @@ import { advanceCodexCredentialMutationEpoch } from "./credential-mutation-epoch
 import { isValidCodexAccountId } from "./account-id";
 import type { PoolQuotaWriter } from "./quota-types";
 import { CODEX_REFRESH_FLIGHT_CEILING_MS } from "./quota-recovery-timing";
+import {
+  CHATGPT_REFRESH_ORIGINATOR,
+  CHATGPT_REFRESH_SCOPE,
+  CHATGPT_REFRESH_USER_AGENT,
+} from "../oauth/chatgpt";
 
 import {
   CodexPoolRefreshCooldownError,
@@ -1313,11 +1318,16 @@ async function resolveCodexToken(
     }
     const res = await fetch(CHATGPT_TOKEN_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": CHATGPT_REFRESH_USER_AGENT,
+        "originator": CHATGPT_REFRESH_ORIGINATOR,
+      },
       body: new URLSearchParams({
         grant_type: "refresh_token",
         client_id: CHATGPT_CLIENT_ID,
         refresh_token: lockedCred.refreshToken,
+        scope: CHATGPT_REFRESH_SCOPE,
       }).toString(),
       signal,
     });

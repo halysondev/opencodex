@@ -150,7 +150,7 @@ describe("adapter reasoning and usage details", () => {
     expect(body.messages[0].content).toBe("hi");
   });
 
-  test("Anthropic OAuth requests keep Claude identity first and cache user system prompt", async () => {
+  test("Anthropic OAuth requests keep the billing and identity prefix and cache user system prompt", async () => {
     const adapter = createAnthropicAdapter({
       ...provider,
       adapter: "anthropic",
@@ -168,13 +168,14 @@ describe("adapter reasoning and usage details", () => {
     });
     const body = JSON.parse(request.body) as { system: Record<string, unknown>[]; cache_control?: unknown };
 
-    expect(body.cache_control).toEqual({ type: "ephemeral" });
-    expect(body.system[0]).toMatchObject({ type: "text" });
+    expect(body.cache_control).toBeUndefined();
+    expect(body.system[0]).toMatchObject({ type: "text", text: expect.stringContaining("x-anthropic-billing-header:") });
     expect(body.system[0].cache_control).toBeUndefined();
+    expect(body.system[1]).toMatchObject({ type: "text", text: expect.stringContaining("Claude Agent SDK") });
     // The last system block (user system prompt) gets the cache breakpoint.
-    expect(body.system[1]).toEqual({
+    expect(body.system[2]).toMatchObject({
       type: "text",
-      text: "stable project instructions",
+      text: expect.stringContaining("stable project instructions"),
       cache_control: { type: "ephemeral" },
     });
   });

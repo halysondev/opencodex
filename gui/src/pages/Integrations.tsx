@@ -3,7 +3,6 @@ import { navigateHash, normalizeHashPath } from "../hash-routing";
 import { useT } from "../i18n/shared";
 import ClientMark from "../components/ClientMark";
 import { INTEGRATION_MARKS } from "../components/integration-marks";
-import ApiKeys from "./ApiKeys";
 import Claude from "./Claude";
 import Grok from "./Grok";
 import CursorIntegrationPage from "./integrations/CursorIntegrationPage";
@@ -30,14 +29,13 @@ function panelDomId(tab: IntegrationTab): string {
 }
 
 /*
- * The strip carries 18 tabs on one row, which is precisely where a mark earns
- * its place: the eye finds a logo faster than it reads the tenth label. Two
- * tabs have no client behind them -- `overview` is the page itself and `keys`
- * is a credential surface, not an integration -- so they stay text-only rather
- * than borrowing a mark that would imply a client.
+ * The strip carries a row of tabs, which is precisely where a mark earns its
+ * place: the eye finds a logo faster than it reads the tenth label. `overview`
+ * has no client behind it -- it is the page itself -- so it stays text-only
+ * rather than borrowing a mark that would imply a client.
  */
 function tabMark(tab: IntegrationTab): string | null {
-  if (tab === "overview" || tab === "keys") return null;
+  if (tab === "overview") return null;
   return INTEGRATION_MARKS[tab] ?? null;
 }
 
@@ -180,7 +178,6 @@ export default function Integrations({ apiBase, machineApiBase = apiBase, connec
             {definition.id === "overview" && (
               <IntegrationsOverview apiBase={apiBase} active={active} />
             )}
-            {definition.id === "keys" && <ApiKeys apiBase={apiBase} active={active} />}
             {definition.id === "codex" && (
               <section className="integration-native-page" aria-labelledby="codex-integration-title">
                 <h3 id="codex-integration-title">{t("integrations.codex.title")}</h3>

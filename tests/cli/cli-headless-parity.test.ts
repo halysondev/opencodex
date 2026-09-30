@@ -572,6 +572,7 @@ describe("headless GUI parity CLI", () => {
       ["/api/anthropic/reset-grants", "(none — GUI reset-grant dialog; spend requires a dashboard session)"],
       ["/api/protocols", "ocx api protocols/explain/policy"],
       ["/api/settings", "ocx system"],
+      ["/api/headroom", "ocx headroom"],
       // Routing Intelligence (RI-04..RI-10): profiles + dry-run are mirrored by
       // `ocx route policy`. Analytics is GUI-first for now; the same request
       // history remains available through observe/index tooling.
@@ -631,6 +632,16 @@ describe("headless GUI parity CLI", () => {
     const runtime = fakeRuntime();
     expect(await handleProviderRuntimeCommand("edit", args, runtime.deps)).toBe(2);
     expect(runtime.requests).toHaveLength(0);
+  });
+
+  test("provider edit sends only validated Copilot context tiers", async () => {
+    const { requests, deps } = fakeRuntime();
+    expect(await handleProviderRuntimeCommand("edit", ["github-copilot", "--model-context-tier", "gpt-5.6-luna=long_context", "--model-context-tier", "gpt-5.5=default"], deps)).toBe(0);
+    expect(requests).toEqual([{ path: "/api/providers?name=github-copilot", method: "PATCH",
+      body: { modelContextTiers: { "gpt-5.6-luna": "long_context", "gpt-5.5": "default" } } }]);
+    expect(await handleProviderRuntimeCommand("edit", ["github-copilot", "--model-context-tier", "gpt-5.5=wide"], deps)).toBe(2);
+    expect(await handleProviderRuntimeCommand("edit", ["openai", "--model-context-tier", "gpt-5.5=default"], deps)).toBe(2);
+    expect(requests).toHaveLength(1);
   });
 
   test("provider edit --headers sends the parsed block and - clears it", async () => {

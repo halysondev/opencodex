@@ -5,7 +5,7 @@ import type { Root } from "react-dom/client";
 import { LanguageProvider } from "../src/i18n/provider";
 import { clearClientResourceStoresForTests } from "../src/client-resource";
 import { readSessionListCache } from "../src/session-list-cache";
-import { readUsageMetadata } from "../src/usage-summary-resource";
+import { isUsageReadFailure, readUsageMetadata, readUsageResponseJson, UsageReadFailedError } from "../src/usage-summary-resource";
 import { DashboardOverviewHead } from "../src/pages/dashboard-overview-head";
 import ProviderWorkspaceShell from "../src/components/provider-workspace/ProviderWorkspaceShell";
 import AddProviderModal from "../src/components/AddProviderModal";
@@ -82,6 +82,22 @@ test("metadata reader preserves positive diagnostics without inferring completen
   expect(readUsageMetadata({ usageIncomplete: true, usageIncompleteReason: "future_reason" })).toEqual({ usageIncomplete: true });
 });
 
+test("legacy successful error envelopes are not accepted as measured usage", () => {
+  expect(isUsageReadFailure({ error: "read_failed", summary: { requests: 0 } })).toBe(true);
+  for (const value of [null, {}, { error: "future_error" }, { error: true }]) {
+    expect(isUsageReadFailure(value)).toBe(false);
+  }
+});
+
+test("usage response admission classifies both current HTTP 500 and legacy HTTP 200 read failures", async () => {
+  for (const status of [200, 500]) {
+    await expect(readUsageResponseJson(Response.json({ error: "read_failed" }, { status })))
+      .rejects.toBeInstanceOf(UsageReadFailedError);
+  }
+  await expect(readUsageResponseJson(Response.json({ summary: { requests: 0 } })))
+    .resolves.toEqual({ summary: { requests: 0 } });
+});
+
 test("Dashboard warns even when no readable requests remain", async () => {
   await mount(<DashboardOverviewHead locale="en" health={null} providers={[]}
     usage30d={{ ...partial, summary: { requests: 0, totalTokens: 0, coverageRatio: 0 } } as never}
@@ -112,7 +128,7 @@ test("API key fetch and session cache retain incomplete metadata even without at
   const node = <ApiKeys apiBase="/keys" />;
   await mount(node);
   expect(host.textContent).toContain(warning);
-  const cached = readSessionListCache<Record<string, unknown>>("ocx.apikeys.list.v2:/keys");
+  const cached = readSessionListCache<Record<string, unknown>>("ocx.apikeys.list.v3:/keys");
   expect(cached).toMatchObject({ ...partial, keys: [] });
   expect(cached).not.toHaveProperty("attributionSince");
   await remountFromCache(node);

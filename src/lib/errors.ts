@@ -1,4 +1,4 @@
-import { parseRetryAfterFromMessage } from "./retry-delay";
+import { formatRetryAfterAdvice, parseRetryAfterFromMessage } from "./retry-delay";
 
 export interface OcxErrorPayload {
   message: string;
@@ -17,6 +17,7 @@ export const ENCRYPTED_FUNCTION_OUTPUT_REJECTION =
  * string for a client to be able to tell this apart from a provider rate limit.
  */
 export const SEND_BUDGET_EXHAUSTED_CODE = "request_send_budget_exhausted";
+export const CLIENT_VERSION_TOO_OLD_CODE = "client_version_too_old";
 
 /** Canonical human-readable message paths used by Responses upstream failures. */
 export function upstreamErrorMessageFromPayload(payload: unknown): string | undefined {
@@ -401,7 +402,8 @@ export function classifyError(status: number, type: string, message: string): Oc
     text.includes("context window") ||
     text.includes("context length") ||
     text.includes("maximum context") ||
-    text.includes("too many tokens")
+    text.includes("too many tokens") ||
+    (status === 400 && /\binput token count(?:\s*\([\d,]+\))?\s+exceeds\s+the maximum number of tokens allowed\b/.test(text))
   ) {
     return { message, type: "invalid_request_error", code: "context_length_exceeded" };
   }
@@ -630,10 +632,12 @@ export function adapterFailureFromMessage(message: string): { httpStatus: number
             : httpStatus === 400
               ? "invalid_request_error"
               : "upstream_error";
-  return {
-    httpStatus,
-    error: classifyError(httpStatus, errorType, finalMessage),
-  };
+  const error = classifyError(httpStatus, errorType, finalMessage);
+  if (httpStatus === 429 && error.type === "rate_limit_error"
+    && ["rate_limit_exceeded", "slow_down"].includes(error.code ?? "")) {
+    error.message = formatRetryAfterAdvice(message) ?? error.message;
+  }
+  return { httpStatus, error };
 }
 
 /** Map a terminal Responses error object to the HTTP status we record in /api/logs. */

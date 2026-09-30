@@ -24,7 +24,8 @@ sticky session affinity 與依用量的新工作階段選擇。它**不**控制 
 啟用時的營運契約：
 
 - 上游 **429** 會讓該帳號冷卻（有 `Retry-After` 時使用它，否則用預設 backoff）、清除其 affinity，
-  並可能在同一個請求內輪換到另一個合格帳號（有上限）。
+  並可能在同一個請求內輪換到另一個合格帳號（有上限）。若只有某個模型的每週額度用盡，且統一的
+  5 小時/7 天額度仍可用，冷卻只套用於該模型家族；其他家族仍可使用此帳號。
 - Affinity 是**程序本機**的（proxy 重啟後就會遺失）。
 - **401/403** 憑證失敗會隔離該帳號（`needsReauth`），直到重新認證前都不會參與選擇。
 - 如果每個合格帳號都在冷卻，proxy 會回傳 **429**（不是 401），並在已知時附上 `Retry-After`。
@@ -143,7 +144,9 @@ unknown 表示 opencodex 無法確定設定是否仍指向自己的代理。外�
 Picker 模式是第一方模式的一部分。在 macOS 上選擇第一方時預設開啟；設定
 `claudeCode.intercept.picker: false` 後會保持關閉。它會修改第一方 Desktop 的 Code 分頁模型選擇器，
 依名稱列出可用的 opencodex 模型。首次開啟時，macOS 可能會要求你在登入鑰匙圈中信任本機憑證授權單位。
-該授權單位限制為 `claude.ai` 及其子網域；這個提示是對該本機 CA 的一次性信任步驟。
+該授權單位限制為 `claude.ai` 及其子網域。其簽章金鑰只存在於執行中的 OpenCodex 處理程序內，因此每次重新啟動
+OpenCodex 都會發佈新的授權單位，macOS 也會再次請求信任——請在每次重新啟動後核准該提示，或稍後執行
+`ocx claude desktop picker trust`。
 
 Picker 模式開啟期間，Claude Desktop 會透過 OpenCodex 存取網路。如果 OpenCodex 停止，Desktop 會離線，
 直到你完全重新啟動 Desktop 或關閉 Picker 模式。使用 `ocx claude desktop picker status` 查看狀態，
@@ -184,8 +187,9 @@ ocx claude desktop import <path> [--apply]
 檔案，因此無效檔案不會改動目前設定檔。加上 `--apply` 可在匯入有效設定檔後立即寫入 Desktop。
 `none` 僅適用於空系列；每個非空系列都必須保留一個預設。
 
-非 Anthropic 路由會得到穩定別名，例如 `claude-opus-4-8-YYYYMMDD`，年份範圍為 2026 至 2035。看起來像日期的部分是合成的
-路由槽位，不是模型釋出日期。系統會先配置 2026 的槽位，因此既有別名的 id 不變；2026 用盡後才會用到後續年份。
+非 Anthropic 路由會得到穩定別名，例如 `claude-opus-4-8-p01q`，其後綴是以 `p` 開頭的四字元代碼。OpenCodex 仍會在內部保留合成日期槽位，
+以維持既有設定檔配置的穩定性，但不會把日期當成 Desktop 模型 ID；目前的 Desktop 版本在比較作用中工作階段的模型時會移除尾端日期，
+因而可能抑制模型切換。
 真正的 Anthropic Claude 路由保留真實 id。新路由預設落在 Opus
 系列，但移動路由不會改變它所呼叫的供應商或模型。舊版 apply 旗標 `--static`、`--hybrid` 與
 `--discovery-only` 仍可供既有腳本使用。
@@ -257,7 +261,7 @@ opencodex 路由：
 
 ```bash
 ocx claude desktop bind claude-sonnet-4-6 xai/grok-4.7
-ocx claude desktop bind claude-opus-4-6 native/gpt-6-sol
+ocx claude desktop bind claude-opus-4-6 native/gpt-6.1-sol
 ocx claude desktop unbind claude-opus-4-6
 ```
 
@@ -312,10 +316,10 @@ Claude Code 2.1.278 接受包含 `claude` 或 `anthropic` 的 ID。以 `claude-`
 | 介面 | 格式 | 示例 |
 | --- | --- | --- |
 | Claude Code CLI | `ocx-claude-<provider>--<model>`（plain）或 `ocx-claude2-…`（escaped） | `ocx-claude-native--gpt-5.6-sol` |
-| Claude Desktop 3P | `claude-opus-4-8-<code>`（3 字元 base36 雜湊） | `claude-opus-4-8-ncb` |
+| Claude Desktop 3P | `claude-opus-4-8-p<code>`（3 字元 base36 設定檔槽位） | `claude-opus-4-8-p01q` |
 
 代理會按請求選擇別名族：`?ids=cli` 或 `?ids=desktop` 優先；否則，`claude-code/*`
-user-agent 會獲得易讀的 CLI 形式，其他用戶端會獲得 Desktop 雜湊形式。兩種別名族都會永久
+user-agent 會獲得易讀的 CLI 形式，其他用戶端會獲得 Desktop 代碼形式。兩種別名族都會永久
 保持可解碼——以任一形式儲存在 `settings.json` 中的模型都能繼續工作。
 每個條目帶有誠實的顯示名（如 `gemini-3-pro (gemini)`），並以官方 ModelInfo 形態附帶完整模型
 能力（推理強度階梯、thinking 型別），使 Claude Desktop 的第三方閘道器模式能夠提供其推理強度
@@ -551,6 +555,8 @@ role；`tool_result` 缺少 `tool_use_id`；`tool_use` 缺少 id/name；指定�
 413 `request_too_large`、429 `rate_limit_error`、504 `timeout_error`、529 `overloaded_error`，
 其他 5xx 為 `api_error`。`Retry-After` 會保留。
 
+Responses 回傳 `client_version_too_old` 表示 Anthropic 要求的 Claude Code 版本高於 OpenCodex 內建指紋宣告的版本。這不是已連線 CLI 的版本或帳號問題；請在 proxy 主機上更新到包含較新 Claude Code 範本的 OpenCodex 版本，然後重新啟動 proxy。
+
 ## 提示快取與 token 用量
 
 **Anthropic 路由請求：**適配器會管理工具、系統內容和倒數第二條使用者訊息的快取斷點，以及頂層
@@ -635,3 +641,7 @@ Claude 模型時自動載入。對於原生透傳，這是正常現象；對於�
 在 `config.json` 中設定 `claudeCode.stabilizePromptCache: true`，可在轉換路由上將系統指令末尾支援的 Claude 提示移到最後一則使用者訊息。預設值為 `false`。僅在用戶端允許這種角色變更時啟用。程式碼圍欄中的範例和不符合的文字會保留，Anthropic 原生轉送不變。沒有中繼資料時，快取鍵依穩定後的指令計算。此選項不會產生對話識別碼，也不保證上游快取命中。
 
 在所有轉換後的 Chat 路由上，時間線提醒都會保留在對話中的原有位置（排在尚待傳回的工具結果之後）。因此，新增提醒不會重寫開頭的系統提示，對話中途的指令也不會被移到它原本應跟隨的輪次之前。該位置攜帶哪個角色是另外決定的：除非提供者記錄了 `foldDeveloperRoleToSystem: false`，否則提醒以 `system` 傳送；該記錄表示上游接受 `developer` 角色，此時提醒在相同位置照原樣轉送。不接受該角色的上游會回應 `400 role 'developer' is not allowed`，該回合根本無法開始，所以未記錄的目的地採用摺疊。無論 `stabilizePromptCache` 是否啟用，此行為都會生效；Anthropic 原生轉送維持不變。快取重用仍需要穩定的工作階段識別碼和可用的上游快取。修改較早的指令或工具、壓縮對話也可能影響快取命中；僅保留提醒順序並不保證快取重用。
+
+### `anthropicAccountPool.routes`
+
+帳戶池啟用時，`anthropicAccountPool.routes` 依模型第一個符合的規則，將首次選擇和 429 重試限制在已儲存帳戶內。沒有可用帳戶時會在本機拒絕；`fallback: true` 才允許使用一般帳戶池。規則不代表帳戶確實有模型權限。

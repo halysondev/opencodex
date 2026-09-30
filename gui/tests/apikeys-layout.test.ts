@@ -22,13 +22,15 @@ test("ApiKeys uses workspace shell (no classic layout toggle)", async () => {
   expect(page).not.toContain("pws.workspaceToggle");
   expect(page).not.toContain("pws.classicToggle");
 
-  // ApiKeys is no longer rendered by App directly: WP5 made it one panel of
-  // the Integrations tab strip, which is what passes `active` so a hidden
-  // panel stops polling while its drafts stay mounted.
+  // ApiKeys is rendered by its own sidebar page now — the Integrations tab
+  // strip that used to own it no longer mounts it at all.
   expect(app).toContain('<Integrations apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />');
+  expect(app).toContain('<ApiKeysPage apiBase={sharedBase}');
   expect(app).not.toContain("<ApiKeys apiBase");
   const integrations = await Bun.file(new URL("../src/pages/Integrations.tsx", import.meta.url)).text();
-  expect(integrations).toContain("<ApiKeys apiBase={apiBase} active={active} />");
+  expect(integrations).not.toContain("ApiKeys");
+  const apiKeysPage = await Bun.file(new URL("../src/pages/ApiKeysPage.tsx", import.meta.url)).text();
+  expect(apiKeysPage).toContain("<ApiKeys apiBase={apiBase} active");
   expect(css).toContain('@import "./styles-apikeys-workspace.css"');
   expect(css).toContain(".api-auth-list");
   expect(css).toContain(".api-test-note--ok");
@@ -211,7 +213,10 @@ test("usage examples are document content, and the overview keeps its reading or
   const panels = await Bun.file(new URL("../src/pages/api-keys-panels.tsx", import.meta.url)).text();
   const workspace = await Bun.file(new URL("../src/components/apikeys-workspace/ApiKeysWorkspace.tsx", import.meta.url)).text();
 
-  expect(panels).not.toContain("<details className");
+  // The usage examples are document content, never a fold — the assertion is
+  // scoped to the usage panel because an unrelated optional-quota disclosure
+  // legitimately lives in the generate panel.
+  expect(panels.slice(panels.indexOf("export function ApiKeysUsagePanel"))).not.toContain("<details className");
   expect(panels).toContain("awi-usage-panel");
   // All three examples survive the un-collapsing, Messages still gated.
   expect(panels).toContain('t("api.usageChatTitle")');

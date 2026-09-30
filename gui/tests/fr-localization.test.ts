@@ -146,6 +146,11 @@ const INTENTIONAL_ENGLISH = new Set<TKey>([
   // Cline product name and CLI acronym are intentionally preserved.
   "integrations.tab.cline",
   "api.clientConfig.clientCline",
+  "integrations.tab.kilo",
+  "api.clientConfig.clientKilo",
+  // Factory Droid is a product name, identical in every locale.
+  "integrations.tab.droid",
+  "api.clientConfig.clientDroid",
   "models.reasoningEffort.minimal",
   "models.reasoningEffort.max",
   "models.reasoningEffort.ultra",
@@ -213,11 +218,18 @@ const INTENTIONAL_ENGLISH = new Set<TKey>([
   // untranslated `~$`); the templates are pure placeholders on purpose.
   "logs.cost.approximate",
   "logs.cost.lowerBound",
+  // "Headroom" is the sidecar's feature name; every locale keeps it verbatim.
+  "nav.headroom",
+  "headroom.title",
   // Protocol wire names on the Logs protocol path, and the IR acronym beside them.
   "logs.protocol.wire.responses",
   "logs.protocol.wire.chat",
   "logs.protocol.wire.messages",
   "logs.protocol.hop.ir",
+  // The consolidation phase's name is the ordinary French noun, spelled exactly as in English.
+  // Inventing a synonym would also break the pair with the extract row, whose French label is
+  // "Extraction".
+  "memoryModels.consolidation",
 ]);
 
 function placeholders(value: string): string[] {

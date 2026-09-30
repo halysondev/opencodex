@@ -11,6 +11,7 @@ import {
   classifyError,
   cyberPolicyErrorType,
   CYBER_POLICY_ERROR_CODE,
+  CLIENT_VERSION_TOO_OLD_CODE,
   isCyberPolicyCode,
   type OcxErrorPayload,
 } from "../lib/errors";
@@ -25,10 +26,13 @@ export function formatErrorResponse(
   if (isCyberPolicyCode(options?.code)) {
     error.code = CYBER_POLICY_ERROR_CODE;
     error.type = cyberPolicyErrorType(type);
+  } else if (options?.code === CLIENT_VERSION_TOO_OLD_CODE) {
+    error.code = CLIENT_VERSION_TOO_OLD_CODE;
   }
   // Only the allowlisted transport verdicts survive this formatter. Do not forward
   // arbitrary provider codes, and preserve the existing cyber-policy precedence.
   const replayBlocked = error.code !== CYBER_POLICY_ERROR_CODE
+    && error.code !== CLIENT_VERSION_TOO_OLD_CODE
     && isNonReplayableUpstreamCode(options?.code);
   if (replayBlocked) error.code = options!.code!;
   // The replay refusal owns its status as well as its code. A combo or adapter formatter

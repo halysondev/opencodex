@@ -54,6 +54,34 @@ export interface MuseOAuthMetadata {
   tierName?: string;
 }
 
+/**
+ * Account-scoped Claude Code identity — the stable triple a subscription OAuth
+ * request carries in `metadata.user_id` and `x-claude-code-session-id`.
+ *
+ * Populated on local-CLI import (from ~/.claude.json + .credentials.json) or
+ * minted on OAuth login. The device/account pair is per ACCOUNT, not per
+ * machine: reusing one machine's identity for an unrelated Anthropic account is
+ * exactly the correlation Anthropic's anti-abuse looks for (dario
+ * chooseClientIdentity). `sessionId` is only the rotation SEED — the request
+ * path rotates it on an idle window (src/claude/cc-fingerprint.ts).
+ *
+ * Never returned by management APIs; persisted only inside the protected
+ * auth-store boundary.
+ */
+export interface AnthropicOAuthMetadata {
+  /** `userID`/`installId`/`deviceId` from ~/.claude.json, or a minted uuid. */
+  deviceId?: string;
+  /** `oauthAccount.accountUuid` — the Anthropic account this login belongs to. */
+  accountUuid?: string;
+  /** First session id; the rotation registry seeds from it then mints fresh. */
+  sessionId?: string;
+  /** Profile observations — display only, never part of request signing. */
+  organizationUuid?: string;
+  organizationType?: string;
+  rateLimitTier?: string;
+  seatTier?: string;
+}
+
 export type OAuthCredentials = {
   refresh: string;
   access: string;
@@ -73,17 +101,27 @@ export type OAuthCredentials = {
   kiro?: KiroOAuthMetadata;
   /** Never returned by management APIs; persisted only inside the protected auth-store boundary. */
   muse?: MuseOAuthMetadata;
+  /** Never returned by management APIs; persisted only inside the protected auth-store boundary. */
+  anthropic?: AnthropicOAuthMetadata;
 };
 
 /** One logged-in account inside a provider's account set (multiauth). */
 export interface ProviderAccount {
   /** Stable short id, generated once at append time; never re-derived after rotation. */
   id: string;
+  /** Rotated on each explicit login and retained across token refreshes. */
+  loginId?: string;
+  /** Native Kiro device accounts cannot use the kiro-cli reauth path. */
+  loginOrigin?: "kiro-device";
   /** User-owned display label; never participates in auth identity or routing. */
   alias?: string;
   credential: OAuthCredentials;
   /** Terminal refresh failure (invalid_grant / reused / revoked) — re-login required. */
   needsReauth?: boolean;
+  /** Operator exclusion from generic OAuth account selection until explicitly resumed. */
+  paused?: boolean;
+  /** Anthropic-only usage-switch override; absent inherits its pool default, zero disables it. */
+  autoSwitchThresholdOverride?: number;
   addedAt?: number;
 }
 

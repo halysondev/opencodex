@@ -1,0 +1,10 @@
+This distribution includes RTK 0.50.0 (https://github.com/rtk-ai/rtk), licensed
+under the Apache License, Version 2.0. See the accompanying LICENSE.
+
+Upstream source: 1d87b8e719ce0a50c223cd93ca64dd16921f9aec
+Release: https://github.com/rtk-ai/rtk/releases/tag/v0.50.0
+
+OpenCodex bundles the official executables after verifying their pinned archive
+and binary SHA-256 digests. Platform distribution signing may replace executable
+signatures; the RTK program is otherwise unmodified. The OpenCodex integration
+code is covered by OpenCodex's own license.

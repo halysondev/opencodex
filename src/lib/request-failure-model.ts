@@ -217,6 +217,7 @@ const RECOVERY_KIND_CAUSE = {
   "transient-5xx": "upstream-fault",
   "connection-reset": "transport-ambiguous",
   "oauth-401": "credential-rejected",
+  "oauth-account-403": "credential-rejected",
   "key-401": "credential-rejected",
   "key-429": "rate-limit",
   "rate-limit-429": "rate-limit",
@@ -229,6 +230,10 @@ const RECOVERY_KIND_CAUSE = {
   "opaque-blob-rejection": "ciphertext-refusal",
   "empty-completion": "empty-output",
   "reasoning-effort-downgrade": "parameter-rejected",
+  // The subscription-fingerprint 400s (beta flag, effort rung, max_tokens cap,
+  // long context) are all "the upstream refused this parameter for this
+  // account/model" — same cause family as the effort downgrade.
+  "anthropic-beta-400": "parameter-rejected",
   // Anthropic refused `speed: "fast"` (no usage credits, org not enabled, model outside the
   // lane); the same turn succeeds once the parameter is dropped.
   "anthropic-fast-downgrade": "parameter-rejected",

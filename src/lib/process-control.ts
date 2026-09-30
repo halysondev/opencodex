@@ -261,11 +261,14 @@ async function stopProxyGracefullyDetailed(
     if (!res.ok) return done(false);
     const body: unknown = await res.json().catch(() => null);
     const expectedTeardown = io.deferSharedTeardownNonce ? "deferred" : "performed";
+    // A sibling instance answers `not-owned`: it has no shared teardown to perform, so there is
+    // nothing left over for this caller either. A deferral it was sent is still not confirmed.
     sharedTeardownConfirmed = body !== null
       && typeof body === "object"
       && !Array.isArray(body)
       && "success" in body && body.success === true
-      && "sharedTeardown" in body && body.sharedTeardown === expectedTeardown;
+      && "sharedTeardown" in body && (body.sharedTeardown === expectedTeardown
+        || (!io.deferSharedTeardownNonce && body.sharedTeardown === "not-owned"));
   } catch {
     return done(false);
   }
@@ -279,9 +282,9 @@ async function stopProxyGracefullyDetailed(
 
 function drainDeadlineMs(): number {
   try {
-    return (loadConfig().shutdownTimeoutMs ?? 5000) + 3000;
+    return (loadConfig().shutdownTimeoutMs ?? 90_000) + 3_000;
   } catch {
-    return 8000;
+    return 93_000;
   }
 }
 

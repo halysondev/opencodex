@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, readConfigDiagnostics, saveConfig } from "../../src/config";
 import { startServer } from "../../src/server";
 import { isDataPlaneAdmissionSecret } from "../../src/server/auth-cors";
+import { resetApiKeyQuotaStateForTests } from "../../src/server/api-key-quota";
 import { ownAdmissionTokens } from "../../src/claude/auth-detect";
 import { commitClientKeyRotation, startClientKeyRotation } from "../../src/client/hub-client";
+import { usageLogPath } from "../../src/usage/log";
+import { refreshUserCostOverlays } from "../../src/usage/user-cost-overlays";
 import type { OcxConfig } from "../../src/types";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
+import { repoPath } from "../helpers/repo-root";
 
 // The /api/keys handlers had no direct test before this file: GET masking, POST
 // persistence and DELETE semantics were only ever exercised through a CLI fixture
@@ -84,6 +88,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetApiKeyQuotaStateForTests();
+  refreshUserCostOverlays({ providers: {} } as OcxConfig);
   if (previousHome === undefined) delete process.env.OPENCODEX_HOME;
   else process.env.OPENCODEX_HOME = previousHome;
   if (previousDataToken === undefined) delete process.env.OPENCODEX_API_AUTH_TOKEN;
@@ -259,7 +265,7 @@ describe("POST /api/keys", () => {
   });
 
   test("the POST handler no longer reads provider API keys", async () => {
-    const source = readFileSync(new URL("../../src/server/management/oauth-account-routes.ts", import.meta.url), "utf-8");
+    const source = readFileSync(repoPath("src/server/management/oauth-account-routes.ts"), "utf-8");
     const start = source.indexOf('url.pathname === "/api/keys" && req.method === "POST"');
     const end = source.indexOf('url.pathname === "/api/keys" && req.method === "PATCH"');
     expect(start).toBeGreaterThan(-1);
@@ -267,7 +273,15 @@ describe("POST /api/keys", () => {
     const handler = source.slice(start, end);
     expect(handler).not.toContain("p.apiKey");
     expect(handler).not.toContain("CryptoHasher");
-    expect(handler).toContain("randomBytes(20)");
+    expect(handler).toContain("issueApiKeyInProcess(config, name, fields)");
+    const issuerStart = source.indexOf("export function issueApiKeyInProcess(");
+    const issuerEnd = source.indexOf("export function revokeApiKeyInProcess(");
+    expect(issuerStart).toBeGreaterThan(-1);
+    expect(issuerEnd).toBeGreaterThan(issuerStart);
+    const issuer = source.slice(issuerStart, issuerEnd);
+    expect(issuer).not.toContain("p.apiKey");
+    expect(issuer).not.toContain("CryptoHasher");
+    expect(issuer).toContain("randomBytes(20)");
   });
 
   test.each([
@@ -835,5 +849,278 @@ describe("apiKeys config compatibility", () => {
     const loaded = loadConfig();
     expect((loaded.apiKeys ?? []).map(k => k.key)).toEqual(["ocx_data_realkey"]);
     expect(ownAdmissionTokens(loaded)).toEqual(["ocx_data_realkey"]);
+  });
+});
+
+describe("key quota write boundary", () => {
+  test("POST persists and echoes quota and scope without echoing them in later reads", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      const created = await keysRequest(server, "POST", {
+        name: "limited",
+        quota: { dailyUsd: 5, monthlyUsd: 50 },
+        allowedProviders: ["test"],
+        allowedModels: ["gpt-test"],
+      });
+      expect(created.status).toBe(201);
+      expect(created.json.quota).toEqual({ dailyUsd: 5, monthlyUsd: 50 });
+      expect(created.json.allowedProviders).toEqual(["test"]);
+      expect(created.json.allowedModels).toEqual(["gpt-test"]);
+
+      const stored = loadConfig().apiKeys ?? [];
+      expect(stored[0]!.quota).toEqual({ dailyUsd: 5, monthlyUsd: 50 });
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test.each([
+    ["a negative window", { quota: { dailyUsd: -1 } }],
+    ["a window over the cap", { quota: { weeklyUsd: 1_000_001 } }],
+    ["a string window", { quota: { monthlyUsd: "5" } }],
+    ["an unknown quota field", { quota: { yearlyUsd: 5 } }],
+    ["a non-object quota", { quota: "unlimited" }],
+  ])("POST rejects %s with 400 and persists nothing", async (_label, patch) => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      const created = await keysRequest(server, "POST", { name: "bad", ...patch });
+      expect(created.status).toBe(400);
+      expect(loadConfig().apiKeys ?? []).toHaveLength(0);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("POST rejects a raw NaN quota literal with 400", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      const created = await keysRequest(server, "POST", '{"name":"bad","quota":{"dailyUsd":NaN}}');
+      expect(created.status).toBe(400);
+      expect(loadConfig().apiKeys ?? []).toHaveLength(0);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("PATCH quota updates merge per-window, null clears, and a quota-only patch is enough", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      const created = await keysRequest(server, "POST", { name: "limited" });
+      const id = created.json.id as string;
+
+      expect((await keysRequest(server, "PATCH", { id, quota: { dailyUsd: 5 } })).status).toBe(200);
+      expect((await keysRequest(server, "PATCH", { id, quota: { weeklyUsd: 7 } })).status).toBe(200);
+      expect(loadConfig().apiKeys?.[0]?.quota).toEqual({ dailyUsd: 5, weeklyUsd: 7 });
+
+      // Renaming must not disturb the quota the caller never mentioned.
+      expect((await keysRequest(server, "PATCH", { id, name: "renamed" })).status).toBe(200);
+      expect(loadConfig().apiKeys?.[0]?.quota).toEqual({ dailyUsd: 5, weeklyUsd: 7 });
+
+      expect((await keysRequest(server, "PATCH", { id, quota: null })).status).toBe(200);
+      expect(loadConfig().apiKeys?.[0]?.quota).toBeUndefined();
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test.each([
+    ["a negative window", { quota: { dailyUsd: -0.01 } }],
+    ["a window over the cap", { quota: { monthlyUsd: 1_000_000.01 } }],
+    ["a string window", { quota: { weeklyUsd: "10" } }],
+    ["an unknown quota field", { quota: { hourlyUsd: 1 } }],
+    ["a non-object quota", { quota: 0 }],
+  ])("PATCH rejects %s with 400 and leaves the stored quota alone", async (_label, patch) => {
+    const config = baseConfig();
+    config.apiKeys = [{ id: "kept", name: "original", key: "fixture-key", createdAt: "2026-01-01T00:00:00Z", quota: { dailyUsd: 3 } }];
+    saveConfig(config);
+    const server = startServer(0);
+    try {
+      expect((await keysRequest(server, "PATCH", { id: "kept", ...patch })).status).toBe(400);
+      expect(loadConfig().apiKeys?.[0]?.quota).toEqual({ dailyUsd: 3 });
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("PATCH with no recognized field names quota in the error", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      const created = await keysRequest(server, "POST", { name: "keep" });
+      const res = await keysRequest(server, "PATCH", { id: created.json.id });
+      expect(res.status).toBe(400);
+      expect(String(res.json.error)).toContain("quota");
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("POST /api/keys/quota/reset", () => {
+  /** A $1 spend row for `keyId` under the base config's $1/1M-token overlay. */
+  function seedSpendRow(keyId: string): void {
+    const config = baseConfig();
+    config.providers.test!.modelCosts = { "gpt-test": { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } };
+    refreshUserCostOverlays(config);
+    appendFileSync(usageLogPath(), `${JSON.stringify({
+      requestId: `seed-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+      provider: "test",
+      model: "gpt-test",
+      apiKeyId: keyId,
+      admissionKind: "configured",
+      status: 200,
+      durationMs: 10,
+      usageStatus: "reported",
+      usage: { inputTokens: 1_000_000, outputTokens: 0 },
+    })}\n`, "utf-8");
+  }
+
+  test("reset-one stamps quotaResetAt, zeroes reported spend, and persists", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      const created = await keysRequest(server, "POST", { name: "limited", quota: { dailyUsd: 10 } });
+      const id = created.json.id as string;
+      seedSpendRow(id);
+
+      const before = await keysRequest(server, "GET");
+      const beforeRow = (before.json.keys as Array<Record<string, unknown>>)[0]!;
+      expect((beforeRow.spend as Record<string, unknown>).dailyUsd).toBe(1);
+
+      const reset = await managementRequest(server, "/api/keys/quota/reset", "POST", { id });
+      expect(reset.status).toBe(200);
+      expect(reset.json.ok).toBe(true);
+      const resetAt = reset.json.resetAt as string;
+      expect(Number.isFinite(Date.parse(resetAt))).toBe(true);
+      expect(loadConfig().apiKeys?.[0]?.quotaResetAt).toBe(resetAt);
+
+      const after = await keysRequest(server, "GET");
+      const afterRow = (after.json.keys as Array<Record<string, unknown>>)[0]!;
+      expect(afterRow.quotaResetAt).toBe(resetAt);
+      expect(afterRow.spend).toEqual({ dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 });
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("reset-all stamps every key", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      await keysRequest(server, "POST", { name: "one" });
+      await keysRequest(server, "POST", { name: "two" });
+
+      const reset = await managementRequest(server, "/api/keys/quota/reset", "POST", { all: true });
+      expect(reset.status).toBe(200);
+      const resetAt = reset.json.resetAt as string;
+      const persisted = loadConfig().apiKeys ?? [];
+      expect(persisted).toHaveLength(2);
+      for (const key of persisted) expect(key.quotaResetAt).toBe(resetAt);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test("an unknown id is 404 and writes nothing", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      await keysRequest(server, "POST", { name: "keep" });
+      const reset = await managementRequest(server, "/api/keys/quota/reset", "POST", { id: "ghost" });
+      expect(reset.status).toBe(404);
+      expect(loadConfig().apiKeys?.[0]?.quotaResetAt).toBeUndefined();
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  test.each([
+    ["an empty body", {}],
+    ["id and all together", { id: "x", all: true }],
+    ["all as a non-true value", { all: false }],
+    ["an extra field", { id: "x", note: "hi" }],
+  ])("rejects %s with 400", async (_label, body) => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      await keysRequest(server, "POST", { name: "keep" });
+      expect((await managementRequest(server, "/api/keys/quota/reset", "POST", body)).status).toBe(400);
+      expect(loadConfig().apiKeys?.[0]?.quotaResetAt).toBeUndefined();
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("GET /api/keys quota and spend fields", () => {
+  test("unset windows report 0 and every key carries a spend object", async () => {
+    saveConfig(baseConfig());
+    const server = startServer(0);
+    try {
+      await keysRequest(server, "POST", { name: "plain" });
+      const listed = await keysRequest(server, "GET");
+      const row = (listed.json.keys as Array<Record<string, unknown>>)[0]!;
+      expect(row.quota).toEqual({ dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0 });
+      expect(row.quotaResetAt).toBeUndefined();
+      expect(row.spend).toEqual({ dailyUsd: 0, weeklyUsd: 0, monthlyUsd: 0, unpricedRequests: 0 });
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("GET /api/keys/scope-options", () => {
+  test("lists provider destinations and excludes combo rows", async () => {
+    const config = baseConfig();
+    // Static catalogs: the public-list gather must not depend on a live /models fetch.
+    config.providers.test = { adapter: "openai-chat", baseUrl: "https://example.test/v1", apiKey: "k", models: ["gpt-test"], liveModels: false };
+    config.providers.second = { adapter: "openai-chat", baseUrl: "https://other.test/v1", apiKey: "k", models: ["other-model"], liveModels: false };
+    config.combos = { pair: { strategy: "failover", targets: [{ provider: "test", model: "gpt-test" }, { provider: "second", model: "other-model" }] } };
+    saveConfig(config);
+    const server = startServer(0);
+    try {
+      const res = await managementRequest(server, "/api/keys/scope-options", "GET");
+      expect(res.status).toBe(200);
+      const providers = res.json.providers as string[];
+      expect(providers).toEqual([...providers].sort());
+      expect(providers).not.toContain("combo");
+      const models = res.json.models as Array<Record<string, unknown>>;
+      expect(models.every(m => m.provider !== "combo")).toBe(true);
+      expect(models.some(m => m.value === "combo/pair")).toBe(false);
+      expect(models).toContainEqual({ value: "test/gpt-test", publicId: "test/gpt-test", provider: "test" });
+    } finally {
+      await server.stop(true);
+    }
+  });
+});
+
+describe("data-plane credentials on /api/keys", () => {
+  test.each([
+    ["a bearer token", (key: string) => ({ authorization: `Bearer ${key}` })],
+    ["the dedicated header", (key: string) => ({ "x-opencodex-api-key": key })],
+  ])("a generated ocx_data_ key sent as %s gets 401, never key management", async (_label, header) => {
+    const config = baseConfig();
+    const dataKey = `ocx_data_${"c".repeat(40)}`;
+    config.apiKeys = [{ id: "data", name: "data", key: dataKey, createdAt: "2026-01-01T00:00:00Z" }];
+    saveConfig(config);
+    const server = startServer(0);
+    try {
+      for (const method of ["GET", "POST"]) {
+        const res = await fetch(new URL("/api/keys", server.url), {
+          method,
+          headers: { "content-type": "application/json", ...header(dataKey) },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        });
+        expect(res.status).toBe(401);
+      }
+      expect(loadConfig().apiKeys ?? []).toHaveLength(1);
+    } finally {
+      await server.stop(true);
+    }
   });
 });

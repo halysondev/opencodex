@@ -56,6 +56,29 @@ export interface OcxParsedRequest {
   options: OcxRequestOptions;
   _rawBody?: unknown;
   /**
+   * The client's original Anthropic Messages body, stashed by the /v1/messages
+   * translator before the Responses-shaped replay. The anthropic adapter's OAuth
+   * branch rebuilds the upstream request from THIS body — the genuine Claude Code
+   * path needs its system blocks, tool list and field order preserved, which the
+   * internal round-trip cannot guarantee.
+   */
+  _anthropicSourceBody?: Record<string, unknown>;
+  /** CC-identity headers forwarded verbatim by the genuine-CC path (dario). */
+  _anthropicClientHeaders?: Record<string, string>;
+  /** The client's raw anthropic-beta header — merge input for the computed beta set. */
+  _anthropicClientBeta?: string;
+  /**
+   * The serving OAuth account's Claude Code identity, stamped once the transport
+   * resolves the credential. `accountId` keys the session/beta caches; the
+   * device/account/session triple lands in `metadata.user_id`.
+   */
+  _anthropicIdentity?: {
+    accountId: string;
+    deviceId?: string;
+    accountUuid?: string;
+    sessionSeed?: string;
+  };
+  /**
    * Boundary between replayed history and this turn's newly appended input. Usually the
    * items the proxy restored from local previous_response_id state; also set when the
    * CLIENT already carried that history verbatim and the proxy skipped the prepend.
@@ -144,6 +167,12 @@ export interface OcxParsedRequest {
   /** Manual compaction moved to another provider: summarize portably even on a canonical ChatGPT target. */
   _portableCompaction?: boolean;
   /**
+   * Codex memory pipeline phase this turn belongs to, when `memoryModels` routes it
+   * (src/server/responses/memory-models.ts). Read at the effort choke point, which runs after the
+   * route is known.
+   */
+  _memoryModelPhase?: "extract" | "consolidation";
+  /**
    * True when the current request newly introduced a stored compaction summary/marker. Historical
    * markers restored by previous_response_id expansion were already acknowledged and do not reset
    * provider-private continuation caches again on every later turn.
@@ -221,8 +250,17 @@ export interface OcxImageContent {
 
 export interface OcxVideoContent {
   type: "video";
-  /** A base64 `data:` URL from an OpenAI-compatible `video_url` part. */
+  /**
+   * A base64 `data:` URL from an OpenAI-compatible `video_url` part, or a URI
+   * the upstream can fetch itself (a YouTube watch URL, a Files API uri).
+   */
   videoUrl: string;
+  /**
+   * Gemini's agentic video mode, carried verbatim from the caller's
+   * `video_url.processing` (#3271). Absent for every request that does not ask
+   * for it, so no existing traffic gains a field.
+   */
+  processing?: string;
 }
 
 /**
@@ -301,6 +339,8 @@ export interface OcxRequestOptions {
   parallelToolCalls?: boolean;
   reasoning?: string;
   hideThinkingSummary?: boolean;
+  /** Provider policy: suppress raw content-channel reasoning while summaries stay visible. */
+  hideRawReasoning?: boolean;
   serviceTier?: string;
   /** Final outbound tier action, resolved after the provider/model wire is settled. */
   tierDecision?: TierDecision;
@@ -361,7 +401,7 @@ export interface OcxProviderContinuationState {
 }
 
 export type AdapterEvent =
-  | { type: "heartbeat"; replayUnsafe?: true }
+  | { type: "heartbeat"; replayUnsafe?: true; preflightReady?: true }
   | { type: "text_delta"; text: string; phase?: OcxMessagePhase }
   | { type: "thinking_delta"; thinking: string }
   // Anthropic extended-thinking round-trip: signature_delta for the current thinking block, and
@@ -438,6 +478,8 @@ export interface OcxUrlCitation {
  * - `totalTokens` = inputTokens + outputTokens. Never re-add cache detail on top.
  */
 export interface OcxUsage {
+  /** Provider-reported credit spend, independent of token estimates and USD pricing. */
+  providerCredits?: number;
   inputTokens: number;
   outputTokens: number;
   /**

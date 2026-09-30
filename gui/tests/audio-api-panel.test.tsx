@@ -206,14 +206,14 @@ test("unknown fields cannot write secrets to the list cache", async () => {
   audio = { ...AUDIO, apiKey: "sensitive-extra-marker" };
   await render();
   expect(container.querySelector(`${DICTATION} input`)).toBeNull();
-  expect(win.sessionStorage.getItem("ocx.apikeys.list.v2:http://localhost")).not.toContain("sensitive-extra-marker");
+  expect(win.sessionStorage.getItem("ocx.apikeys.list.v3:http://localhost")).not.toContain("sensitive-extra-marker");
 });
 
 test("old server and malformed cache audio never invent configured support", async () => {
   audio = undefined;
   let release!: () => void;
   holdKeys = new Promise(resolve => { release = resolve; });
-  win.sessionStorage.setItem("ocx.apikeys.list.v2:http://localhost", JSON.stringify({
+  win.sessionStorage.setItem("ocx.apikeys.list.v3:http://localhost", JSON.stringify({
     keys: [], claudeCodeEnabled: true,
     authMatrix: [{ endpoint: "/v1/models", bearer: "accepted", dedicated: "accepted", xApiKey: "accepted" }],
     endpoints: { baseUrl: BASE, responses: `${BASE}/responses`, chatCompletions: `${BASE}/chat/completions`, messages: `${BASE}/messages`, models: `${BASE}/models`, audio: { ...AUDIO, liveConfigured: "yes" } },

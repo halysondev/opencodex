@@ -12,6 +12,8 @@ import {
 } from "../../../src/adapters/anthropic/passthrough";
 import { createTranslatorBudget } from "../../../src/lib/translator-budget";
 import { ANTHROPIC_OAUTH_BETA, CLAUDE_CODE_SYSTEM_INSTRUCTION } from "../../../src/oauth/anthropic";
+import { CLAUDE_CODE_HEADERS, claudeCodeSessionId } from "../../../src/adapters/client-fingerprint";
+import { claudeStaticHeaders, detectClaudeCliVersion } from "../../../src/claude/cc-fingerprint";
 import type { OcxParsedRequest, OcxProviderConfig } from "../../../src/types";
 
 const ACCESS = "fixture-oauth-access-token";
@@ -51,7 +53,7 @@ const SOURCE = {
 };
 
 describe("buildAnthropicMessagesPassthroughRequest with OAuth", () => {
-  test("places the credential and fingerprint exactly as the adapter does", async () => {
+  test("places native OAuth credentials and preserves each lane's declared fingerprint", async () => {
     const built = buildAnthropicMessagesPassthroughRequest(oauthProvider(), "claude-wire", SOURCE);
     expect(built.url).toBe("https://api.anthropic.com/v1/messages");
     expect(built.headers.Authorization).toBe(`Bearer ${ACCESS}`);
@@ -66,13 +68,18 @@ describe("buildAnthropicMessagesPassthroughRequest with OAuth", () => {
     } as unknown as OcxParsedRequest;
     const adapterRequest = await createAnthropicAdapter(oauthProvider())
       .buildRequest(parsed, { headers: new Headers(), translatorBudget: createTranslatorBudget() });
-    const adapterHeaders = adapterRequest.headers as Record<string, string>;
-    const perRequest = new Set(["x-client-request-id"]);
-    for (const [name, value] of Object.entries(adapterHeaders)) {
-      if (name === "Content-Type" || perRequest.has(name)) continue;
-      expect(built.headers[name]).toBe(value);
+    const nativeHeaders = new Headers(built.headers);
+    const adapterHeaders = new Headers(adapterRequest.headers);
+    for (const name of ["authorization", "content-type", "anthropic-version"]) {
+      expect(nativeHeaders.get(name)).toBe(adapterHeaders.get(name));
     }
-    expect(Object.keys(built.headers).sort()).toEqual(Object.keys(adapterHeaders).sort());
+    // The byte-preserving native lane keeps upstream's baseline identity; Haly's
+    // translated subscription body uses the captured CLI identity alongside its envelope.
+    for (const [name, value] of Object.entries(CLAUDE_CODE_HEADERS)) expect(nativeHeaders.get(name)).toBe(value);
+    expect(nativeHeaders.get("x-claude-code-session-id")).toBe(claudeCodeSessionId(ACCESS));
+    for (const [name, value] of Object.entries(claudeStaticHeaders(detectClaudeCliVersion()))) {
+      expect(adapterHeaders.get(name)).toBe(value);
+    }
   });
 
   test("an OAuth token is refused for any destination but api.anthropic.com", () => {

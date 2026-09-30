@@ -268,6 +268,15 @@
       ]
     },
     {
+      "path": "providers/anthropic-account-thresholds.md",
+      "tier": 4,
+      "title": "Anthropic Account Thresholds",
+      "scope": "Account-owned usage thresholds, inheritance, routing boundaries and durable policy changes.",
+      "documents": [
+        "src/oauth/"
+      ]
+    },
+    {
       "path": "providers-and-adapters.md",
       "tier": 4,
       "title": "Providers And Adapters",
@@ -282,6 +291,16 @@
         "src/server/",
         "src/types/",
         "src/web-search/"
+      ]
+    },
+    {
+      "path": "providers/anthropic-account-pool.md",
+      "tier": 4,
+      "title": "Anthropic Account Pool",
+      "scope": "Anthropic OAuth account pause, model routes, and quota labels.",
+      "documents": [
+        "src/oauth/",
+        "src/providers/"
       ]
     },
     {
@@ -337,6 +356,18 @@
         "src/oauth/",
         "src/providers/",
         "src/responses/",
+        "src/server/"
+      ]
+    },
+    {
+      "path": "providers/anthropic.md",
+      "tier": 4,
+      "title": "Anthropic Provider",
+      "scope": "Claude subscription OAuth fingerprint, local Claude Code credential import, and capability-rejection recovery.",
+      "documents": [
+        "src/adapters/",
+        "src/claude/",
+        "src/oauth/",
         "src/server/"
       ]
     },
@@ -450,10 +481,21 @@
       "title": "Background Service And Sidecars",
       "scope": "Service install/repair, platform launchers, tray, and sidecar processes.",
       "documents": [
+        "src/lib/",
         "src/server/",
+        "src/headroom/",
         "src/service-manager-probe.ts",
         "src/sidecar/",
         "src/update/"
+      ]
+    },
+    {
+      "path": "ops/plugins.md",
+      "tier": 6,
+      "title": "Local Plugins",
+      "scope": "Plugin loading from OPENCODEX_HOME/plugins and the upstream rewrite slot plugins attach to.",
+      "documents": [
+        "src/plugins/"
       ]
     },
     {
@@ -541,6 +583,17 @@
       "scope": "Test-runner home and case-scoped lifecycle teardown ordering.",
       "documents": [
         "tests/"
+      ]
+    },
+    {
+      "path": "ops/bundled-tools.md",
+      "tier": 6,
+      "title": "Bundled Command Tools",
+      "scope": "Pinned RTK executables, package assembly, resource lookup, and command forwarding.",
+      "documents": [
+        "src/rtk/",
+        "src/cli/",
+        "src/lib/"
       ]
     }
   ],

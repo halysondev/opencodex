@@ -17,7 +17,31 @@ import type {
   OcxUsage,
 } from "../types";
 import { isAllowedToolChoice, namespacedToolName, resolveToolChoiceWireName, toolChoiceToolPredicate } from "../types";
-import { ANTHROPIC_OAUTH_BETA, CLAUDE_CODE_SYSTEM_INSTRUCTION, applyClaudeToolPrefix, stripClaudeToolPrefix } from "../oauth/anthropic";
+import { ANTHROPIC_OAUTH_BETA, applyClaudeToolPrefix, stripClaudeToolPrefix } from "../oauth/anthropic";
+import { CLAUDE_CODE_HEADERS, claudeCodeSessionId } from "./client-fingerprint";
+import {
+  applyClaudeCapabilityClamps,
+  buildClaudeBillingTag,
+  buildSynthesizedClaudeBody,
+  claudeBetaForModel,
+  claudeStaticHeaders,
+  detectClaudeCliVersion,
+  effectiveClaudeCacheControl,
+  extractClaudeClientSystemText,
+  hasClaudeCchSeed,
+  isClaudeContext1mUnavailable,
+  isGenuineClaudeCodeBody,
+  mergeClaudeClientBeta,
+  orderClaudeHeaders,
+  resolveClaudeSessionId,
+  rewriteGenuineClaudeBody,
+  stampClaudeCch,
+  stripClaudeContext1mTag,
+  stripRejectedClaudeBetas,
+  withClaudeCacheTtlBeta,
+  CLAUDE_DEFAULT_MAX_TOKENS,
+} from "../claude/cc-fingerprint";
+import { createHash, randomUUID } from "node:crypto";
 import { parseDataUrl } from "./image";
 import { enforceAnthropicImageLimits } from "./anthropic-image-guard";
 import { normalizeAnthropicImages } from "./anthropic-image-normalize";
@@ -25,12 +49,12 @@ import { normalizeAnthropicOutputSchema } from "./anthropic-output-schema";
 import { stripResponsesOnlyEncryptedMarker } from "./responses-tool-schema";
 import { identifyRoutedModel } from "./identity";
 import { redactSecretString } from "../lib/redact";
-import { CLAUDE_CODE_HEADERS, claudeCodeSessionId } from "./client-fingerprint";
 import { buildNonOpenAIToolCatalogNudgeForTools } from "./tool-catalog-nudge";
 import { decodeServerSentEvents } from "../lib/sse-decoder";
 import { isTranslatorBudgetExceededError, retainTranslatedEventBatch, type TranslatorBudget } from "../lib/translator-budget";
 import { isReasoningEffortOmitted, modelRecordValue } from "../reasoning-effort";
 import { applyAgentRouterLanguageFraming, isAgentRouterEndpoint } from "./agentrouter";
+import { rejectsCombinedSampling, rejectsForcedToolChoice, rejectsSamplingParameters, supportsExplicitThinkingDisable, usesAdaptiveThinking, usesBetweenToolsFloor } from "./anthropic-model-contract";
 
 /** Map a user content part to an Anthropic content block (text or image source). */
 function toAnthropicContentPart(p: OcxContentPart): unknown {
@@ -564,7 +588,10 @@ export function applyAnthropicOAuthAuth(headers: Record<string, string>, accessT
 /** The provider's Messages endpoint, refusing a base URL with an unresolved `{placeholder}`. */
 export function resolveAnthropicMessagesUrl(provider: Pick<OcxProviderConfig, "baseUrl">): string {
   const url = anthropicMessagesUrl(provider.baseUrl);
-  const unresolvedPlaceholder = url.match(/\{[^}]*\}/)?.[0];
+  // indexOf instead of a regex: \{[^}]*\} is quadratic on brace-only input (CodeQL js/polynomial-redos).
+  const openBrace = url.indexOf("{");
+  const closeBrace = openBrace === -1 ? -1 : url.indexOf("}", openBrace);
+  const unresolvedPlaceholder = closeBrace === -1 ? undefined : url.slice(openBrace, closeBrace + 1);
   if (unresolvedPlaceholder) {
     throw new Error(`anthropic baseUrl contains unresolved ${unresolvedPlaceholder}`);
   }
@@ -582,88 +609,6 @@ function reasoningBudget(effort: string): number {
     case "medium":
     default: return 8192;
   }
-}
-
-/**
- * Claude families that moved to adaptive thinking: they 400 on `thinking.type: "enabled"`
- * ("Use \"thinking.type.adaptive\" and \"output_config.effort\" to control thinking behavior."),
- * while older families (Haiku 4.5, Sonnet 4.x, Opus <= 4.6) 400 on `adaptive` — so both wire
- * shapes must stay. Verified against api.anthropic.com: sonnet-5, fable-5, opus-4-7 and opus-4-8
- * require adaptive; haiku-4-5 and sonnet-4-5 reject it; opus-4-6/sonnet-4-6 accept both.
- */
-const ADAPTIVE_THINKING_FAMILY_MINIMUMS: Record<string, readonly [major: number, minor: number]> = {
-  sonnet: [5, 0],
-  opus: [4, 7],
-  fable: [0, 0],
-};
-
-/**
- * Family/version parse for a Claude model id, tolerant of a routing prefix.
- *
- * `parsed.modelId` is not always bare, and the slash can fall on either side.
- * A `modelMap` entry may point at a routed destination such as
- * `anthropic/claude-sonnet-5` (prefix), while a custom provider may expose a
- * native id such as `claude-sonnet-5/variant` (suffix); both survive routing's
- * known-id decoding. So this matches the segment that actually begins with
- * `claude-` rather than assuming it is the first or the last one. A capability
- * predicate that quietly returns false is worse than one that throws — the
- * request just goes out wrong.
- *
- * Minor is 1-2 digits with a non-digit lookahead so date-pinned ids
- * ("claude-opus-4-20250514") parse as minor 0 instead of minor 20250514;
- * suffixed ids ("claude-opus-4-8[1m]") still match.
- */
-function claudeFamilyVersion(modelId: string): { family: string; major: number; minor: number } | undefined {
-  // Find the segment that actually starts with `claude-`, rather than assuming it is either
-  // the first (breaks `anthropic/claude-sonnet-5`) or the last (breaks `claude-sonnet-5/variant`,
-  // where the slash carries a vendor suffix rather than a routing prefix).
-  const match = /(?:^|\/)claude-([a-z]+)-(\d+)(?:[.-](\d{1,2}))?(?!\d)/i.exec(modelId);
-  if (!match) return undefined;
-  return {
-    family: match[1]!.toLowerCase(),
-    major: Number(match[2]),
-    minor: match[3] === undefined ? 0 : Number(match[3]),
-  };
-}
-
-function meetsFamilyMinimum(
-  modelId: string,
-  minimums: Record<string, readonly [major: number, minor: number]>,
-): boolean {
-  const parsed = claudeFamilyVersion(modelId);
-  if (!parsed) return false;
-  const minimum = minimums[parsed.family];
-  if (!minimum) return false;
-  return parsed.major > minimum[0] || (parsed.major === minimum[0] && parsed.minor >= minimum[1]);
-}
-
-function usesAdaptiveThinking(modelId: string): boolean {
-  return meetsFamilyMinimum(modelId, ADAPTIVE_THINKING_FAMILY_MINIMUMS);
-}
-
-/**
- * Claude families that (a) think by DEFAULT when the request omits `thinking`,
- * and (b) accept an explicit `thinking: {type: "disabled"}` to turn it off.
- *
- * Deliberately NOT `usesAdaptiveThinking()`, which answers a different question
- * (which wire shape a family accepts). The two sets differ in both directions:
- * Fable always thinks and REJECTS an explicit disable, while Opus 4.7/4.8 use
- * the adaptive wire but leave thinking off when the field is omitted, so they
- * need no disable at all. Seeded with the family where the defect reproduces
- * (#545); widen only with vendor evidence, since a wrong entry here turns a
- * silent truncation into a 400.
- */
-const EXPLICIT_THINKING_DISABLE_FAMILY_MINIMUMS: Record<string, readonly [major: number, minor: number]> = {
-  sonnet: [5, 0],
-};
-
-function supportsExplicitThinkingDisable(modelId: string): boolean {
-  return meetsFamilyMinimum(modelId, EXPLICIT_THINKING_DISABLE_FAMILY_MINIMUMS);
-}
-
-function rejectsForcedToolChoice(modelId: string): boolean {
-  const parsed = claudeFamilyVersion(modelId);
-  return parsed?.family === "opus" && parsed.major === 5 && parsed.minor === 5;
 }
 
 /** `output_config.effort` accepts low|medium|high|xhigh|max — "minimal" is rejected with a 400. */
@@ -1022,6 +967,185 @@ function normalizeAnthropicInputSchema(schema: unknown): Record<string, unknown>
   return normalized;
 }
 
+// ── Claude Code subscription (OAuth) request path — dario parity ──
+// Everything in this block exists to make the upstream request indistinguishable
+// from first-party Claude Code traffic so it bills against the subscription, not
+// the API meter: billing-tag system block, agent identity, the captured CC system
+// prompt, the model-conditional beta set, CC's header set/order, metadata.user_id,
+// and CC's cache-breakpoint placement. See src/claude/cc-fingerprint.ts for the
+// primitives and the per-behavior dario references.
+
+/** Stable per-account identity when the credential predates the anthropic metadata
+ *  fields — derived, not random, so one account keeps ONE device/account pair across
+ *  restarts without a store write from the request path (dario mints at login). */
+function deriveClaudeIdentityField(kind: "device" | "account", accountKey: string): string {
+  const h = createHash("sha256").update(`ocx-anthropic-${kind}:${accountKey}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+/** Map the internal reasoning knob onto the wire effort vocabulary dario forwards. */
+function claudeEffortFromReasoning(reasoning: string | undefined): string | undefined {
+  if (reasoning === undefined || reasoning === "none") return reasoning === "none" ? "low" : undefined;
+  const mapped = adaptiveEffort(reasoning);
+  return mapped === "none" ? "low" : mapped;
+}
+
+/**
+ * Build the upstream request for an `authMode: "oauth"` anthropic provider.
+ * Two body paths, both ending in the same header/beta/metadata stamping:
+ *
+ *  - genuine Claude Code body (billing-tag + CC-origin system blocks): rewritten
+ *    byte-faithfully — client's own tools/system/order kept, only the billing tag,
+ *    metadata.user_id and cache breakpoints are replaced (dario genuine branch);
+ *  - anything else: the synthesized CC body (template system + client content).
+ */
+async function buildClaudeSubscriptionRequest(
+  parsed: OcxParsedRequest,
+  provider: OcxProviderConfig,
+  incoming: IncomingMeta | undefined,
+  toolNames: ReturnType<typeof buildToolNameTransforms>,
+): Promise<{ url: string; method: string; headers: Record<string, string>; body: string; tierLog?: AdapterTierMetadata }> {
+  const url = resolveAnthropicMessagesUrl(provider);
+
+  const cliVersion = detectClaudeCliVersion();
+  const idIn = parsed._anthropicIdentity;
+  const accountKey = idIn?.accountId ?? "default";
+  const sessionId = resolveClaudeSessionId(accountKey, idIn?.sessionSeed);
+  const identity = {
+    deviceId: idIn?.deviceId ?? deriveClaudeIdentityField("device", accountKey),
+    accountUuid: idIn?.accountUuid ?? deriveClaudeIdentityField("account", accountKey),
+    sessionId,
+  };
+  const cch = hasClaudeCchSeed(cliVersion) ? randomUUID().replace(/-/g, "").slice(0, 5) : null;
+  const billingTag = buildClaudeBillingTag(cliVersion, cch);
+  const clientHeaders = parsed._anthropicClientHeaders ?? {};
+  const clientBeta = parsed._anthropicClientBeta;
+  const sourceBody = parsed._anthropicSourceBody;
+  const requestModel = parsed.modelId;
+  const wireModel = stripClaudeContext1mTag(requestModel);
+
+  // One cache-control decision feeds both the body stamps and the beta pairing:
+  // a client-requested ttl:"1h" requires the extended-cache-ttl flag on the wire
+  // or upstream ignores the ttl (the pair travels together on real CC).
+  const cacheControl = effectiveClaudeCacheControl(sourceBody ?? {}, clientBeta);
+  // Beta set: model-conditional base → client betas merged after → the ttl pair
+  // flag → account-rejected flags stripped (learned by the 400 recovery arm).
+  const skipContext1m = isClaudeContext1mUnavailable(accountKey);
+  let beta = claudeBetaForModel(requestModel, skipContext1m);
+  beta = mergeClaudeClientBeta(beta, clientBeta);
+  beta = withClaudeCacheTtlBeta(beta, cacheControl);
+  beta = stripRejectedClaudeBetas(beta, accountKey);
+
+  const configuredMaxOut = modelRecordValue(provider.modelMaxOutputTokens, wireModel)
+    ?? provider.defaultMaxOutputTokens;
+  const maxTokens = typeof configuredMaxOut === "number" && configuredMaxOut > 0
+    ? configuredMaxOut
+    : CLAUDE_DEFAULT_MAX_TOKENS;
+
+  let body: Record<string, unknown>;
+  const genuine = sourceBody !== undefined && isGenuineClaudeCodeBody(sourceBody);
+  if (genuine) {
+    body = rewriteGenuineClaudeBody(sourceBody, billingTag, cacheControl, identity);
+    body.model = wireModel;
+    // Routed turns always stream internally (the response layer folds for
+    // non-streaming clients); a genuine body's stream flag stays client-authored
+    // upstream, so pin it here like the synthesized branches do.
+    body.stream = parsed.stream;
+  } else if (sourceBody !== undefined) {
+    // Anthropic-native non-genuine client: synthesize from ITS body — messages,
+    // tools and system text are the client's own (dario preserveTools shape).
+    const messages = Array.isArray(sourceBody.messages) ? sourceBody.messages as Array<Record<string, unknown>> : [];
+    const clientOutputConfig = sourceBody.output_config as Record<string, unknown> | undefined;
+    body = buildSynthesizedClaudeBody({
+      model: wireModel,
+      messages,
+      clientSystemText: extractClaudeClientSystemText(sourceBody),
+      tools: Array.isArray(sourceBody.tools) ? sourceBody.tools as Array<Record<string, unknown>> : undefined,
+      maxTokens,
+      // The wire stream flag is the transport's internal decision (routed turns always
+      // stream and fold for non-streaming clients) — never the client's own preference.
+      stream: parsed.stream,
+      billingTag,
+      cacheControl,
+      identity,
+      clientEffort: clientOutputConfig?.effort,
+      clientThinking: sourceBody.thinking as Record<string, unknown> | undefined,
+    });
+    // The client's own structured-output contract rides on output_config.format
+    // (dario --preserve-output-format) — dropping it silently breaks strict parsers.
+    if (clientOutputConfig?.format !== undefined) {
+      const oc = body.output_config as Record<string, unknown> | undefined;
+      body.output_config = { ...(oc ?? {}), format: clientOutputConfig.format };
+    }
+  } else {
+    // Translated inbound (Responses/chat → anthropic OAuth): the converted
+    // Anthropic-shape parts get dressed in the CC template.
+    const { system, messages } = messagesToAnthropicFormat(parsed, toolNames);
+    if (isAgentRouterEndpoint(provider.baseUrl)) applyAgentRouterLanguageFraming(messages);
+    await normalizeAnthropicImages(messages, {
+      tierBias: incoming?.imageTierBias ?? 0,
+      abortSignal: incoming?.abortSignal,
+    });
+    enforceAnthropicImageLimits(messages);
+    const tools = toolsToAnthropicFormat(parsed, toolNames);
+    const clientEffort = claudeEffortFromReasoning(
+      parsed.options.reasoning ?? defaultReasoningEffort(provider, parsed.modelId),
+    );
+    body = buildSynthesizedClaudeBody({
+      model: wireModel,
+      messages: messages as Array<Record<string, unknown>>,
+      clientSystemText: system,
+      tools: tools as Array<Record<string, unknown>> | undefined,
+      maxTokens,
+      stream: parsed.stream,
+      billingTag,
+      cacheControl,
+      identity,
+      clientEffort,
+    });
+    const textFormat = parsed.options.textFormat;
+    if (textFormat?.type === "json_schema" && textFormat.schema) {
+      const oc = body.output_config as Record<string, unknown> | undefined;
+      body.output_config = {
+        ...(oc ?? {}),
+        format: { type: "json_schema", schema: normalizeAnthropicOutputSchema(textFormat.schema) },
+      };
+    }
+  }
+
+  applyClaudeCapabilityClamps(body, wireModel);
+  // The caller's explicit tool prohibition survives the subscription envelope.
+  if (parsed.options.toolChoice === "none") body.tool_choice = { type: "none" };
+  const fastSpeed = anthropicFastSpeed(parsed, provider);
+  if (fastSpeed) body.speed = fastSpeed.value;
+
+  const headers: Record<string, string> = {
+    ...claudeStaticHeaders(cliVersion),
+    // The genuine-CC client's own identity headers are the authentic article —
+    // forwarded over the template values (dario forwards on genuine/passthrough).
+    ...(genuine ? clientHeaders : {}),
+    "Authorization": `Bearer ${provider.apiKey}`,
+    "x-claude-code-session-id": sessionId,
+    "anthropic-version": "2023-06-01",
+    "anthropic-beta": beta,
+    // A genuine CC request already carries a real request id; synthesizing over
+    // it discards information for no gain (dario forwardedIdentity ?? randomUUID).
+    "x-client-request-id": clientHeaders["x-client-request-id"] ?? randomUUID(),
+    "x-stainless-timeout": clientHeaders["x-stainless-timeout"] ?? "600",
+  };
+  if (provider.headers) Object.assign(headers, provider.headers);
+  mergeAnthropicBetaHeader(headers, fastSpeed?.betas ?? []);
+
+  const serialized = stampClaudeCch(JSON.stringify(body), cliVersion);
+  return {
+    url, method: "POST", headers: orderClaudeHeaders(headers), body: serialized,
+    tierLog: createAdapterTierMetadata(
+      parsed.options.tierObservation, parsed.options.tierDecision,
+      fastSpeed ? "anthropic-speed" : null, fastSpeed?.value ?? null,
+    ),
+  };
+}
+
 export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetention?: "none" | "short" | "long"): ProviderAdapter {
   const isOAuth = provider.authMode === "oauth";
   const toolNames = buildToolNameTransforms(provider);
@@ -1036,6 +1160,10 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
           throw new Error("anthropic oauth token missing — run ocx login anthropic");
         }
         throw new Error("anthropic provider requires a non-empty apiKey (authMode: key)");
+      }
+
+      if (isOAuth) {
+        return await buildClaudeSubscriptionRequest(parsed, provider, incoming, toolNames);
       }
 
       const { system, messages } = messagesToAnthropicFormat(parsed, toolNames);
@@ -1068,13 +1196,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
         stream: parsed.stream,
         max_tokens: parsed.options.maxOutputTokens ?? omittedMaxTokens,
       };
-      if (isOAuth) {
-        // Claude OAuth (Pro/Max) requires the first system block to be the Claude Code identity.
-        body.system = [
-          { type: "text", text: CLAUDE_CODE_SYSTEM_INSTRUCTION },
-          ...(system ? [{ type: "text", text: system }] : []),
-        ];
-      } else if (system) {
+      if (system) {
         body.system = [{ type: "text", text: system }];
       }
       if (tools) body.tools = tools;
@@ -1093,13 +1215,24 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
       const effectiveReasoning = parsed.options.reasoning ?? defaultReasoningEffort(provider, parsed.modelId);
       if (effectiveReasoning === "none" && supportsExplicitThinkingDisable(parsed.modelId)) {
         body.thinking = { type: "disabled" };
+      } else if (effectiveReasoning === "none" && usesBetweenToolsFloor(parsed.modelId)) {
+        // Sonnet 5.5 rejects `disabled`; `between_tools` is its lowest setting and turns off up-front
+        // thinking. No effort is sent: the API default (high) is inside the range it accepts.
+        body.thinking = { type: "between_tools" };
+        delete body.temperature;
+        delete body.top_p;
       } else if (typeof effectiveReasoning === "string" && effectiveReasoning !== "none") {
         if (usesAdaptiveThinking(parsed.modelId)) {
           // Adaptive-thinking models replace the token budget with an effort knob and reject
           // `thinking.type: "enabled"` outright. `max_tokens` still caps thinking plus visible
           // output, so high effort needs the same total-token headroom as budget thinking or a
           // default 8192-token request can spend everything on thought and return empty text.
-          body.thinking = { type: "adaptive" };
+          // Opus 4.7+ defaults `display` to "omitted": the stream then carries signature-only
+          // thinking blocks, so a Chat client sees minutes of heartbeats and no reasoning delta
+          // during a long think (#5824). Ask for summarized thinking unless the caller hides it.
+          body.thinking = parsed.options.hideThinkingSummary
+            ? { type: "adaptive" }
+            : { type: "adaptive", display: "summarized" };
           const effort = adaptiveEffort(effectiveReasoning);
           body.output_config = { effort };
           const explicitMaxOut = parsed.options.maxOutputTokens;
@@ -1124,6 +1257,16 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
         }
         // Extended thinking disallows temperature != 1 and top_p — drop both or the API 400s.
         delete body.temperature;
+        delete body.top_p;
+      }
+
+      if (rejectsSamplingParameters(parsed.modelId)) {
+        // Opus 4.7+, Sonnet 5+ and Fable 400 on any non-default sampling parameter, with or without
+        // thinking (anthropic-model-contract.ts).
+        delete body.temperature;
+        delete body.top_p;
+      } else if (body.temperature !== undefined && body.top_p !== undefined && rejectsCombinedSampling(parsed.modelId)) {
+        // The 4.5/4.6 families take either field alone but 400 on both; temperature is the one kept.
         delete body.top_p;
       }
 
@@ -1156,7 +1299,7 @@ export function createAnthropicAdapter(provider: OcxProviderConfig, cacheRetenti
       }
       const selectedToolChoice = body.tool_choice as { type?: string; name?: string } | undefined;
       if (rejectsForcedToolChoice(parsed.modelId) && (selectedToolChoice?.type === "any" || selectedToolChoice?.type === "tool")) {
-        // Claude Opus 5.5 rejects forced tool use regardless of whether adaptive thinking is
+        // Claude Opus 5.5 and Sonnet 5.5 reject forced tool use regardless of whether adaptive thinking is
         // explicit. Anthropic's migration guidance recommends auto plus a prompt instruction;
         // this keeps the request usable but cannot preserve the caller's forced-tool guarantee.
         if (selectedToolChoice.type === "tool" && Array.isArray(body.tools)) {

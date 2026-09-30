@@ -10,20 +10,26 @@ import {
 import { normalizeHashPath, replaceHash } from "../src/hash-routing";
 
 /**
- * Routing contract for devlog/_fin/260802_client_toggle_api/050 §2-§3.
+ * Routing contract for devlog/_fin/260802_client_toggle_api/050 §2-§3, revised
+ * when API keys left the Integrations tab strip for a page of their own.
  *
- * The three legacy top-level pages (`api`, `claude`, `grok`) collapse into one
- * `integrations` route with nested hashes. The load-bearing property is not
- * "the page resolves" — it is that each legacy hash keeps its SPECIFIC nested
- * destination, because `readPageFromHash` already answers `integrations` and
- * generic normalization would otherwise rewrite the hash to the bare page and
- * silently land an old bookmark on Overview.
+ * The two legacy top-level pages (`claude`, `grok`) collapse into one
+ * `integrations` route with nested hashes, while `api` and the old
+ * `integrations/keys` tab hash land on the standalone `api-keys` page. The
+ * load-bearing property is not "the page resolves" — it is that each legacy
+ * hash keeps its SPECIFIC destination, because generic normalization would
+ * otherwise rewrite the hash to the bare page and silently land an old
+ * bookmark on Overview.
  */
 
 const LEGACY_DESTINATIONS: readonly (readonly [string, string])[] = [
-  ["api", "integrations/keys"],
   ["claude", "integrations/claude"],
   ["grok", "integrations/grok"],
+];
+
+const API_KEYS_DESTINATIONS: readonly (readonly [string, string])[] = [
+  ["api", "api-keys"],
+  ["integrations/keys", "api-keys"],
 ];
 
 describe("legacy integration hashes", () => {
@@ -43,6 +49,20 @@ describe("legacy integration hashes", () => {
       // They still resolve — as the new page, never as the dashboard fallback.
       expect(readPageFromHash(legacy)).toBe("integrations");
     }
+  });
+
+  test("api keys is a top-level page and the legacy spellings land on it", () => {
+    expect(VALID_PAGES.has("api-keys")).toBe(true);
+    expect(readPageFromHash("api-keys")).toBe("api-keys");
+    expect(resolveAppHashChange("api-keys").replaceTo).toBeNull();
+    for (const [legacy, destination] of API_KEYS_DESTINATIONS) {
+      expect(readPageFromHash(legacy)).toBe("api-keys");
+      const action = resolveAppHashChange(legacy);
+      expect(action.page).toBe("api-keys");
+      expect(action.replaceTo).toBe(destination);
+    }
+    // The old tab hash is no longer a registered Integrations route.
+    expect(INTEGRATION_TAB_HASHES).not.toContain("integrations/keys");
   });
 
   test("readPageFromHash alone cannot preserve the destination", () => {
@@ -126,10 +146,12 @@ describe("two-plane integration call routing", () => {
     const startup = await Bun.file(new URL("../src/pages/Startup.tsx", import.meta.url)).text();
     expect(app).toContain('<Integrations apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />');
     expect(app).toContain('<Startup apiBase={sharedBase} machineApiBase={machineBase} connected={targets.connected} />');
-    for (const component of ["ApiKeys", "Grok", "Claude", "IntegrationsOverview", "FileIntegrationPage"]) {
+    // API keys moved to its own page — it must no longer render inside Integrations.
+    expect(app).toContain("<ApiKeysPage apiBase={sharedBase}");
+    expect(integrations).not.toContain("ApiKeys");
+    for (const component of ["Grok", "Claude", "IntegrationsOverview", "FileIntegrationPage"]) {
       expect(integrations).toContain(`${component}`);
     }
-    expect(integrations).toContain("<ApiKeys apiBase={apiBase}");
     expect(integrations).toContain("<Grok apiBase={apiBase}");
     expect(integrations).toContain("<Claude apiBase={apiBase}");
     expect(integrations).toContain("<IntegrationsOverview apiBase={apiBase}");
@@ -169,16 +191,16 @@ describe("history semantics", () => {
      */
     const before = win.history.length;
     const action = resolveAppHashChange(normalizeHashPath(win.location.hash));
-    expect(action.replaceTo).toBe("integrations/keys");
+    expect(action.replaceTo).toBe("api-keys");
     replaceHash(action.replaceTo!, win as unknown as Window & typeof globalThis);
-    expect(normalizeHashPath(win.location.hash)).toBe("integrations/keys");
+    expect(normalizeHashPath(win.location.hash)).toBe("api-keys");
     expect(win.history.length).toBe(before);
   });
 
   test("the corrected hash is itself a registered route, so it settles", () => {
     // A redirect that lands on something the resolver would rewrite again is
     // a loop; assert the destination is terminal.
-    for (const [, destination] of LEGACY_DESTINATIONS) {
+    for (const [, destination] of [...LEGACY_DESTINATIONS, ...API_KEYS_DESTINATIONS]) {
       expect(resolveAppHashChange(destination).replaceTo).toBeNull();
     }
   });

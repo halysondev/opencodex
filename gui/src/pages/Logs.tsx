@@ -343,6 +343,7 @@ const RECOVERY_KIND_KEYS = {
   "transient-5xx": "logs.detail.attempt.recovery.transient5xx",
   "connection-reset": "logs.detail.attempt.recovery.connectionReset",
   "oauth-401": "logs.detail.attempt.recovery.oauth401",
+  "oauth-account-403": "logs.detail.attempt.recovery.oauthAccount403",
   "key-401": "logs.detail.attempt.recovery.key401",
   "key-429": "logs.detail.attempt.recovery.key429",
   "rate-limit-429": "logs.detail.attempt.recovery.rateLimit429",
@@ -353,6 +354,7 @@ const RECOVERY_KIND_KEYS = {
   "console-go-upload-retry": "logs.detail.attempt.recovery.consoleGoUpload",
   "opaque-blob-rejection": "logs.detail.attempt.recovery.opaqueBlobRejection",
   "reasoning-effort-downgrade": "logs.detail.attempt.recovery.reasoningEffortDowngrade",
+  "anthropic-beta-400": "logs.detail.attempt.recovery.anthropicBeta400",
   "anthropic-fast-downgrade": "logs.detail.attempt.recovery.anthropicFastDowngrade",
 } as const satisfies Record<AttemptRecoveryKind, string>;
 
